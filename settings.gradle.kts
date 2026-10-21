@@ -34,9 +34,15 @@ dependencyResolutionManagement {
             content {
                 includeGroupAndSubgroups("com.android")
                 includeGroupAndSubgroups("androidx")
+                // Spike only: the instrumented-test runner (UTP).
+                includeGroupAndSubgroups("com.google.testing.platform")
             }
         }
         mavenCentral()
+        // Spike only: requery/sqlite-android is published on JitPack, not Maven Central.
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.requery") }
+        }
     }
 }
 
@@ -45,3 +51,4 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 rootProject.name = "jotter"
 
 include(":core:model")
+include(":spike:fts5")

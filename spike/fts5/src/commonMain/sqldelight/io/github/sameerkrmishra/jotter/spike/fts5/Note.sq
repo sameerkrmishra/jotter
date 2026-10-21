@@ -1,0 +1,71 @@
+-- Spike schema: a plain notes table plus an external-content FTS5 index kept in sync by
+-- triggers. This is the shape core/storage is expected to use.
+
+CREATE TABLE note (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL
+);
+
+CREATE VIRTUAL TABLE note_fts USING fts5(
+  title,
+  body,
+  content = 'note',
+  content_rowid = 'id',
+  tokenize = 'unicode61 remove_diacritics 2'
+);
+
+CREATE TRIGGER note_ai AFTER INSERT ON note BEGIN
+  INSERT INTO note_fts(rowid, title, body) VALUES (new.id, new.title, new.body);
+END;
+
+CREATE TRIGGER note_ad AFTER DELETE ON note BEGIN
+  INSERT INTO note_fts(note_fts, rowid, title, body)
+  VALUES ('delete', old.id, old.title, old.body);
+END;
+
+CREATE TRIGGER note_au AFTER UPDATE ON note BEGIN
+  INSERT INTO note_fts(note_fts, rowid, title, body)
+  VALUES ('delete', old.id, old.title, old.body);
+  INSERT INTO note_fts(rowid, title, body) VALUES (new.id, new.title, new.body);
+END;
+
+insertNote:
+INSERT INTO note(title, body) VALUES (?, ?);
+
+updateBody:
+UPDATE note SET body = :body WHERE id = :id;
+
+deleteNote:
+DELETE FROM note WHERE id = ?;
+
+-- Ranked search with bm25() (title weighted 10x), snippet() and highlight().
+search:
+SELECT
+  note.id,
+  note.title,
+  highlight(note_fts, 0, '<b>', '</b>') AS titleHighlighted,
+  snippet(note_fts, 1, '[', ']', '...', 6) AS bodySnippet,
+  bm25(note_fts, 10.0, 1.0) AS score
+FROM note_fts
+JOIN note ON note.id = note_fts.rowid
+WHERE note_fts MATCH :query
+ORDER BY score
+LIMIT :limit;
+
+-- The synthesized FTS5 `rank` column.
+searchByRank:
+SELECT note.id, note_fts.rank AS rank
+FROM note_fts JOIN note ON note.id = note_fts.rowid
+WHERE note_fts MATCH ?
+ORDER BY rank;
+
+-- Column filter syntax inside MATCH, plus a match against a single column.
+searchTitleOnly:
+SELECT note.id FROM note_fts JOIN note ON note.id = note_fts.rowid WHERE note_fts.title MATCH ? ORDER BY note.id;
+
+sqliteVersion:
+SELECT sqlite_version();
+
+fts5CompileOption:
+SELECT sqlite_compileoption_used('ENABLE_FTS5');
