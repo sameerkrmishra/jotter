@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+
+# Kotlin
+.kotlin/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.fleet/
+
+# Android
+local.properties
+*.apk
+*.aab
+captures/
+.cxx/
+*.hprof
+
+# Signing keys (never commit)
+*.jks
+*.keystore
+keystore.properties
+
+# OS
+.DS_Store
