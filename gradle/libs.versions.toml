@@ -7,6 +7,9 @@ kotlin = "2.4.21"
 # TODO: move to the stable detekt 2.0 once it is released.
 detekt = "2.0.0-alpha.6"
 kover = "0.9.11"
+# SPIKE: Compose Multiplatform 1.12.x supports Kotlin 2.4.x. Material3 is versioned separately.
+compose-multiplatform = "1.12.2"
+compose-material3 = "1.9.0"
 ktlint-gradle = "14.2.0"
 
 [libraries]
@@ -14,5 +17,11 @@ ktlint-gradle = "14.2.0"
 android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
 detekt-gradlePlugin = { module = "dev.detekt:detekt-gradle-plugin", version.ref = "detekt" }
 kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+compose-gradlePlugin = { module = "org.jetbrains.compose:compose-gradle-plugin", version.ref = "compose-multiplatform" }
+compose-compiler-gradlePlugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
 kover-gradlePlugin = { module = "org.jetbrains.kotlinx:kover-gradle-plugin", version.ref = "kover" }
 ktlint-gradlePlugin = { module = "org.jlleitschuh.gradle:ktlint-gradle", version.ref = "ktlint-gradle" }
+
+# SPIKE: Compose libraries.
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
+compose-desktop-linux-x64 = { module = "org.jetbrains.compose.desktop:desktop-jvm-linux-x64", version.ref = "compose-multiplatform" }

@@ -45,3 +45,4 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 rootProject.name = "jotter"
 
 include(":core:model")
+include(":spike:desktop")

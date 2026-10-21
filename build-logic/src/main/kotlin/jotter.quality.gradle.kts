@@ -24,6 +24,14 @@ detekt {
 // The names are spelled out so that a rename in a detekt release fails the build with "task not
 // found" instead of silently dropping detekt from `check`. They assume a jotter.kmp-library
 // module; modules with other targets will need their own list.
-tasks.named("check") {
-    dependsOn("detektMainJvm", "detektTestJvm", "detektMainAndroid", "detektHostTestAndroid")
+// SPIKE: pick the list by module kind, so Kotlin/JVM (desktop app) modules work too.
+pluginManager.withPlugin("org.jetbrains.kotlin.multiplatform") {
+    tasks.named("check") {
+        dependsOn("detektMainJvm", "detektTestJvm", "detektMainAndroid", "detektHostTestAndroid")
+    }
+}
+pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+    tasks.named("check") {
+        dependsOn("detektMain", "detektTest")
+    }
 }

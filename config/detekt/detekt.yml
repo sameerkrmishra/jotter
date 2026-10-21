@@ -14,3 +14,8 @@ style:
   # Matches .editorconfig, so detekt and ktlint agree.
   MaxLineLength:
     maxLineLength: 100
+
+naming:
+  # SPIKE: Compose convention is PascalCase for @Composable functions.
+  FunctionNaming:
+    ignoreAnnotated: ['Composable']

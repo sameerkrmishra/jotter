@@ -13,6 +13,8 @@ max_line_length = 100
 ktlint_code_style = ktlint_official
 ij_kotlin_allow_trailing_comma = true
 ij_kotlin_allow_trailing_comma_on_call_site = true
+# SPIKE: @Composable functions are PascalCase by Compose convention.
+ktlint_function_naming_ignore_when_annotated_with = Composable
 
 [*.bat]
 end_of_line = crlf
