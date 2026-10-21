@@ -16,7 +16,7 @@ WebDAV, or the user's own PC over Tailscale).
 | Platforms | Android app (F-Droid), native Linux desktop app, Linux CLI |
 | Offline | Android and Linux work fully offline and sync when a backend is reachable |
 | Convergence | When the PC or a backend comes back online, all devices converge to the same state |
-| Storage | One SQLite database per device. Copying the `.sqlite` file is the portable format |
+| Storage | One SQLite database per device, in a single file. Copying it is safe when the app and CLI are not running (a clean close checkpoints the WAL and removes the `-wal`/`-shm` files). While the app runs, "Export database" writes a consistent single-file copy (`VACUUM INTO`) |
 | Export | Export all notes, or all notes with a given tag, as Markdown files |
 | Backends | Local folder and WebDAV (mailbox.org, NAS, Nextcloud). The user can add and remove backends at runtime |
 | Conflicts | Merge automatically where possible. Otherwise keep both versions and offer manual merge |
@@ -50,9 +50,9 @@ fast enough, so we choose for portability, correctness and readability.
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **SQLite via SQLDelight** | One portable file (meets the flash-drive requirement). FTS5 full-text search. SQL is visible and reviewable in `.sq` files. Type-safe generated Kotlin. Mature on Android and JVM | Generated code (excluded from coverage) | **Recommended** |
+| **SQLite via SQLDelight** | One portable file (meets the flash-drive requirement: copy it when the app is closed, or use "Export database"). FTS5 full-text search. SQL is visible and reviewable in `.sq` files. Type-safe generated Kotlin. Mature on Android and JVM | Generated code (excluded from coverage) | **Recommended** |
 | SQLite via Room KMP | Google-backed, familiar to Android devs, now multiplatform | Annotation-heavy. SQL hidden in DAOs. Desktop support is newer | Viable alternative |
-| Folder of Markdown files + index | Human-readable without the app | Needs a separate index for search. Metadata in front-matter. Multi-file atomicity is hard. A copyable SQLite file already meets the portability goal | Rejected for the live store. Kept as the **export** format |
+| Folder of Markdown files + index | Human-readable without the app | Needs a separate index for search. Metadata in front-matter. Multi-file atomicity is hard. A single SQLite file, copied when the app is closed or exported while it runs, already meets the portability goal | Rejected for the live store. Kept as the **export** format |
 | Realm Kotlin | Built-in sync | Deprecated by MongoDB, and its sync service is a vendor dependency | Rejected |
 | ObjectBox | Fast | Opaque binary format, weaker portability | Rejected |
 | Event log only + in-memory model | Simple model | Search and queries need rebuilding on every start. No single queryable file | Rejected (but the sync layer *is* an event log, §6) |
