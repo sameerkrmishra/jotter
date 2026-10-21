@@ -89,8 +89,8 @@ unused ones.
 | Option | Result | Maintenance | F-Droid | Size (per ABI) |
 |---|---|---|---|---|
 | Platform SQLite via `AndroidSqliteDriver` | **Fails** on API 26 and 36: `no such module: fts5` | n/a | n/a | 0 |
-| androidx `sqlite-bundled` + `com.eygraber:sqldelight-androidx-driver` | Passes | Bundled: Google, androidx, Apache-2.0. Adapter: one maintainer, 0.x, active (pushed 2026-10-20), Maven Central | Likely OK, with a caveat (below) | ~1.25 MB `.so`, ~0.63 MB compressed |
-| androidx `sqlite-bundled` + our own `SqlDriver` adapter | Passes | Ours. 109 lines in the spike (`ConnectionSqlDriver.kt`) | Same caveat | same |
+| androidx `sqlite-bundled` + `com.eygraber:sqldelight-androidx-driver` | Passes | Bundled: Google, androidx, Apache-2.0. Adapter: one maintainer, 0.x, active (pushed 2026-10-20), Maven Central | Expected to be acceptable (caveat below) | ~1.25 MB `.so`, ~0.63 MB compressed |
+| androidx `sqlite-bundled` + our own `SqlDriver` adapter | Passes | Ours. 109 lines in the spike (`ConnectionSqlDriver.kt`) | Expected to be acceptable (same caveat) | same |
 | requery `sqlite-android` + `AndroidSqliteDriver(factory = RequerySQLiteOpenHelperFactory())` | Passes (omits `sqlite_compileoption_used`) | Last release 3.49.0 on 2025-05-29. **JitPack only** | Weak: JitPack is not a trusted repository | ~1.84 MB `.so` (arm64) |
 
 There is no official SQLDelight driver for the androidx `SQLiteDriver` API in
@@ -103,9 +103,9 @@ runs on synchronous drivers (xerial, our adapter, `AndroidSqliteDriver` via
 All options support minSdk 26.
 
 F-Droid caveat: the `sqlite-bundled` AAR contains prebuilt `.so` files that
-F-Droid does not rebuild from source. It is acceptable because androidx on
-Google Maven is a repository F-Droid trusts, not because we build it from
-AOSP source.
+F-Droid does not rebuild from source. It is expected to be acceptable because androidx on
+Google Maven is a repository F-Droid trusts; confirm at the first F-Droid
+build.
 
 ### 4. Proven on a real Android runtime
 
@@ -163,6 +163,6 @@ Keep ADR-0002 and accept it, with the driver choice made concrete:
   SQLite security fixes.
 - **Size:** about 0.6 MB compressed per ABI. Fine for a notes app. F-Droid
   builds a universal APK with all four ABIs unless the app build configures
-  ABI splits, so one copy per APK needs build configuration.
+  ABI splits. Shipping one ABI per APK needs ABI splits in our build.
 - **User input in `MATCH`** is FTS5 query syntax, and a malformed query throws.
   The search layer must quote or escape user text.

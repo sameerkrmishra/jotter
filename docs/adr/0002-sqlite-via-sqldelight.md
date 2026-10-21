@@ -12,7 +12,8 @@
 Each device keeps a full local replica ([ADR-0001](0001-local-first-architecture.md)).
 The store must:
 
-- be a single file the user can copy to a flash drive and open elsewhere;
+- be a single SQLite file the user can copy to a flash drive and open
+  elsewhere;
 - support full-text search over title and body;
 - run on Android and on the JVM (Linux desktop and CLI) from shared Kotlin code;
 - be readable and reviewable, since correctness matters more than speed.
@@ -40,6 +41,13 @@ available and behaves identically everywhere. Use androidx `sqlite-bundled`
 (`BundledSQLiteDriver`) on **both** Android and the JVM, so every device runs
 the same SQLite build.
 
+[Spike 0001](../spikes/0001-fts5-sqldelight.md) proved the FTS5 part: the
+dialect accepts `CREATE VIRTUAL TABLE ... USING fts5` with `MATCH`, `bm25()`,
+`rank`, `snippet()` and `highlight()`, and the same FTS5 tests pass on the JVM
+and on Android emulators at API 26 and API 36. The platform SQLite failed with
+`no such module: fts5` on both API levels. The adapter and multi-process rules
+below are not proven yet; M1 tests them.
+
 SQLDelight has no driver for the androidx `SQLiteDriver` API, so `core/storage`
 contains our own synchronous `SqlDriver` adapter over androidx
 `SQLiteConnection`, with synchronous code generation (`generateAsync = false`).
@@ -53,12 +61,17 @@ adapter must cover, each with tests:
 - listener notifications, so `asFlow()` queries re-run after writes;
 - a prepared-statement cache keyed by the SQLDelight query identifier;
 - connection pragmas on open: `journal_mode = WAL`, `busy_timeout`,
-  `foreign_keys = ON`.
+  `foreign_keys = ON`;
+- a clean close that checkpoints the WAL into the main file, for example
+  `PRAGMA wal_checkpoint(TRUNCATE)` before closing the last connection, so no
+  `-wal`/`-shm` files are left behind.
 
 Expected cost: a few hundred lines with tests, plus keeping up with
 `SqlDriver` and `SQLiteConnection` API changes. Fallback trigger: if M1 or a
-later milestone needs more than one connection per process (for example
-concurrent readers next to a writer), we stop extending the adapter and switch
+later milestone needs more than one connection per process, we stop extending
+the adapter. The observable signal is UI reads measurably blocked behind sync
+writes (for example more than 100 ms), which concurrent readers would fix. We
+then switch and switch
 to `com.eygraber:sqldelight-androidx-driver`, which already pools connections.
 That switch is **not** drop-in: the eygraber driver only accepts an async
 schema, so it needs `generateAsync = true`, and every generated query and
@@ -69,22 +82,25 @@ Multi-process access: every connection opens in WAL mode with a
 `busy_timeout` (5 s to start with), and write transactions use
 `BEGIN IMMEDIATE`. A second writer then waits instead of failing at once with
 `SQLITE_BUSY`. M1 adds a test with two connections, and ideally two
-processes, writing to the same file at the same time. WAL needs shared memory,
-so the database must stay on a local file system. Copying the database to a
-flash drive goes through a checkpointed export (for example `VACUUM INTO`),
-not a raw copy of the live file.
+processes, writing to the same file at the same time.
 
-[Spike 0001](../spikes/0001-fts5-sqldelight.md) proved this: the dialect
-accepts `CREATE VIRTUAL TABLE ... USING fts5` with `MATCH`, `bm25()`, `rank`,
-`snippet()` and `highlight()`, and the same FTS5 tests pass on the JVM and on
-Android emulators at API 26 and API 36. The platform SQLite failed with
-`no such module: fts5` on both API levels.
+WAL relies on shared memory between processes, which is unsafe on network
+file systems (NFS, SMB). The live database must therefore be on a local file
+system.
+
+Copying: the database is a single SQLite file. Copying it is safe when the app
+and the CLI are not running: on a clean close SQLite checkpoints the WAL into
+the main file and removes the `-wal` and `-shm` files. While the app is
+running, the user uses "Export database", which writes a consistent
+single-file copy (`VACUUM INTO`). This rule exists because of the `-wal` file,
+not because of the flash drive.
 
 ## Consequences
 
 ### Positive
 
-- One portable file meets the flash-drive requirement.
+- One portable SQLite file meets the flash-drive requirement: copy it when
+  the app is closed, or use "Export database" while it runs.
 - FTS5 gives fast, ranked full-text search without an external search engine.
 - SQL is visible in `.sq` files, so reviewers can read every query.
 - Generated code is type-safe, and SQLite is mature on both targets.
