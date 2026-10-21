@@ -36,19 +36,26 @@ jotter/
 ```
 
 A **segment** is an immutable batch of revisions, written by one device and
-numbered sequentially per device. A device only writes into its own folder and
-never modifies or deletes a file it has written. There are two exceptions:
-when removing a backend the user may choose "also delete remote data"
-([PLAN.md §6.5](../PLAN.md#65-adding-and-removing-backends)), and
-`format.json` lives outside any device folder and is written once, when the
-backend is initialised. Segments pass through a
-`SegmentCodec` (v1: JSON + gzip), which is the seam for future encryption.
+numbered sequentially per device. A device never modifies a file once
+written, and never deletes one, except when the user removes a backend and
+chooses "also delete remote data"
+([PLAN.md §6.5](../PLAN.md#65-adding-and-removing-backends)).
+
+A device writes only into its own folder, with one exception: `format.json`
+sits outside the device folders. It is written once, with `writeNew`, by the
+device that initialises the backend. A device that loses that creation race
+gets a "file exists" failure, then reads and validates the existing file.
+
+Segments pass through a `SegmentCodec` (v1: JSON + gzip), which is the seam
+for future encryption.
 
 A sync cycle per backend:
 
 1. **Push** local revisions not yet on the backend as a new segment. This may
    include revisions that came from other devices, so a backend can relay
-   between devices that never share a backend directly.
+   between devices that never share a backend directly. Before calling
+   `writeNew`, the device records the pending segment locally: its number and
+   its revision ids (or the encoded segment itself).
 2. **Pull** segments past the stored cursor for every device folder.
 3. **Apply** in one transaction: insert revisions idempotently by revision id,
    recompute heads, merge, update `note` and FTS, advance cursors.
@@ -86,13 +93,16 @@ A sync cycle per backend:
   with the same device id and number together. The app must give a copied
   database a new device id. PLAN.md does not specify this yet; it should be
   settled in M3.
-- If a push fails after the write but before the local record, the next push
-  will find the number taken. The device id alone cannot show that the
-  existing segment is ours, because a copied database shares it. The device
-  reads the segment and compares its revision ids (or content hash) with what
-  it intended to push. On a match it records the push and moves on. On a
-  mismatch it stops and reports a device-id collision to the user, rather
-  than skipping its own revisions.
+- A push can fail after the remote write succeeded but before the device
+  marked it done. The retry then finds the segment number taken. The device
+  id alone cannot show that the existing segment is ours, because a copied
+  database shares it. Recomputing "revisions not yet on this backend" is not
+  enough either, since edits made after the interrupted push would be
+  included and cause a false mismatch. So the device compares the remote
+  segment with the pending segment it recorded before `writeNew`. Any hash is
+  taken over the decoded content, not the gzip bytes. On a match it marks the
+  push done and moves on. On a mismatch it stops and reports a device-id
+  collision to the user, rather than skipping its own revisions.
 
 ## Alternatives considered
 

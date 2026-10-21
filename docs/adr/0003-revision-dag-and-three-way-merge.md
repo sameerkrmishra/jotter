@@ -27,33 +27,39 @@ edits, and the device merges them field by field
 | `isPinned`, `state` | Last writer wins by hybrid logical clock (HLC) timestamp, device id as tiebreaker |
 | Delete vs. edit | The edit wins and the note comes back in the trash (`TRASHED`) |
 
-**On conflict**, the head with the higher HLC timestamp (device id as
-tiebreaker) stays current, so every device picks the same one. The other head
-is stored in the `conflict` table. The UI offers "keep mine", "keep theirs",
-"keep both as separate notes" or "edit merged text". Resolving creates a merge
-revision with both heads as parents.
+**On conflict**, only `body` and `title` are in conflict. Tags and the LWW
+fields still merge by their rules above. For the text, the head with the
+higher (HLC timestamp, device id) stamp stays current, so every device picks
+the same one. The other head's text is stored in the `conflict` table. The UI
+offers "keep mine", "keep theirs", "keep both as separate notes" or "edit
+merged text". Resolving creates a merge revision with both heads as parents.
+
+**Stamps.** Every revision carries a stamp: an (HLC timestamp, device id)
+pair. Stamps are compared by timestamp first and device id second, which is a
+total order. An edit is stamped with the editing device's clock and id.
 
 **Determinism.** A merge revision's id is a hash of its sorted parent ids and
-its content. Its timestamp is the maximum of its parents' timestamps and its
-author is recorded as "merge". Every field derives from the parents alone, so
-two devices that auto-merge the same heads produce the same revision, which
-then deduplicates by id.
+its content. Its stamp is the greater of its parents' stamps: the timestamp
+is the maximum of the parents' timestamps, and the device id comes from the
+same parent. The device that happened to compute the merge is not recorded in
+the revision, so every field derives from the parents alone. Two devices that
+auto-merge the same heads produce the same revision, which then deduplicates
+by id.
 
 **LWW fields in merge revisions.** For `isPinned` and `state`, a merge
-revision does not stamp the winning value with its own timestamp or author.
-It carries the winning value together with that value's original (HLC
-timestamp, device id). Later LWW comparisons use those original stamps, so a
-merge introduces no tie-break bias of its own. The merge revision's own
-timestamp is still the maximum of its parents' timestamps. How these
+revision carries the winning value together with that value's original stamp,
+not the merge revision's own stamp. Later LWW comparisons use those original
+stamps, so a merge introduces no tie-break bias of its own. How these
 per-field stamps are stored is settled in M3.
 
-Assumptions where PLAN.md is not explicit:
+Further details (PLAN.md §5 summarises these):
 
 - With more than two heads, a device does a left fold over the heads it
   currently has, sorted by revision id. Each step is a real merge revision,
   persisted and synced, whose parents are the two revisions it merged. The
   fold stops at the first step that conflicts; that pair becomes a conflict
-  record.
+  record. Heads not yet consumed by the fold remain heads until the conflict
+  is resolved, and are folded in after that.
 - This is deterministic only for a fixed set of heads. It is not
   order-independent: a device that sees {A, B} and later C produces
   different intermediate merges from one that sees {A, C} and later B.

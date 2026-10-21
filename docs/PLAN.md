@@ -193,21 +193,31 @@ merges them:
 |---|---|
 | `body` and `title` | Three-way line merge (diff3) against the common ancestor revision. Non-overlapping edits merge cleanly, e.g. ticking item 3 on the phone and adding item 7 on the PC. Overlapping edits → **conflict** |
 | `tags` | Set merge: tags added on either side are kept, tags removed on either side are removed. If one side adds a tag the other side removed, the add wins (OR-set semantics) |
-| `isPinned`, `state` | Last writer wins by hybrid logical clock timestamp, with device id as tiebreaker |
+| `isPinned`, `state` | Last writer wins by hybrid logical clock timestamp, with device id as tiebreaker. A merge revision carries the winning value with that value's original (timestamp, device id), not its own |
 | Delete vs. edit | The edit wins and the note comes back in the trash (state `TRASHED`), so nothing is silently lost |
 
-**On conflict:** the note keeps one version as current: the head with the higher
-hybrid logical clock timestamp, with device id as tiebreaker, so every device
-picks the same one. The other is stored in `conflict`. The UI shows a badge and
+**On conflict:** only `body` and `title` conflict; tags and the
+last-writer-wins fields still merge by the rules above. The note keeps one
+text version as current: the head with the higher hybrid logical clock
+timestamp, with device id as tiebreaker, so every device picks the same one.
+The other is stored in `conflict`. The UI shows a badge and
 offers "keep mine", "keep theirs", "keep both as separate notes" or "edit merged
 text" (side-by-side, with conflict markers pre-filled). Resolving creates a
 merge revision with both heads as parents.
 
 **Determinism:** a merge revision's id is a hash of its sorted parent ids and
-its content. Its timestamp is the maximum of its parents' timestamps and its
-author is recorded as "merge", so all of its fields derive from the parents
-alone. If two devices auto-merge the same heads, they produce the same revision
-and it deduplicates.
+its content. Its (timestamp, device id) is the greater of its parents', so its
+timestamp is the maximum of its parents' timestamps. The device that computed
+the merge is not recorded, so all of its fields derive from the parents alone.
+If two devices auto-merge the same heads, they produce the same revision and
+it deduplicates.
+
+**More than two heads:** a device folds the heads it has, sorted by revision
+id, merging two at a time. Each step is a real merge revision. The fold stops
+at the first conflict; remaining heads stay heads until it is resolved. This
+is deterministic for a given set of heads but not independent of arrival
+order. Devices converge because they keep merging whatever heads are present
+until one remains. See ADR-0003.
 
 ---
 
@@ -308,6 +318,8 @@ codec. Documented as ADR-0006 in M6.
 - **Style:** ktlint with the `ktlint_official` code style and a 100-character
   line limit. detekt with strict thresholds (complexity, long methods, magic
   numbers). Android Lint warnings treated as errors.
+- **Compiler:** Kotlin explicit API mode in every module. Compiler warnings are
+  errors.
 - **Docs:** KDoc on every public class, interface, function and property
   (detekt `UndocumentedPublic*` rules). Module-level `README.md` per module.
 - **Coverage:** Kover gate at **95% line and branch coverage**. Generated code
