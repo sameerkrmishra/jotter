@@ -14,6 +14,11 @@ data.
 > Status: early development. See [docs/PLAN.md](docs/PLAN.md) for the plan and
 > roadmap.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and propose
+changes.
+
 ## License
 
 Jotter is licensed under the [Apache License 2.0](LICENSE). You may use,
