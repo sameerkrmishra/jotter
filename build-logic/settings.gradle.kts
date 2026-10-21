@@ -4,8 +4,8 @@ dependencyResolutionManagement {
         // Same filter as in the root settings.gradle.kts; keep in sync.
         google {
             content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("androidx.*")
+                includeGroupAndSubgroups("com.android")
+                includeGroupAndSubgroups("androidx")
             }
         }
         mavenCentral()

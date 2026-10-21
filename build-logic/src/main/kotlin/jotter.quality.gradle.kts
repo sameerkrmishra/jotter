@@ -1,7 +1,6 @@
 // Static analysis and coverage instrumentation shared by every module.
 // The coverage threshold itself is enforced once, on the aggregated report (jotter.root).
 
-import dev.detekt.gradle.Detekt
 import dev.detekt.gradle.extensions.FailOnSeverity
 
 plugins {
@@ -19,12 +18,12 @@ detekt {
     failOnSeverity = FailOnSeverity.Info
 }
 
-// detekt registers one task per compilation (detektMainJvm, detektTestJvm, detektMainAndroid,
-// ...). These run with type resolution, which enables rules that the per-source-set tasks and the
-// plain `detekt` task skip, so `check` runs them instead. The plain `detekt` task only looks at
-// src/main and src/test, which multiplatform modules don't have, so it reports NO-SOURCE.
+// detekt registers one task per compilation. These run with type resolution, which enables rules
+// that the per-source-set tasks and the plain `detekt` task skip, so `check` runs them instead.
+// (The plain task only looks at src/main and src/test, which multiplatform modules don't have.)
+// The names are spelled out so that a rename in a detekt release fails the build with "task not
+// found" instead of silently dropping detekt from `check`. They assume a jotter.kmp-library
+// module; modules with other targets will need their own list.
 tasks.named("check") {
-    dependsOn(
-        tasks.withType<Detekt>().matching { !it.name.endsWith("SourceSet") && it.name != "detekt" },
-    )
+    dependsOn("detektMainJvm", "detektTestJvm", "detektMainAndroid", "detektHostTestAndroid")
 }

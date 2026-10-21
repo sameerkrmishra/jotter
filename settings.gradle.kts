@@ -4,13 +4,16 @@ pluginManagement {
     repositories {
         // Only Android and AndroidX artifacts come from Google's repository, so Play Services
         // and Firebase can never be resolved by accident (F-Droid). Other com.google groups
-        // (Guava, protobuf, ...) resolve from Maven Central. This filter is repeated in the
-        // block below and in build-logic/settings.gradle.kts; keep all three copies in sync.
+        // (Guava, protobuf, ...) resolve from Maven Central. Note that com.google.android.material
+        // and com.google.testing.platform (the instrumented-test runner) exist only on Google's
+        // repository, so the Android app (M5) may need to add them here.
+        // This filter is repeated in the block below and in build-logic/settings.gradle.kts;
+        // keep all three copies in sync.
         // (pluginManagement {} is evaluated on its own and cannot share code with the rest.)
         google {
             content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("androidx.*")
+                includeGroupAndSubgroups("com.android")
+                includeGroupAndSubgroups("androidx")
             }
         }
         mavenCentral()
@@ -29,8 +32,8 @@ dependencyResolutionManagement {
         // Same filter as in pluginManagement above; keep in sync.
         google {
             content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("androidx.*")
+                includeGroupAndSubgroups("com.android")
+                includeGroupAndSubgroups("androidx")
             }
         }
         mavenCentral()
