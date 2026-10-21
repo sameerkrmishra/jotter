@@ -58,11 +58,11 @@ fast enough, so we choose for portability, correctness and readability.
 | Event log only + in-memory model | Simple model | Search and queries need rebuilding on every start. No single queryable file | Rejected (but the sync layer *is* an event log, §6) |
 
 **Decision (ADR-0002):** SQLite with SQLDelight. Android's system SQLite does
-not reliably ship FTS5 on any version, so we bundle our own SQLite build (for
-example the androidx bundled SQLite driver on Android and xerial `sqlite-jdbc`
-on the JVM) so FTS5 behaves identically everywhere. Milestone M0 includes a
-spike that proves FTS5 works on both targets, including that the SQLDelight
-dialect accepts `CREATE VIRTUAL TABLE ... USING fts5`, before we commit.
+not reliably ship FTS5 on any version, so we bundle our own SQLite build: the
+androidx bundled SQLite driver on both Android and the JVM, behind a small
+SQLDelight driver adapter, so FTS5 behaves identically everywhere. The M0 spike
+([docs/spikes/0001](spikes/0001-fts5-sqldelight.md)) proved this on the JVM and
+on Android emulators at API 26 and 36.
 
 ---
 
