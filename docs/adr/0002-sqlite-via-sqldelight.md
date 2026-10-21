@@ -3,6 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-10-21 (accepted 2026-10-22 after
   [spike 0001](../spikes/0001-fts5-sqldelight.md))
+- **Changed since Proposed:** androidx `sqlite-bundled` on the JVM too (instead
+  of xerial `sqlite-jdbc`), our own driver adapter (instead of an open choice),
+  dialect pinned to `sqlite-3-44`, and multi-process access rules added.
 
 ## Context
 
@@ -17,8 +20,14 @@ The store must:
 Notes are small (10–100 lines). Even thousands of notes are a few MB, so any
 option is fast enough ([PLAN.md §2](../PLAN.md#2-storage-layer-options)).
 
-Android's system SQLite does not reliably ship the FTS5 extension on any
-version. Relying on it would make search behave differently per device.
+Android's system SQLite cannot be relied on for FTS5. On the API 26 and API 36
+default emulator images it has no FTS5 module at all
+([spike 0001](../spikes/0001-fts5-sqldelight.md)). Relying on it would make
+search behave differently per device.
+
+The desktop app and the CLI can open the same database file at the same time
+([PLAN.md §3](../PLAN.md#3-architecture)), so the store must handle more than
+one process.
 
 ## Decision
 
@@ -32,10 +41,38 @@ available and behaves identically everywhere. Use androidx `sqlite-bundled`
 the same SQLite build.
 
 SQLDelight has no driver for the androidx `SQLiteDriver` API, so `core/storage`
-contains a small synchronous `SqlDriver` adapter over androidx
-`SQLiteConnection`. If the adapter grows beyond a small class, switch to the
-maintained third-party `com.eygraber:sqldelight-androidx-driver`, which needs
-`generateAsync = true`.
+contains our own synchronous `SqlDriver` adapter over androidx
+`SQLiteConnection`, with synchronous code generation (`generateAsync = false`).
+The spike version is 109 lines and is not production-ready: it shares one
+connection with no lock, and its listener map is not synchronised. The M1
+adapter must cover, each with tests:
+
+- thread safety: one connection behind a mutex, or confined to one thread;
+- nested transactions, including rollback of the outer transaction when an
+  inner one fails, and `afterCommit`/`afterRollback` callbacks;
+- listener notifications, so `asFlow()` queries re-run after writes;
+- a prepared-statement cache keyed by the SQLDelight query identifier;
+- connection pragmas on open: `journal_mode = WAL`, `busy_timeout`,
+  `foreign_keys = ON`.
+
+Expected cost: a few hundred lines with tests, plus keeping up with
+`SqlDriver` and `SQLiteConnection` API changes. Fallback trigger: if M1 or a
+later milestone needs more than one connection per process (for example
+concurrent readers next to a writer), we stop extending the adapter and switch
+to `com.eygraber:sqldelight-androidx-driver`, which already pools connections.
+That switch is **not** drop-in: the eygraber driver only accepts an async
+schema, so it needs `generateAsync = true`, and every generated query and
+every call site in `core/storage` becomes `suspend`. It is a migration to plan,
+so the decision to switch must be made early.
+
+Multi-process access: every connection opens in WAL mode with a
+`busy_timeout` (5 s to start with), and write transactions use
+`BEGIN IMMEDIATE`. A second writer then waits instead of failing at once with
+`SQLITE_BUSY`. M1 adds a test with two connections, and ideally two
+processes, writing to the same file at the same time. WAL needs shared memory,
+so the database must stay on a local file system. Copying the database to a
+flash drive goes through a checkpointed export (for example `VACUUM INTO`),
+not a raw copy of the live file.
 
 [Spike 0001](../spikes/0001-fts5-sqldelight.md) proved this: the dialect
 accepts `CREATE VIRTUAL TABLE ... USING fts5` with `MATCH`, `bm25()`, `rank`,
@@ -61,11 +98,12 @@ Android emulators at API 26 and API 36. The platform SQLite failed with
 - We take on keeping the bundled SQLite up to date, including security fixes,
   instead of getting them from the OS.
 - Generated code must be excluded from the coverage gate.
-- SQLDelight 2.4.1 fails to generate code for unaliased FTS5 `rowid` or
-  `rank` result columns, and for labeled FTS5 command statements
+- SQLDelight 2.4.1 has two FTS5 codegen bugs: it crashes on unaliased FTS5
+  `rowid` or `rank` result columns, and on labeled FTS5 command statements
   (`INSERT INTO t(t) VALUES ('rebuild')`). We alias those columns and run FTS5
-  commands through the driver (see the spike).
-- We own and test the driver adapter (transactions, listeners, threading).
+  commands through the driver. One more gotcha, which is a correct error: a
+  `MATCH` column must be qualified on joins (see the spike).
+- We own, test and maintain the driver adapter (scope above).
 - The bundled SQLite follows androidx releases, which can lag upstream SQLite.
 - FTS5 query syntax is visible to users: search text must be escaped, because a
   malformed `MATCH` expression is an SQL error.

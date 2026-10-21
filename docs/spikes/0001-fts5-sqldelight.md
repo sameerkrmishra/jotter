@@ -43,7 +43,7 @@ diacritic folding (`cafe` finds `café`), `bm25()` with column weights,
 
 ## Results
 
-### 1. SQLDelight dialect: works, with three codegen bugs to avoid
+### 1. SQLDelight dialect: works, with two codegen bugs and one gotcha
 
 The default dialect (`sqlite-3-18`) already parses FTS5 virtual tables,
 `MATCH`, `bm25()`, `snippet()` and `highlight()`. `sqlite-3-38-dialect` and
@@ -52,7 +52,8 @@ module is needed. Typed results are generated, for example
 `search(query: String, limit: Long): Query<Search>` with
 `bodySnippet: String?` and `score: Double`.
 
-SQLDelight 2.4.1 crashes at generation time in three cases:
+SQLDelight 2.4.1 crashes at generation time in the first two cases. The third
+is a correct error, but easy to hit:
 
 | Statement | Failure | Workaround |
 |---|---|---|
@@ -60,7 +61,7 @@ SQLDelight 2.4.1 crashes at generation time in three cases:
 | Labeled `INSERT INTO note_fts(note_fts) VALUES ('rebuild')` (FTS5 commands) | `ClassCastException: SqlModuleColumnDefImpl cannot be cast to ColumnDefMixin` | Run via `driver.execute(...)`. The same statement inside a trigger compiles fine |
 | Unqualified column in `MATCH` on a join (`WHERE title MATCH ?`) | `Multiple columns found with name title` (a correct error) | Qualify: `note_fts.title MATCH ?` |
 
-These are small and contained. They should be reported upstream.
+The two crashes are small and contained. They should be reported upstream.
 
 ### 2. JVM: xerial has FTS5
 
@@ -72,16 +73,24 @@ FTS5SPIKE jvm/bundled+eygraber: Fts5Report(sqliteVersion=3.50.1, fts5CompileOpti
 FTS5SPIKE jvm/bundled+own-adapter: Fts5Report(sqliteVersion=3.50.1, fts5CompileOption=1, ...)
 ```
 
-`sqlite-bundled` also ships JVM natives, so the same SQLite build can run on
-Android and the desktop.
+The same tests also pass with synchronous generation (`generateAsync = false`),
+the mode M1 intends: `./gradlew :spike:fts5:jvmTest -Pspike.sync` runs
+`JvmSyncFts5Test`, 2 tests (xerial, bundled + own adapter), 0 failures. The
+eygraber driver cannot run in this mode.
+
+`sqlite-bundled-jvm` 2.7.1 (from Google Maven, not Maven Central) ships natives
+for linux x64, linux arm64, macOS arm64 and windows x64, about 1.8 to 1.9 MB
+each uncompressed (3.8 MB jar). So the same SQLite build runs on Android and
+the desktop. The desktop jar carries all four unless the build strips the
+unused ones.
 
 ### 3. Android options
 
 | Option | Result | Maintenance | F-Droid | Size (per ABI) |
 |---|---|---|---|---|
 | Platform SQLite via `AndroidSqliteDriver` | **Fails** on API 26 and 36: `no such module: fts5` | n/a | n/a | 0 |
-| androidx `sqlite-bundled` + `com.eygraber:sqldelight-androidx-driver` | Passes | Bundled: Google, AOSP source, Apache-2.0. Adapter: one maintainer, 0.x, active (pushed 2026-10-20), Maven Central | OK (Google Maven `androidx`, Maven Central) | ~1.25 MB `.so`, ~0.63 MB compressed |
-| androidx `sqlite-bundled` + our own `SqlDriver` adapter | Passes | Ours. 109 lines in the spike (`ConnectionSqlDriver.kt`) | OK | same |
+| androidx `sqlite-bundled` + `com.eygraber:sqldelight-androidx-driver` | Passes | Bundled: Google, androidx, Apache-2.0. Adapter: one maintainer, 0.x, active (pushed 2026-10-20), Maven Central | Likely OK, with a caveat (below) | ~1.25 MB `.so`, ~0.63 MB compressed |
+| androidx `sqlite-bundled` + our own `SqlDriver` adapter | Passes | Ours. 109 lines in the spike (`ConnectionSqlDriver.kt`) | Same caveat | same |
 | requery `sqlite-android` + `AndroidSqliteDriver(factory = RequerySQLiteOpenHelperFactory())` | Passes (omits `sqlite_compileoption_used`) | Last release 3.49.0 on 2025-05-29. **JitPack only** | Weak: JitPack is not a trusted repository | ~1.84 MB `.so` (arm64) |
 
 There is no official SQLDelight driver for the androidx `SQLiteDriver` API in
@@ -92,6 +101,11 @@ runs on synchronous drivers (xerial, our adapter, `AndroidSqliteDriver` via
 `Schema.synchronous()`), which the tests confirm.
 
 All options support minSdk 26.
+
+F-Droid caveat: the `sqlite-bundled` AAR contains prebuilt `.so` files that
+F-Droid does not rebuild from source. It is acceptable because androidx on
+Google Maven is a repository F-Droid trusts, not because we build it from
+AOSP source.
 
 ### 4. Proven on a real Android runtime
 
@@ -123,9 +137,15 @@ Keep ADR-0002 and accept it, with the driver choice made concrete:
   the JVM, so search behaves the same on every device.
 - **Our own small synchronous `SqlDriver` adapter** over androidx
   `SQLiteConnection` in `core/storage`, tested on the JVM under the coverage
-  gate. It keeps the generated API synchronous and avoids a 0.x single-maintainer
-  dependency. The eygraber driver is the fallback if the adapter grows (it
-  already has connection pooling and WAL readers).
+  gate, with synchronous generation (tested above). It avoids a 0.x
+  single-maintainer dependency. The eygraber driver is the fallback if we
+  need connection pooling, but switching to it means async generation and
+  `suspend` at every call site, so it is a migration, not a drop-in swap. The
+  ADR states the adapter's M1 scope and the trigger for switching.
+- **WAL and `busy_timeout`** on every connection, because the desktop app and
+  the CLI can open the same file. Not tested in the spike: its adapter uses
+  `BEGIN IMMEDIATE` without `busy_timeout`, so a second writer would get
+  `SQLITE_BUSY` at once. M1 adds a two-connection (ideally two-process) test.
 - **Dialect:** `app.cash.sqldelight:sqlite-3-44-dialect` (the newest; both
   bundles are SQLite 3.50+).
 - xerial `sqlite-jdbc` stays usable for JVM-only tools, but is not the main path.
@@ -136,14 +156,13 @@ Keep ADR-0002 and accept it, with the driver choice made concrete:
 - **SQLDelight FTS5 codegen bugs** (table above). Mitigation: aliases and
   driver-level FTS5 commands, written down in `core/storage`'s README. Report
   upstream.
-- **Adapter correctness** (transactions, nesting, listeners, threading). The
-  spike version has one connection and no statement cache. The production
-  version needs tests for these, and must confine the connection to one thread
-  or lock around it.
+- **Adapter correctness:** the spike adapter has no lock and no statement
+  cache. ADR-0002 lists what the M1 adapter must cover and test.
 - **SQLite update lag:** the bundled SQLite follows androidx releases (3.50.1
   in 2.7.1, while xerial is at 3.53.4). We must watch androidx releases for
   SQLite security fixes.
-- **Size:** about 0.6 MB compressed per ABI. Fine for a notes app; per-ABI
-  splits keep it to one copy.
+- **Size:** about 0.6 MB compressed per ABI. Fine for a notes app. F-Droid
+  builds a universal APK with all four ABIs unless the app build configures
+  ABI splits, so one copy per APK needs build configuration.
 - **User input in `MATCH`** is FTS5 query syntax, and a malformed query throws.
   The search layer must quote or escape user text.
