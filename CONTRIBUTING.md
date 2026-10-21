@@ -33,11 +33,14 @@ The intended interface is:
 
 | Command | What it does |
 |---|---|
-| `./gradlew check` | Compiles, runs all tests, ktlint, detekt and the 95% Kover coverage gate |
+| `./gradlew check` | Compiles, runs all tests, Android Lint, ktlint, detekt and the 95% Kover coverage gate |
 | `./gradlew ktlintFormat` | Reformats Kotlin sources to the project style |
 
-Run `./gradlew check` before every commit. CI runs the same checks, plus
-Android Lint and the APK and desktop builds.
+Run `./gradlew check` before every commit. CI
+([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same
+`./gradlew check` on every pull request to `main` and every push to `main`.
+Its `check` job is the required status check for merging. The APK and desktop
+builds join CI once those modules exist.
 
 ## Code style
 

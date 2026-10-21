@@ -1,5 +1,7 @@
 # Jotter
 
+[![CI](https://github.com/sameerkrmishra/jotter/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sameerkrmishra/jotter/actions/workflows/ci.yml)
+
 A local-first notes app for Android and Linux that keeps you in control of your
 data.
 
