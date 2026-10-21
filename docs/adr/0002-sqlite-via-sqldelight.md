@@ -33,11 +33,9 @@ SQLDelight's Android driver does not directly use the `SQLiteDriver` API of
 androidx `sqlite-bundled`. The spike must check the adapter path between the
 two (an existing adapter or a small one of our own) as well as FTS5 itself.
 
-This decision is pending confirmation by the M0 spike. The spike must show that
-FTS5 works on both Android and the JVM, and that the SQLDelight dialect accepts
-`CREATE VIRTUAL TABLE ... USING fts5`. Until then this ADR stays Proposed.
-If the spike passes, it becomes Accepted. If it fails, the decision is
-rewritten before acceptance.
+The spike must also show that FTS5 works on both Android and the JVM, and
+that the SQLDelight dialect accepts `CREATE VIRTUAL TABLE ... USING fts5`. If
+it fails, the decision is rewritten before acceptance.
 
 ## Consequences
 
@@ -57,9 +55,8 @@ rewritten before acceptance.
 - We take on keeping the bundled SQLite up to date, including security fixes,
   instead of getting them from the OS.
 - Generated code must be excluded from the coverage gate.
-- SQLDelight's dialect may lag behind SQLite features such as FTS5, and its
-  Android driver needs an adapter to the bundled SQLite driver. These are the
-  main risks and the reason for the spike.
+- Dialect support for FTS5 and the driver adapter are not yet proven. This is
+  the main risk, and the reason for the spike.
 
 ## Alternatives considered
 
