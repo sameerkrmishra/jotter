@@ -1,0 +1,17 @@
+[versions]
+# AGP 9.4 requires Gradle 9.x and provides the Android-KMP library plugin used by jotter.kmp-library.
+agp = "9.4.1"
+kotlin = "2.4.21"
+# detekt 1.23.x is built against Kotlin 2.0 and cannot analyse current Kotlin reliably.
+# 2.0.0-alpha.6 is built against Kotlin 2.4.10, so it is the only line that matches our compiler.
+detekt = "2.0.0-alpha.6"
+kover = "0.9.11"
+ktlint-gradle = "14.2.0"
+
+[libraries]
+# Gradle plugins, consumed by build-logic/ as regular dependencies.
+android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+detekt-gradlePlugin = { module = "dev.detekt:detekt-gradle-plugin", version.ref = "detekt" }
+kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+kover-gradlePlugin = { module = "org.jetbrains.kotlinx:kover-gradle-plugin", version.ref = "kover" }
+ktlint-gradlePlugin = { module = "org.jlleitschuh.gradle:ktlint-gradle", version.ref = "ktlint-gradle" }
