@@ -37,7 +37,11 @@ jotter/
 
 A **segment** is an immutable batch of revisions, written by one device and
 numbered sequentially per device. A device only writes into its own folder and
-never modifies or deletes a file it has written. Segments pass through a
+never modifies or deletes a file it has written. There are two exceptions:
+when removing a backend the user may choose "also delete remote data"
+([PLAN.md §6.5](../PLAN.md#65-adding-and-removing-backends)), and
+`format.json` lives outside any device folder and is written once, when the
+backend is initialised. Segments pass through a
 `SegmentCodec` (v1: JSON + gzip), which is the seam for future encryption.
 
 A sync cycle per backend:
@@ -75,13 +79,20 @@ A sync cycle per backend:
   assume they are globally unique, generated offline (for example UUIDv7), so
   idempotent insert by id is safe.
 - If a database file is copied to another machine and both copies keep the
-  same device id, both would try to write the same segment numbers. `writeNew`
-  fails loudly instead of losing data, but the app must give a copied database
-  a new device id. PLAN.md does not specify this yet; it should be settled in
-  M3.
+  same device id, both would try to write the same segment numbers. If both
+  copies push to the same backend, `writeNew` fails loudly instead of losing
+  data. If they push to different backends, `writeNew` cannot see the
+  collision; it surfaces later, when relaying brings two different segments
+  with the same device id and number together. The app must give a copied
+  database a new device id. PLAN.md does not specify this yet; it should be
+  settled in M3.
 - If a push fails after the write but before the local record, the next push
-  will find the number taken. We assume the device then reads that segment,
-  confirms it is its own, and moves on.
+  will find the number taken. The device id alone cannot show that the
+  existing segment is ours, because a copied database shares it. The device
+  reads the segment and compares its revision ids (or content hash) with what
+  it intended to push. On a match it records the push and moves on. On a
+  mismatch it stops and reports a device-id collision to the user, rather
+  than skipping its own revisions.
 
 ## Alternatives considered
 

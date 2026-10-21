@@ -1,6 +1,6 @@
 # 0002. SQLite via SQLDelight with a bundled SQLite build
 
-- **Status:** Accepted (pending confirmation by the M0 FTS5 spike)
+- **Status:** Proposed (to be accepted once the M0 FTS5 spike passes)
 - **Date:** 2026-10-21
 
 ## Context
@@ -29,17 +29,22 @@ available and behaves identically everywhere. Candidates are the androidx
 bundled SQLite driver on Android and xerial `sqlite-jdbc` on the JVM. The exact
 driver choice is made by the spike below.
 
+SQLDelight's Android driver does not directly use the `SQLiteDriver` API of
+androidx `sqlite-bundled`. The spike must check the adapter path between the
+two (an existing adapter or a small one of our own) as well as FTS5 itself.
+
 This decision is pending confirmation by the M0 spike. The spike must show that
 FTS5 works on both Android and the JVM, and that the SQLDelight dialect accepts
-`CREATE VIRTUAL TABLE ... USING fts5`. If the spike fails, this ADR will be
-revisited and superseded rather than silently changed.
+`CREATE VIRTUAL TABLE ... USING fts5`. Until then this ADR stays Proposed.
+If the spike passes, it becomes Accepted. If it fails, the decision is
+rewritten before acceptance.
 
 ## Consequences
 
 ### Positive
 
 - One portable file meets the flash-drive requirement.
-- FTS5 gives fast, ranked full-text search without a separate index.
+- FTS5 gives fast, ranked full-text search without an external search engine.
 - SQL is visible in `.sq` files, so reviewers can read every query.
 - Generated code is type-safe, and SQLite is mature on both targets.
 - Identical SQLite version on all devices removes a class of
@@ -52,15 +57,16 @@ revisited and superseded rather than silently changed.
 - We take on keeping the bundled SQLite up to date, including security fixes,
   instead of getting them from the OS.
 - Generated code must be excluded from the coverage gate.
-- SQLDelight's dialect may lag behind SQLite features such as FTS5. This is the
-  main risk and the reason for the spike.
+- SQLDelight's dialect may lag behind SQLite features such as FTS5, and its
+  Android driver needs an adapter to the bundled SQLite driver. These are the
+  main risks and the reason for the spike.
 
 ## Alternatives considered
 
 - **SQLite via Room KMP:** Google-backed and familiar to Android developers.
   Rejected as the default because it is annotation-heavy, hides SQL in DAOs,
-  and its desktop support is newer. It stays the fallback if SQLDelight fails
-  the spike.
+  and its desktop support is newer. It is a viable alternative if SQLDelight
+  fails the spike.
 - **Folder of Markdown files plus an index:** human-readable without the app,
   but needs a separate search index, keeps metadata in front-matter, and makes
   multi-file atomic updates hard. Kept as the export format only.
