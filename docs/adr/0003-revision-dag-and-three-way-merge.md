@@ -39,13 +39,29 @@ author is recorded as "merge". Every field derives from the parents alone, so
 two devices that auto-merge the same heads produce the same revision, which
 then deduplicates by id.
 
+**LWW fields in merge revisions.** For `isPinned` and `state`, a merge
+revision does not stamp the winning value with its own timestamp or author.
+It carries the winning value together with that value's original (HLC
+timestamp, device id). Later LWW comparisons use those original stamps, so a
+merge introduces no tie-break bias of its own. The merge revision's own
+timestamp is still the maximum of its parents' timestamps. How these
+per-field stamps are stored is settled in M3.
+
 Assumptions where PLAN.md is not explicit:
 
-- With more than two heads, they are merged pairwise in a fixed order (sorted
-  by revision id), so the result does not depend on arrival order.
-- When an LWW tiebreak meets a merge revision, its author "merge" is compared
-  as a plain string like any device id. Any fixed total order works; it must
-  be the same on every device.
+- With more than two heads, a device does a left fold over the heads it
+  currently has, sorted by revision id. Each step is a real merge revision,
+  persisted and synced, whose parents are the two revisions it merged. The
+  fold stops at the first step that conflicts; that pair becomes a conflict
+  record.
+- This is deterministic only for a fixed set of heads. It is not
+  order-independent: a device that sees {A, B} and later C produces
+  different intermediate merges from one that sees {A, C} and later B.
+  Convergence comes from merging deterministically whatever heads are
+  present, and repeating until one head remains. The differing intermediate
+  merges become heads themselves and are merged in a further step.
+- When several common ancestors are candidates (a criss-cross merge), the
+  choice of ancestor is deferred to M3.
 - The merge code lives in `core/merge` and is pure Kotlin with no I/O.
 
 ## Consequences

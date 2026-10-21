@@ -22,8 +22,8 @@ The reasons behind these are recorded in [docs/adr/](docs/adr/README.md).
 
 - **JDK.** The build provisions JDK 21 through Gradle toolchains. Any recent
   JDK that can start Gradle is enough to bootstrap it.
-- **Android SDK** with platform 36 and build-tools 36.1.0 installed. Set
-  `ANDROID_HOME` to the SDK location.
+- **Android SDK** with the platform and build-tools versions pinned in the
+  build installed. Set `ANDROID_HOME` to the SDK location.
 - **Gradle.** No system Gradle is needed. Always use the wrapper, `./gradlew`.
 
 ## Everyday commands
@@ -89,6 +89,9 @@ Reviewers check: correctness and edge cases; readability; naming; fit with the
 module boundaries and ADRs; meaningful tests; present and accurate KDoc; no
 dead code and no premature abstraction.
 
+In addition, the maintainer reviews the project at milestone boundaries. Each
+milestone ends with a demo and a short summary of the decisions made.
+
 ## Proposing an architectural change
 
 Changes to architecture, module boundaries, data formats, the sync protocol or
@@ -103,5 +106,6 @@ supersedes the old one. See [docs/adr/README.md](docs/adr/README.md).
 Jotter is licensed under the [Apache License 2.0](LICENSE). By submitting a
 contribution you agree that it is licensed under the same terms
 (inbound = outbound, as described in section 5 of the license). Do not remove
-or alter the [NOTICE](NOTICE) file, and keep existing copyright and license
-notices intact. Only contribute code you have the right to license this way.
+existing content from the [NOTICE](NOTICE) file. A contribution may need to
+add an attribution there. Keep existing copyright and license notices intact.
+Only contribute code you have the right to license this way.
