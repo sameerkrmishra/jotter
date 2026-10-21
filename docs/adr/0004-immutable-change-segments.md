@@ -103,6 +103,8 @@ A sync cycle per backend:
   taken over the decoded content, not the gzip bytes. On a match it marks the
   push done and moves on. On a mismatch it stops and reports a device-id
   collision to the user, rather than skipping its own revisions.
+  If the retry finds the segment number still free, it writes the recorded
+  pending segment as-is, without recomputing it.
 
 ## Alternatives considered
 

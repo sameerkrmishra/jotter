@@ -24,48 +24,71 @@ edits, and the device merges them field by field
 |---|---|
 | `body`, `title` | Three-way line merge (diff3) against the common ancestor. Non-overlapping edits merge. Overlapping edits are a conflict |
 | `tags` | OR-set: additions on either side are kept, removals on either side apply, and an add wins over a concurrent remove |
-| `isPinned`, `state` | Last writer wins by hybrid logical clock (HLC) timestamp, device id as tiebreaker |
+| `isPinned`, `state` | Last writer wins by stamp order (HLC timestamp, device id, revision id; see below) |
 | Delete vs. edit | The edit wins and the note comes back in the trash (`TRASHED`) |
 
-**On conflict**, only `body` and `title` are in conflict. Tags and the LWW
-fields still merge by their rules above. For the text, the head with the
-higher (HLC timestamp, device id) stamp stays current, so every device picks
-the same one. The other head's text is stored in the `conflict` table. The UI
-offers "keep mine", "keep theirs", "keep both as separate notes" or "edit
-merged text". Resolving creates a merge revision with both heads as parents.
+**Stamps and ordering.** Every revision carries a stamp: an HLC timestamp
+and a device id. Wherever this ADR compares revisions ("higher stamp", "last
+writer"), it uses one total order: HLC timestamp, then device id, then
+revision id. Device ids and revision ids are compared as unsigned byte
+strings, so every platform orders them identically. The revision id is
+needed as the final tiebreaker because two automatic merges can inherit the
+same stamp (see below).
 
-**Stamps.** Every revision carries a stamp: an (HLC timestamp, device id)
-pair. Stamps are compared by timestamp first and device id second, which is a
-total order. An edit is stamped with the editing device's clock and id.
+**Two kinds of revision.**
 
-**Determinism.** A merge revision's id is a hash of its sorted parent ids and
-its content. Its stamp is the greater of its parents' stamps: the timestamp
-is the maximum of the parents' timestamps, and the device id comes from the
-same parent. The device that happened to compute the merge is not recorded in
-the revision, so every field derives from the parents alone. Two devices that
-auto-merge the same heads produce the same revision, which then deduplicates
-by id.
+- A *user revision* is anything a person does: an edit, a pin, a delete, or a
+  conflict resolution. It gets the device's fresh HLC timestamp, which is
+  strictly greater than its parents', the device's id, and an ordinary unique
+  revision id (UUIDv7).
+- An *automatic merge* is created by the merge code. Its id is a hash of its
+  sorted parent ids and its content. Its stamp is the greatest of its
+  parents' stamps, so its timestamp is the maximum of the parents'. The
+  device that computed it is not recorded. Every field derives from the
+  parents alone, so two devices that auto-merge the same heads produce the
+  same revision, which deduplicates by id.
 
-**LWW fields in merge revisions.** For `isPinned` and `state`, a merge
-revision carries the winning value together with that value's original stamp,
-not the merge revision's own stamp. Later LWW comparisons use those original
-stamps, so a merge introduces no tie-break bias of its own. How these
-per-field stamps are stored is settled in M3.
+**LWW fields in automatic merges.** For `isPinned` and `state`, an automatic
+merge carries the winning value together with that value's original stamp,
+not its own. Later LWW comparisons use those original stamps, so a merge
+introduces no tie-break bias. How these per-field stamps are stored is
+settled in M3.
 
-Further details (PLAN.md §5 summarises these):
+**On conflict**, only `body` and `title` are in conflict. The device still
+writes a deterministic automatic merge with both heads as parents. Its tags
+and LWW fields are merged by the rules above. Its `body` and `title` come
+from the head with the higher stamp, so every device picks the same one. It
+also records that it is conflicted and which parent lost; this is part of its
+hashed content. A device that applies such a revision, whether it computed
+it or received it, adds the losing parent's text to its local `conflict`
+table and shows a badge.
 
-- With more than two heads, a device does a left fold over the heads it
-  currently has, sorted by revision id. Each step is a real merge revision,
-  persisted and synced, whose parents are the two revisions it merged. The
-  fold stops at the first step that conflicts; that pair becomes a conflict
-  record. Heads not yet consumed by the fold remain heads until the conflict
-  is resolved, and are folded in after that.
-- This is deterministic only for a fixed set of heads. It is not
-  order-independent: a device that sees {A, B} and later C produces
-  different intermediate merges from one that sees {A, C} and later B.
-  Convergence comes from merging deterministically whatever heads are
-  present, and repeating until one head remains. The differing intermediate
-  merges become heads themselves and are merged in a further step.
+The conflicted merge replaces the two conflicting heads. While the conflict
+is open, new edits take that conflicted merge (or a later descendant) as
+parent, as usual, and the conflict stays open. The UI offers "keep mine", "keep theirs", "keep both as
+separate notes" or "edit merged text". Choosing one creates a user revision
+whose parent is the current head; it closes the conflict. Two devices that
+resolve the same conflict differently create two heads, which are merged
+like any other concurrent edits. The exact encoding of the conflict marker
+is settled in M3.
+
+**More than two heads.** A device does a left fold over the heads it
+currently has, sorted by revision id (byte order). Each step is a real
+automatic merge, persisted and synced, whose parents are the two revisions it
+merged. If a step conflicts, it writes the conflicted merge described above
+and the fold stops. Heads not yet consumed stay heads, and automatic merging
+of that note waits until the conflict is resolved.
+
+This is deterministic only for a fixed set of heads. It is not
+order-independent: a device that sees {A, B} and later C produces different
+intermediate merges from one that sees {A, C} and later B. Convergence comes
+from merging deterministically whatever heads are present, and repeating
+until one head remains. The differing intermediate merges become heads
+themselves and are merged in a further step. Such merges can carry the same
+stamp, which is why the revision id breaks ties.
+
+Further details:
+
 - When several common ancestors are candidates (a criss-cross merge), the
   choice of ancestor is deferred to M3.
 - The merge code lives in `core/merge` and is pure Kotlin with no I/O.
@@ -89,6 +112,9 @@ Further details (PLAN.md §5 summarises these):
   Compaction must preserve common ancestors that are still needed.
 - Finding the common ancestor and merging is more code to get right than
   last-writer-wins on the whole note.
+- While a conflict is open, automatic merging of that note pauses. Concurrent
+  edits from other devices stay as separate heads until the user resolves
+  it.
 - HLC-based LWW for pin and state depends on reasonably sane device clocks;
   HLC limits but does not remove the effect of a badly wrong clock.
 
