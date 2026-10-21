@@ -82,9 +82,8 @@ A sync cycle per backend:
 
 ## Assumptions and open points
 
-- PLAN.md does not say how ordinary (non-merge) revision ids are formed. We
-  assume they are globally unique, generated offline (for example UUIDv7), so
-  idempotent insert by id is safe.
+- User revision ids are UUIDv7 and automatic merge ids are content hashes
+  ([PLAN.md §5](../PLAN.md#5-merge-rules)), so inserting by id is idempotent.
 - If a database file is copied to another machine and both copies keep the
   same device id, both would try to write the same segment numbers. If both
   copies push to the same backend, `writeNew` fails loudly instead of losing
