@@ -220,7 +220,8 @@ it stores the losing text in `conflict`. The UI shows a badge and offers "keep
 mine", "keep theirs", "keep both as separate notes" or "edit merged text"
 (side-by-side, with conflict markers pre-filled). New edits while the conflict
 is open take the conflicted merge as parent. Resolving creates a user revision
-on top of the current head and closes the conflict.
+on top of the head that descends from the conflicted merge. It names the
+conflicted merge it resolves, so other devices learn the conflict is closed.
 
 **More than two heads:** a device folds the heads it has, sorted by revision
 id (byte order), merging two at a time. Each step is a real automatic merge.
