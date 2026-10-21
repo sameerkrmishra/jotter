@@ -1,0 +1,16 @@
+# Overrides on top of detekt's default configuration (buildUponDefaultConfig = true).
+# Only list rules here whose default we deliberately change.
+
+comments:
+  # docs/PLAN.md §8: KDoc on every public class, function and property.
+  UndocumentedPublicClass:
+    active: true
+  UndocumentedPublicFunction:
+    active: true
+  UndocumentedPublicProperty:
+    active: true
+
+style:
+  # Matches .editorconfig, so detekt and ktlint agree.
+  MaxLineLength:
+    maxLineLength: 100
