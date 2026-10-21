@@ -13,6 +13,8 @@ import kotlin.uuid.Uuid
  */
 @JvmInline
 public value class NoteId private constructor(
+    // Intentionally no public getter: toString() is the canonical accessor. A value class getter
+    // is only called from Java and reflection, so it would sit uncovered forever.
     private val canonical: String,
 ) {
     /** Returns the UUID in canonical form: 36 lowercase characters, e.g. `0192e6f0-8b4a-...`. */

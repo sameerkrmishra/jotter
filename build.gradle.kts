@@ -1,5 +1,5 @@
 plugins {
-    id("jotter.coverage")
+    id("jotter.root")
 }
 
 dependencies {
