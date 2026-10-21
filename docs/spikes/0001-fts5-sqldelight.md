@@ -103,9 +103,9 @@ runs on synchronous drivers (xerial, our adapter, `AndroidSqliteDriver` via
 All options support minSdk 26.
 
 F-Droid caveat: the `sqlite-bundled` AAR contains prebuilt `.so` files that
-F-Droid does not rebuild from source. It is expected to be acceptable because androidx on
-Google Maven is a repository F-Droid trusts; confirm at the first F-Droid
-build.
+F-Droid does not rebuild from source. It is expected to be acceptable because
+androidx on Google Maven is a repository F-Droid trusts; confirm at the first
+F-Droid build.
 
 ### 4. Proven on a real Android runtime
 

@@ -8,8 +8,9 @@ data.
 - **Works offline.** Every device keeps its own SQLite database.
 - **No lock-in.** Devices sync through storage you choose: a local folder,
   WebDAV (mailbox.org, a NAS, Nextcloud) or your own PC over Tailscale.
-- **Portable.** Copy the database file to a flash drive (with the app closed,
-  or through "Export database" while it runs), or export notes as Markdown.
+- **Portable.** Copy the database file to a flash drive when the app and CLI
+  are not running (or use "Export database" while they run), or export notes
+  as Markdown.
 - **Quick to use.** Markdown notes with tags, pinning, archive, trash and
   full-text search, in the spirit of Google Keep.
 

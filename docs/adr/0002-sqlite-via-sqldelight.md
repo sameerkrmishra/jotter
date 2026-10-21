@@ -64,15 +64,18 @@ adapter must cover, each with tests:
   `foreign_keys = ON`;
 - a clean close that checkpoints the WAL into the main file, for example
   `PRAGMA wal_checkpoint(TRUNCATE)` before closing the last connection, so no
-  `-wal`/`-shm` files are left behind.
+  `-wal`/`-shm` files are left behind. This assumes no persistent WAL
+  (`SQLITE_FCNTL_PERSIST_WAL` unset, the androidx bundled build's default).
+  SQLite only removes the WAL when the last connection across all processes
+  closes. The M1 test verifies that `-wal`/`-shm` are gone after close.
 
 Expected cost: a few hundred lines with tests, plus keeping up with
 `SqlDriver` and `SQLiteConnection` API changes. Fallback trigger: if M1 or a
 later milestone needs more than one connection per process, we stop extending
 the adapter. The observable signal is UI reads measurably blocked behind sync
 writes (for example more than 100 ms), which concurrent readers would fix. We
-then switch and switch
-to `com.eygraber:sqldelight-androidx-driver`, which already pools connections.
+then switch to `com.eygraber:sqldelight-androidx-driver`, which already pools
+connections.
 That switch is **not** drop-in: the eygraber driver only accepts an async
 schema, so it needs `generateAsync = true`, and every generated query and
 every call site in `core/storage` becomes `suspend`. It is a migration to plan,
@@ -92,15 +95,18 @@ Copying: the database is a single SQLite file. Copying it is safe when the app
 and the CLI are not running: on a clean close SQLite checkpoints the WAL into
 the main file and removes the `-wal` and `-shm` files. While the app is
 running, the user uses "Export database", which writes a consistent
-single-file copy (`VACUUM INTO`). This rule exists because of the `-wal` file,
-not because of the flash drive.
+single-file copy (`VACUUM INTO`). If the app or CLI crashed or was killed
+(common on Android), committed data may still be in the `-wal` file. Open and
+close the app once before copying (SQLite recovers the WAL on open), or use
+"Export database". This rule exists because of the `-wal` file, not because of
+the flash drive.
 
 ## Consequences
 
 ### Positive
 
 - One portable SQLite file meets the flash-drive requirement: copy it when
-  the app is closed, or use "Export database" while it runs.
+  the app and CLI are not running, or use "Export database" while they run.
 - FTS5 gives fast, ranked full-text search without an external search engine.
 - SQL is visible in `.sq` files, so reviewers can read every query.
 - Generated code is type-safe, and SQLite is mature on both targets.

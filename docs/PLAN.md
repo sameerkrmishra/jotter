@@ -50,9 +50,9 @@ fast enough, so we choose for portability, correctness and readability.
 
 | Option | Pros | Cons | Verdict |
 |---|---|---|---|
-| **SQLite via SQLDelight** | One portable file (meets the flash-drive requirement: copy it when the app is closed, or use "Export database"). FTS5 full-text search. SQL is visible and reviewable in `.sq` files. Type-safe generated Kotlin. Mature on Android and JVM | Generated code (excluded from coverage) | **Recommended** |
+| **SQLite via SQLDelight** | One portable file (meets the flash-drive requirement: copy it when the app and CLI are not running, or use "Export database"). FTS5 full-text search. SQL is visible and reviewable in `.sq` files. Type-safe generated Kotlin. Mature on Android and JVM | Generated code (excluded from coverage) | **Recommended** |
 | SQLite via Room KMP | Google-backed, familiar to Android devs, now multiplatform | Annotation-heavy. SQL hidden in DAOs. Desktop support is newer | Viable alternative |
-| Folder of Markdown files + index | Human-readable without the app | Needs a separate index for search. Metadata in front-matter. Multi-file atomicity is hard. A single SQLite file, copied when the app is closed or exported while it runs, already meets the portability goal | Rejected for the live store. Kept as the **export** format |
+| Folder of Markdown files + index | Human-readable without the app | Needs a separate index for search. Metadata in front-matter. Multi-file atomicity is hard. A single SQLite file, copied when the app and CLI are not running or exported while they run, already meets the portability goal | Rejected for the live store. Kept as the **export** format |
 | Realm Kotlin | Built-in sync | Deprecated by MongoDB, and its sync service is a vendor dependency | Rejected |
 | ObjectBox | Fast | Opaque binary format, weaker portability | Rejected |
 | Event log only + in-memory model | Simple model | Search and queries need rebuilding on every start. No single queryable file | Rejected (but the sync layer *is* an event log, §6) |
