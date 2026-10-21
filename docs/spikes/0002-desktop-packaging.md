@@ -19,8 +19,8 @@ Wayland, HiDPI and IME caveats for a text-heavy notes app?
 - Libraries by explicit coordinates: `org.jetbrains.compose.desktop:desktop-jvm-linux-x64:1.12.2`
   and `org.jetbrains.compose.material3:material3:1.9.0`. Material3 is versioned
   separately from CMP since 1.10; 1.9.0 is its latest stable.
-- Host: EndeavourOS (Arch), Hyprland (Wayland) session with XWayland,
-  `DISPLAY=:1`, `WAYLAND_DISPLAY=wayland-1`, one 2560x1440 monitor at scale 1.
+- Host: EndeavourOS (Arch), Hyprland (Wayland) session with XWayland, one
+  2560x1440 monitor at scale 1.
 - App: one window, `OutlinedTextField` + Add button + `LazyColumn`, Material3.
   An env var `JOTTER_SPIKE_AUTOCLOSE` makes it exit by itself after 4 s.
 
@@ -29,8 +29,10 @@ Wayland, HiDPI and IME caveats for a text-heavy notes app?
 ### 1. Build and quality gates: works, with three small build-logic changes
 
 `./gradlew check` (whole build, including `:core:model`) passes with the spike
-module applying `jotter.desktop-app` + `jotter.quality`. Only warning is the
-known Kover `Configuration.setVisible` deprecation; CMP adds none.
+module applying `jotter.desktop-app` + `jotter.quality` (compile, tests, ktlint,
+detekt). The Kover gate did **not** cover the spike: the root `kover(...)` list
+aggregates only `:core:model`. Only warning is the known Kover
+`Configuration.setVisible` deprecation; CMP adds none.
 `explicitApi()` and `allWarningsAsErrors` cause no trouble (`main` is `public`,
 composables `private`). Needed:
 
@@ -47,9 +49,9 @@ composables `private`). Needed:
    `ktlint_function_naming_ignore_when_annotated_with = Composable` (.editorconfig).
    `shared-ui` (KMP) will need the same, so this belongs on `main` in M2.
 
-Kover: line coverage of the module was 3% because Compose lambdas compile to
-many synthetic classes. The 95% gate cannot apply to UI code via unit tests;
-see Recommendation.
+Kover (`koverLog` on the module alone): 3% line coverage, simply because only
+`addNote` is unit-tested; `main` and `NotesScreen` have no tests. UI code needs
+Compose UI tests to meet the gate; see Recommendation.
 
 ### 2. Packaging formats
 
@@ -60,12 +62,14 @@ toolchain JDK.
 
 | Task | Result | Size |
 |---|---|---|
-| `createDistributable` | OK, `build/compose/binaries/main/app/jotter-spike/` | 143 MB dir (runtime 87 MB, app jars 55 MB of which `libskiko-linux-x64.so` 30 MB); 67 MB `.tar.gz` |
-| `createReleaseDistributable` (ProGuard on, `optimize = true`) | OK | 127 MB dir, app jars 39 MB; 52 MB `.tar.gz` |
+| `createDistributable` | OK, `build/compose/binaries/main/app/jotter-spike/` | 143 MB dir (runtime 87 MB, app jars 55 MB of which `libskiko-linux-x64.so` 30 MB); 67 MB `.tar.gz`* |
+| `createReleaseDistributable -Pspike.proguard=true` (ProGuard on, `optimize = true`; off by default in the spike) | OK | 127 MB dir, app jars 39 MB; 52 MB `.tar.gz`* |
 | `packageAppImage` | OK, but it is **jpackage `--type app-image`**: the same directory as the distributable, **not** an `.AppImage` file | same as above |
 | `packageDeb` | Failed without `dpkg-deb` (`Error: Invalid or unsupported type: [deb]`). With a user-space `dpkg-deb` 1.23.11 on `PATH`: OK | 54 MB `.deb` (installs to `/opt/jotter-spike`, Installed-Size 145 MB) |
 | `packageRpm` | Failed: `rpmbuild` not installed (`Invalid or unsupported type: [rpm]`); not attempted further | – |
 | `packageUberJarForCurrentOS` | OK | 38 MB jar, **no JDK** (needs Java 21+ on the host) |
+
+\* Made by hand with `tar -czf` of the output directory; Compose has no tarball task.
 
 - The JDK runtime **is bundled** in distributable/AppImage/deb/rpm: a jlink
   image with `--strip-debug --no-header-files --no-man-pages --strip-native-commands`
@@ -86,9 +90,9 @@ A display was available, so no Xvfb (not installed anyway). Launched each
 artifact with auto-close; exit code 0 and `jotter-spike: window shown, closing`
 on stdout for: debug distributable (3 runs), ProGuard release distributable
 (2 runs), uber jar on Temurin 21. Each run took 5.4-6.0 s, i.e. ~1.5 s of
-startup and shutdown on top of the 4 s delay. Screenshots via ImageMagick
-`import -window <X11 id>` show the text field, button and both list items,
-`Grüße — ünïcödé ✓` included. (`import -window root` fails on Hyprland; no `grim`.)
+startup and shutdown on top of the 4 s delay. Screenshots (ImageMagick `import`
+on the X11 window) show the text field, button and both list items,
+`Grüße — ünïcödé ✓` included.
 
 One anomaly: in the first screenshot run the JVM hung after `exitApplication()`
 and ignored SIGTERM and SIGQUIT until `kill -9`. Not reproduced in the 6 other
@@ -140,12 +144,19 @@ Maven Central rather than one we build. Publish SHA-256 sums with releases.
   `org.jetbrains.compose` (a `jotter.compose` add-on plugin is the cleanest).
 - Make `jotter.quality` choose detekt tasks per Kotlin plugin, and add the
   `@Composable` naming exemptions for detekt and ktlint.
-- Coverage: keep `app/desktop` to a thin `main()` and exclude it in
-  `jotter.root` (`*.MainKt`, `ComposableSingletons*`); test screens in
-  `shared-ui` with Compose UI tests (`runComposeUiTest` on the JVM).
-- Ship format: ProGuard release `createReleaseDistributable` as `.tar.gz` plus
-  an `.AppImage` made with `appimagetool` in CI; set `packageVersion` from the
-  Git tag. Flatpak (Flathub) in M6. Skip rpm; deb only if asked.
+- Coverage: keep `app/desktop` to a thin `main()` and exclude only that module's
+  entry point in `jotter.root` (e.g. `*.desktop.MainKt`); do not exclude
+  `ComposableSingletons*` globally, as that would hide untested lambdas in
+  `shared-ui`. Test screens in `shared-ui` with Compose UI tests
+  (`runComposeUiTest` on the JVM; not tried in the spike, but it runs headless,
+  so it fits CI).
+- CI (PLAN §8 builds desktop binaries): add a smoke launch of the distributable
+  under `xvfb-run` with an auto-close switch like the spike's, checking exit 0.
+- Ship format: `createReleaseDistributable` as `.tar.gz` plus an `.AppImage`
+  made with `appimagetool` in CI; set `packageVersion` from the Git tag.
+  Enable ProGuard only once the M2 smoke tests pass with the real dependencies;
+  otherwise ship the non-ProGuard build. Flatpak (Flathub) in M6. Skip rpm; deb
+  only if asked.
 - Set `modules(...)` explicitly and re-run `suggestRuntimeModules` when
   dependencies change (SQLDelight's JDBC driver will need `java.sql`).
 
@@ -157,3 +168,11 @@ Maven Central rather than one we build. Publish SHA-256 sums with releases.
 - Material3 versioning is decoupled from CMP; upgrades need two version bumps.
 - `packageAppImage` naming is misleading; the real AppImage step is ours to own.
 - The unreproduced shutdown hang (section 3).
+- ProGuard was proven only on a trivial app. Ktor, kotlinx.serialization,
+  the SQLDelight JDBC driver (ServiceLoader) and Kermit will likely need keep
+  rules; failures show up only at runtime.
+- Licensing: the bundled Temurin runtime is GPLv2 with Classpath Exception.
+  Keep `lib/runtime/legal/` in every artifact (jpackage includes it) and
+  mention the bundled JDK in NOTICE at release.
+- Host libraries are not bundled: libGL, fontconfig/freetype config and libX11
+  come from the system (Skiko needs glibc >= 2.17, so any current distro works).
