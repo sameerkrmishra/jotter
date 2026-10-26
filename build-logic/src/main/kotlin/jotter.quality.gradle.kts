@@ -20,8 +20,10 @@ detekt {
 
 // `check` runs only the plain `detekt` task by default, which has no type resolution. The
 // type-resolved tasks depend on the module's targets: jotter.kmp-library wires its own, and a
-// plain Kotlin/JVM module (such as a JVM CLI) gets its two here. Spelled out so that a rename in
-// a detekt release fails the build instead of silently dropping detekt from `check`.
+// plain Kotlin/JVM module (such as a JVM CLI) gets its two here. Any other module (a pure Android
+// app, or one applying kotlin.multiplatform directly, such as app/desktop) falls back to the plain
+// task, so whoever adds one must add its type-resolved tasks to `check`. Spelled out so that a
+// rename in a detekt release fails the build instead of silently dropping detekt from `check`.
 pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
     tasks.named("check") {
         dependsOn("detektMain", "detektTest")
