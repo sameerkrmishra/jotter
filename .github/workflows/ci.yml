@@ -40,6 +40,13 @@ jobs:
           # with its own terms of use.
           cache-provider: basic
 
+      # Kotlin/Native fetches its LLVM and sysroot (about 1 GB) from JetBrains on first use, outside
+      # Gradle's cache. They depend only on the Kotlin version, which lives in the version catalog.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan/dependencies
+          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+
       # The runner image ships an Android SDK at $ANDROID_HOME with its licenses
       # accepted, so AGP downloads any missing platform or build-tools itself.
       - run: ./gradlew check

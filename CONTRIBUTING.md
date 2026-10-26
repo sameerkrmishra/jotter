@@ -25,6 +25,10 @@ The reasons behind these are recorded in [docs/adr/](docs/adr/README.md).
 - **Android SDK** with the platform and build-tools versions pinned in the
   build installed. Set `ANDROID_HOME` to the SDK location.
 - **Gradle.** No system Gradle is needed. Always use the wrapper, `./gradlew`.
+- **Disk space** for the Kotlin/Native toolchain (about 1.8 GB in `~/.konan`),
+  which the first build downloads. Shared modules are also built and tested
+  for `linuxX64`, so they must not use JVM-only APIs or libraries
+  ([ADR-0006](docs/adr/0006-native-compatible-shared-modules.md)).
 
 ## Everyday commands
 
@@ -33,7 +37,7 @@ The intended interface is:
 
 | Command | What it does |
 |---|---|
-| `./gradlew check` | Compiles, runs all tests, Android Lint, ktlint, detekt and the 95% Kover coverage gate |
+| `./gradlew check` | Compiles, runs all tests (JVM, Android host and Kotlin/Native `linuxX64`), Android Lint, ktlint, detekt and the 95% Kover coverage gate |
 | `./gradlew ktlintFormat` | Reformats Kotlin sources to the project style |
 
 Run `./gradlew check` before every commit. CI
@@ -58,7 +62,8 @@ builds join CI once those modules exist.
 
 - The coverage gate is 95% line and branch coverage. Generated code
   (SQLDelight) and thin platform entry points (Activity, `main()`) are
-  excluded.
+  excluded. Kover cannot measure Kotlin/Native, so the `linuxX64` tests must
+  pass but do not count towards the gate.
 - Tests must be meaningful. They should check behaviour and edge cases, not
   just execute lines. Tests written only to raise coverage will be rejected in
   review.

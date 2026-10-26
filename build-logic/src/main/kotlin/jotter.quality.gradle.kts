@@ -18,12 +18,12 @@ detekt {
     failOnSeverity = FailOnSeverity.Info
 }
 
-// detekt registers one task per compilation. These run with type resolution, which enables rules
-// that the per-source-set tasks and the plain `detekt` task skip, so `check` runs them instead.
-// (The plain task only looks at src/main and src/test, which multiplatform modules don't have.)
-// The names are spelled out so that a rename in a detekt release fails the build with "task not
-// found" instead of silently dropping detekt from `check`. They assume a jotter.kmp-library
-// module; modules with other targets will need their own list.
-tasks.named("check") {
-    dependsOn("detektMainJvm", "detektTestJvm", "detektMainAndroid", "detektHostTestAndroid")
+// `check` runs only the plain `detekt` task by default, which has no type resolution. The
+// type-resolved tasks depend on the module's targets: jotter.kmp-library wires its own, and a
+// plain Kotlin/JVM module (such as a JVM CLI) gets its two here. Spelled out so that a rename in
+// a detekt release fails the build instead of silently dropping detekt from `check`.
+pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+    tasks.named("check") {
+        dependsOn("detektMain", "detektTest")
+    }
 }
