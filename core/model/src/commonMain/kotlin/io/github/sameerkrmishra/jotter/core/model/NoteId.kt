@@ -1,15 +1,18 @@
 package io.github.sameerkrmishra.jotter.core.model
 
 import kotlin.jvm.JvmInline
+import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
  * The identity of a note: a UUID that stays the same across edits, devices and backends.
  *
- * A [NoteId] can only be obtained through [parse] or [parseOrNull], so every instance holds a
- * valid UUID in canonical form. Two ids for the same UUID are therefore always equal, whatever
- * letter case or format the input used. [toString] returns that canonical form, which is also the
- * form to store and exchange.
+ * New ids come from [generate], which creates a UUIDv7: its leading bits are the creation time, so
+ * ids are unique without coordination between devices and sort roughly by creation order. Stored
+ * or received ids come back through [parse] or [parseOrNull], which accept any UUID version.
+ * Every instance therefore holds a valid UUID in canonical form, and two ids for the same UUID
+ * are always equal, whatever letter case or format the input used. [toString] returns that
+ * canonical form, which is also the form to store and exchange.
  */
 @JvmInline
 public value class NoteId private constructor(
@@ -22,6 +25,10 @@ public value class NoteId private constructor(
 
     /** Factories for [NoteId]. */
     public companion object {
+        /** Creates a new, unique id: a UUIDv7 with the current time and random bits. */
+        @OptIn(ExperimentalUuidApi::class) // generateV7() is still experimental in Kotlin 2.4.
+        public fun generate(): NoteId = NoteId(Uuid.generateV7().toString())
+
         /**
          * Parses [text] as a UUID, in either the 36-character hex-and-dash form or the
          * 32-character hex-only form, ignoring letter case.

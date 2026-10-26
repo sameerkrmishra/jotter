@@ -3,6 +3,7 @@ package io.github.sameerkrmishra.jotter.core.model
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 class NoteIdTest {
@@ -11,6 +12,25 @@ class NoteIdTest {
     @Test
     fun parseKeepsCanonicalUuid() {
         assertEquals(canonical, NoteId.parse(canonical).toString())
+    }
+
+    @Test
+    fun generateCreatesDistinctUuidV7Ids() {
+        val first = NoteId.generate()
+        val second = NoteId.generate()
+
+        assertNotEquals(first, second)
+        // The version digit of `xxxxxxxx-xxxx-7xxx-...`.
+        assertEquals('7', first.toString()[14], "Expected a UUIDv7: $first")
+        assertEquals(first, NoteId.parse(first.toString()))
+    }
+
+    @Test
+    fun generatedIdsSortByCreationOrder() {
+        // generateV7() is monotonic within a process, even within one millisecond.
+        val ids = List(100) { NoteId.generate().toString() }
+
+        assertEquals(ids.sorted(), ids)
     }
 
     @Test
