@@ -37,6 +37,7 @@ write a new ADR and mark the old one as superseded.
 | [0003](0003-revision-dag-and-three-way-merge.md) | Revision DAG with three-way merge | Accepted |
 | [0004](0004-immutable-change-segments.md) | Immutable change segments on dumb blob stores | Accepted |
 | [0005](0005-manual-dependency-injection.md) | Manual constructor injection | Accepted |
+| [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted |
 
-ADR-0006 (encryption plan) and ADR-0007 (multi-user plan) are planned for
+ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.
