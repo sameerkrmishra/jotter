@@ -54,7 +54,7 @@ is just another backend, not an authority.
   exchanged changes through some backend.
 - Conflicts that cannot be merged automatically must be shown to the user.
 - No server-side features such as search across devices or access control.
-  Multi-user support is deferred and will need its own ADR (ADR-0007).
+  Multi-user support is deferred and will need its own ADR (ADR-0008).
 
 ## Alternatives considered
 

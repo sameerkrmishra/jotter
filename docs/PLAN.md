@@ -135,7 +135,7 @@ Each module has one job and a small public API. Internal details are marked
 
 | Concern | Choice | Why |
 |---|---|---|
-| Language | Kotlin Multiplatform (Android + JVM; Wasm for web later) | One language and shared core for Android and Linux |
+| Language | Kotlin Multiplatform (Android + JVM; shared modules also compile and test on `linuxX64`; Wasm for web later) | One language and shared core for Android and Linux. `linuxX64` keeps a native CLI possible (ADR-0006) |
 | License | Apache-2.0 | Free use; attribution required via LICENSE + NOTICE; patent grant |
 | UI | Compose Multiplatform | One UI codebase for Android and Linux |
 | DB | SQLDelight + bundled SQLite (FTS5) | §2 |
@@ -306,7 +306,7 @@ converge on the next successful sync.
 Segments pass through a `SegmentCodec` (v1: JSON + gzip). End-to-end encryption
 later becomes a codec (for example XChaCha20-Poly1305 with a passphrase-derived
 key) without changing backends or the merge logic. `format.json` records the
-codec. Documented as ADR-0006 in M6.
+codec. Documented as ADR-0007 in M6.
 
 ---
 
@@ -335,14 +335,17 @@ codec. Documented as ADR-0006 in M6.
   (detekt `UndocumentedPublic*` rules). Module-level `README.md` per module.
 - **Coverage:** Kover gate at **95% line and branch coverage**. Generated code
   (SQLDelight) and thin platform entry points (Activity, `main()`) are
-  excluded. Compose UI is covered with Compose UI tests.
+  excluded. Compose UI is covered with Compose UI tests. Kover cannot
+  measure Kotlin/Native: native tests prove behaviour but do not count
+  towards the gate.
 - **Architecture decisions:** recorded as ADRs in `docs/adr/`. Planned:
   0001 local-first, 0002 SQLite/SQLDelight, 0003 revision DAG + diff3,
-  0004 immutable segment sync, 0005 manual DI (all in M0); 0006 encryption
-  plan and 0007 multi-user plan (both deferred features, documented in M6).
+  0004 immutable segment sync, 0005 manual DI (all in M0); 0006
+  native-compatible shared modules (M1); 0007 encryption plan and
+  0008 multi-user plan (both deferred features, documented in M6).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
-  (JVM + Robolectric), Kover verify, build APK and desktop binaries. Required
-  for every merge.
+  (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
+  and desktop binaries. Required for every merge.
 - **Reproducible F-Droid builds:** no Google Play Services, no proprietary
   dependencies.
 
@@ -378,12 +381,12 @@ Tasks inside a milestone that touch different modules run in parallel.
 | # | Milestone | Contents | Exit criteria |
 |---|---|---|---|
 | M0 | Foundation | Git repo + GitHub, LICENSE, Gradle KMP skeleton (version catalog, JDK 21 toolchain), ktlint/detekt/Kover/CI, ADR template + ADR-0001..0005, CONTRIBUTING. **Spikes:** bundled SQLite FTS5 on Android + JVM (including SQLDelight `fts5` dialect support); Compose Desktop packaging on Linux | CI green on an empty-but-wired project. Spikes documented |
-| M1 | Core domain + storage | `core/model`, `core/storage`: notes, tags, pin/archive/trash, FTS search, revision table | 95% coverage. Search over 10k synthetic notes < 50 ms |
+| M1 | Core domain + storage | `core/model`, `core/storage`: notes, tags, pin/archive/trash, FTS search, revision table | 95% coverage. Search over 10k synthetic notes < 50 ms. Shared modules compile and test on `linuxX64` |
 | M2 | Linux desktop + CLI + Keep import | `shared-ui` (note grid, editor with Markdown preview, tag filter, search, archive and trash views), `app/desktop`, `app/cli`, `keep-import`, `markdown-export` | **Keep notes can be imported and the app used daily on Linux** |
 | M3 | Sync engine | `core/merge` (diff3), `core/sync`, `backend/api` + contract tests, `backend/localfolder`, conflict UI | Property-based tests: N simulated devices with random offline edits always converge |
 | M4 | WebDAV + PC hub | `backend/webdav` (tested against a containerised WebDAV server), `server` peer endpoint, backend management UI (add, remove, status, last sync) | Desktop ↔ mailbox.org ↔ second desktop converge |
 | M5 | Android | `app/android`, Share-to target, WorkManager sync, F-Droid metadata and reproducible build | Phone and PC converge over Tailscale and over WebDAV |
-| M6 | v1.0 hardening | ADR-0006 and ADR-0007, debug log export, error states, backup/restore docs, user guide, release | Tagged v1.0 on GitHub, APK + AppImage/Flatpak |
+| M6 | v1.0 hardening | ADR-0007 and ADR-0008, debug log export, error states, backup/restore docs, user guide, release | Tagged v1.0 on GitHub, APK + AppImage/Flatpak |
 
 **Later:** web app, E2E encryption, multi-user + login, Dropbox/Drive/S3,
 Neovim/Emacs plugins, log compaction, home-screen widget.
