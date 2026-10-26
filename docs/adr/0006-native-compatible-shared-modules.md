@@ -33,10 +33,12 @@ fails the build.
 No native binary is shipped. The apps (`app/desktop`, `app/cli`) stay on the
 JVM for now.
 
-In M2, once the CLI exists, we measure the wall-clock time of `jotter add` on
-the JVM. If it is clearly above ~200 ms, and JVM tuning (class data sharing,
-fewer dependencies at startup) does not fix it, we build the CLI for
-`linuxX64` instead. That decision is recorded as its own ADR.
+In M2, once the CLI exists, we measure `jotter add` on the JVM: the median
+wall-clock time of 10 warm runs (after one discarded run) on the maintainer's
+Linux PC, adding a short note to an existing database. If the median exceeds
+200 ms, and JVM tuning (class data sharing, fewer dependencies at startup)
+does not bring it below, we build the CLI for `linuxX64` instead. That
+decision is recorded as its own ADR.
 
 Platform-specific code goes behind `expect`/`actual` declarations or
 interfaces in common code, with an implementation for each target.

@@ -41,15 +41,29 @@ jobs:
           cache-provider: basic
 
       # Kotlin/Native fetches its LLVM and sysroot (about 1 GB) from JetBrains on first use, outside
-      # Gradle's cache. They depend only on the Kotlin version, which lives in the version catalog.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Gradle's cache. They depend only on the Kotlin version, so that is the cache key. Only main
+      # saves the cache, so pull requests cannot fill the cache quota and evict the Gradle cache.
+      - id: kotlin
+        run: |
+          version=$(sed -n 's/^kotlin = "\(.*\)"$/\1/p' gradle/libs.versions.toml)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - id: konan
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.konan/dependencies
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          key: konan-${{ runner.os }}-kotlin-${{ steps.kotlin.outputs.version }}
 
       # The runner image ships an Android SDK at $ANDROID_HOME with its licenses
       # accepted, so AGP downloads any missing platform or build-tools itself.
       - run: ./gradlew check
+
+      - if: github.ref == 'refs/heads/main' && steps.konan.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.konan/dependencies
+          key: ${{ steps.konan.outputs.cache-primary-key }}
 
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
