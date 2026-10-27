@@ -36,6 +36,10 @@ atomicfu. No other Jotter module.
   (the synchronous API guarantees it; the suspending API and
   `generateAsync = true` are not supported), and a transaction body must not
   wait for another thread that uses the database (deadlock).
+- **`transaction(noEnclosing = true)` inside a transaction** throws, as in
+  SQLDelight, and also rolls back the whole outer transaction: SQLDelight
+  leaves an unfinished nested transaction behind, after which its record of
+  failures and hooks cannot be trusted.
 - **Reads.** Every transaction uses `BEGIN IMMEDIATE`, read-only ones too, and
   so takes the write lock across processes. `core/storage` should therefore
   not wrap pure reads in transactions; a single query needs none.
