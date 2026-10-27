@@ -20,15 +20,15 @@ class Fts5Test {
                 null,
                 "INSERT INTO note_fts(title, body) VALUES " +
                     "('Shopping', 'oat milk, coffee'), " +
-                    "('Café ideas', 'coffee coffee coffee'), " +
+                    "('Caf\u00e9 ideas', 'coffee coffee coffee'), " +
                     "('Groceries', 'bread')",
                 0,
             )
 
-            assertEquals(listOf("Café ideas"), driver.search("cafe"))
+            assertEquals(listOf("Caf\u00e9 ideas"), driver.search("cafe"))
             assertEquals(listOf("Groceries"), driver.search("groc*"))
             // bm25() ranks the note that mentions coffee most often first.
-            assertEquals(listOf("Café ideas", "Shopping"), driver.search("coffee"))
+            assertEquals(listOf("Caf\u00e9 ideas", "Shopping"), driver.search("coffee"))
             assertEquals(emptyList(), driver.search("tea"))
         }
 

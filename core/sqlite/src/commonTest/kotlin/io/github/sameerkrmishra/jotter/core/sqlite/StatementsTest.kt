@@ -6,6 +6,7 @@ import app.cash.sqldelight.db.SqlCursor
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.use
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -26,7 +27,7 @@ class StatementsTest {
                 driver.execute(1, insert, 5) {
                     bindLong(0, Long.MIN_VALUE)
                     bindDouble(1, 0.5)
-                    bindString(2, "café")
+                    bindString(2, "caf\u00e9")
                     bindBytes(3, byteArrayOf(0, -1, 7))
                     bindBoolean(4, true)
                 }
@@ -46,7 +47,7 @@ class StatementsTest {
 
                 assertEquals(3, rows.size)
                 assertEquals(
-                    listOf(Long.MIN_VALUE, 0.5, "café", true),
+                    listOf(Long.MIN_VALUE, 0.5, "caf\u00e9", true),
                     rows[0].take(3) + rows[0][4],
                 )
                 assertContentEquals(byteArrayOf(0, -1, 7), rows[0][3] as ByteArray)
@@ -136,6 +137,30 @@ class StatementsTest {
                 )
             }
             assertEquals(listOf("a"), db.titles().executeAsList())
+        }
+
+    @Test
+    fun stepErrorSwallowedByTheMapperStillFailsAndLeavesNoBrokenStatement() =
+        withTempDir { dir ->
+            openConnectionDriver(dir.path).use { driver ->
+                fun absolute(value: Long): Long? =
+                    driver
+                        .executeQuery(
+                            identifier = 9,
+                            sql = "SELECT abs(?)",
+                            mapper = { cursor ->
+                                // Swallows the error that step() reports for abs(Long.MIN_VALUE).
+                                val hasRow = runCatching { cursor.next().value }.getOrDefault(false)
+                                QueryResult.Value(if (hasRow) cursor.getLong(0) else null)
+                            },
+                            parameters = 1,
+                        ) { bindLong(0, value) }
+                        .value
+
+                val error = assertFailsWith<SQLiteException> { absolute(Long.MIN_VALUE) }
+                assertContains(error.message.orEmpty(), "integer overflow")
+                assertEquals(5L, absolute(-5))
+            }
         }
 
     @Test

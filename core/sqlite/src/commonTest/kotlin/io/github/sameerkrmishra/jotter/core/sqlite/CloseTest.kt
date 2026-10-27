@@ -1,5 +1,7 @@
 package io.github.sameerkrmishra.jotter.core.sqlite
 
+import androidx.sqlite.execSQL
+import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.use
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -31,6 +33,55 @@ class CloseTest {
             openSqliteDriver(dir.path, NotesSchema).use { driver ->
                 assertEquals(listOf("a"), NotesDatabase(driver).titles().executeAsList())
             }
+        }
+
+    @Test
+    fun closeReportsAWalThatAnotherReaderKeepsAlive() =
+        withTempDir { dir ->
+            val driver = openConnectionDriver(dir.path)
+            NotesSchema.create(driver)
+            driver.execute(null, "INSERT INTO note(title) VALUES ('a')", 0)
+            // So that the checkpoint gives up quickly instead of after 5 s.
+            driver.execute(null, "PRAGMA busy_timeout = 50", 0)
+            val reader = openRawConnection(dir.path)
+            try {
+                reader.execSQL("BEGIN")
+                reader.prepare("SELECT count(*) FROM note").use { it.step() }
+
+                driver.close()
+
+                assertEquals(false, driver.walCheckpointedOnClose)
+                assertTrue(dir.exists("-wal"))
+                reader.execSQL("COMMIT")
+            } finally {
+                reader.close()
+            }
+            // The last connection to close checkpoints and removes the WAL.
+            assertFalse(dir.exists("-wal"))
+        }
+
+    @Test
+    fun closeReportsACompleteCheckpoint() =
+        withTempDir { dir ->
+            val driver = openConnectionDriver(dir.path)
+            assertEquals(null, driver.walCheckpointedOnClose)
+            driver.close()
+            assertEquals(true, driver.walCheckpointedOnClose)
+        }
+
+    @Test
+    fun closeInsideAMapperIsRejected() =
+        withNotesDatabase { db ->
+            db.insert("a")
+            val error =
+                assertFailsWith<IllegalStateException> {
+                    db.titles().execute {
+                        db.sqlDriver.close()
+                        QueryResult.Unit
+                    }
+                }
+            assertContains(error.message.orEmpty(), "while a statement runs")
+            assertEquals(listOf("a"), db.titles().executeAsList())
         }
 
     @Test

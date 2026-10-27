@@ -30,14 +30,23 @@ internal const val STATEMENT_CACHE_SIZE = 32
  * (one database thread that runs all statements) does not fit SQLDelight's synchronous API: a
  * transaction body runs on the caller's thread and issues its statements from there.
  *
- * A transaction holds [lock] from [newTransaction] to its [Transaction.endTransaction], on the
- * thread that opened it (SQLDelight checks that it ends on the same thread). Another thread's
- * statements therefore wait for the whole transaction, instead of landing inside it or seeing its
- * uncommitted rows. The lock is reentrant, so the transaction's own thread can still run
- * statements, nested transactions and [currentTransaction] while holding it.
+ * The outermost transaction keeps one hold on [lock] from [newTransaction] to its
+ * [Transaction.endTransaction]. Another thread's statements therefore wait for the whole
+ * transaction, instead of landing inside it or seeing its uncommitted rows. The lock is reentrant,
+ * so the transaction's own thread can still run statements, nested transactions and
+ * [currentTransaction] while holding it. Nested transactions keep no hold of their own: if one is
+ * never ended (SQLDelight's `transaction(noEnclosing = true)` opens one and then throws), ending
+ * the outer transaction still releases the lock.
  *
  * Invariant: when a thread holds [lock], [transaction] is either null or a transaction opened by
  * that same thread. This is what makes [currentTransaction] correct for every thread.
+ *
+ * The lock is owned by a thread (a `ReentrantLock` on the JVM, an owner-thread lock in atomicfu on
+ * Native), so a transaction must begin and end on the same thread. SQLDelight's synchronous API
+ * guarantees that: the body is a plain lambda, and `Transaction` checks the thread. `asFlow()`
+ * with `mapToList(dispatcher)` is fine too: it runs single queries on the dispatcher, outside any
+ * transaction. The suspending API (`SuspendingTransacter`, `generateAsync = true`) is not
+ * supported: a suspended transaction can resume on another thread.
  *
  * A side effect: work on another thread that the transaction body waits for (for example a
  * `runBlocking` call into another dispatcher that queries the database) deadlocks. Keep
@@ -45,9 +54,10 @@ internal const val STATEMENT_CACHE_SIZE = 32
  *
  * ## Listeners
  *
- * [listenerLock] guards only [listeners]. Lock order: [listenerLock] is never held while taking
- * [lock] or while calling a listener, and nothing takes [listenerLock] while running SQL, so the
- * two locks never nest and cannot deadlock.
+ * [listenerLock] guards only [listeners]. Lock order: [lock] before [listenerLock], never the
+ * reverse. A thread holding [lock] may take [listenerLock] (a mapper that adds a listener), but
+ * [listenerLock] is only held for map updates: no SQL and no listener calls run under it. So no
+ * thread waits for [lock] while holding [listenerLock], which rules out a deadlock.
  *
  * SQLDelight's generated code (`TransacterImpl`) defers notifications for writes made inside a
  * transaction and calls [notifyListeners] after [Transaction.endTransaction] has committed and
@@ -57,12 +67,23 @@ internal class ConnectionSqlDriver(
     private val connection: SQLiteConnection,
     statementCacheSize: Int,
 ) : SqlDriver {
-    // Guards connection, statements, changeCounters, transaction and closed.
+    // Guards connection, statements, changeCounters, statementsInUse, transaction, closed and
+    // walCheckpointedOnClose.
     private val lock = reentrantLock()
     private val statements = StatementCache(statementCacheSize)
     private val changeCounters = connection.prepare("SELECT changes(), total_changes()")
+    private var statementsInUse = 0
     private var transaction: Transaction? = null
     private var closed = false
+
+    /**
+     * Whether [close] checkpointed the whole WAL into the database file. False if another
+     * connection, usually in another process, was still reading: the WAL then stays until the
+     * last connection to the file closes. Null until [close] has run.
+     */
+    var walCheckpointedOnClose: Boolean? = null
+        get() = lock.withLock { field }
+        private set
 
     private val listenerLock = reentrantLock()
     private val listeners = mutableMapOf<String, MutableSet<Query.Listener>>()
@@ -116,15 +137,23 @@ internal class ConnectionSqlDriver(
      * short, and SQLDelight cannot tell them apart.
      */
     override fun newTransaction(): QueryResult<Transacter.Transaction> {
-        // Taken once per transaction and released by its endTransaction(), not here.
         lock.lock()
+        // A non-null transaction is this thread's (invariant above): open a nested one. It keeps
+        // no hold of its own, because the outermost transaction keeps one.
+        val enclosing = transaction
+        if (enclosing != null) {
+            val nested = Transaction(enclosing)
+            transaction = nested
+            lock.unlock()
+            return QueryResult.Value(nested)
+        }
+        // Outermost: keep this hold until endTransaction(), unless BEGIN fails.
         return cleanUpOnFailure(cleanUp = lock::unlock) {
             checkOpen()
-            val enclosing = transaction
-            if (enclosing == null) connection.execSQL("BEGIN IMMEDIATE")
-            val newTransaction = Transaction(enclosing)
-            transaction = newTransaction
-            QueryResult.Value(newTransaction)
+            connection.execSQL("BEGIN IMMEDIATE")
+            val outermost = Transaction(enclosingTransaction = null)
+            transaction = outermost
+            QueryResult.Value(outermost)
         }
     }
 
@@ -176,17 +205,22 @@ internal class ConnectionSqlDriver(
      * `-shm` files, so the database is one self-contained file again. Waits for transactions on
      * other threads to end. Calling it again does nothing.
      *
-     * @throws IllegalStateException if called inside a transaction.
+     * If another connection is reading, the checkpoint waits for it up to `busy_timeout` and then
+     * gives up without an error; [walCheckpointedOnClose] tells which happened. The file is only
+     * self-contained once the last connection to it has closed.
+     *
+     * @throws IllegalStateException if called inside a transaction or a query's mapper.
      */
     override fun close() {
         lock.withLock {
             if (closed) return
             check(transaction == null) { "Cannot close the database inside a transaction" }
+            check(statementsInUse == 0) { "Cannot close the database while a statement runs" }
             closed = true
             try {
                 statements.closeAll()
                 changeCounters.close()
-                connection.prepare("PRAGMA wal_checkpoint(TRUNCATE)").use { it.step() }
+                walCheckpointedOnClose = connection.checkpointWal()
             } finally {
                 connection.close()
             }
@@ -209,20 +243,23 @@ internal class ConnectionSqlDriver(
         block: (SQLiteStatement) -> T,
     ): T {
         val statement = identifier?.let(statements::take) ?: connection.prepare(sql)
-        val result =
-            cleanUpOnFailure(cleanUp = statement::close) {
-                binders?.invoke(StatementBinder(statement))
-                block(statement)
-            }
-        if (identifier == null) {
-            statement.close()
-        } else {
-            // reset() only reports an error of the last step(), and every step succeeded.
-            statement.reset()
-            statement.clearBindings()
-            statements.put(identifier, statement)
+        statementsInUse++
+        try {
+            val result =
+                cleanUpOnFailure(cleanUp = statement::close) {
+                    binders?.invoke(StatementBinder(statement))
+                    val result = block(statement)
+                    // reset() rethrows the error of a failed step() that the mapper caught. The
+                    // statement is then closed instead of cached.
+                    statement.reset()
+                    statement.clearBindings()
+                    result
+                }
+            if (identifier == null) statement.close() else statements.put(identifier, statement)
+            return result
+        } finally {
+            statementsInUse--
         }
-        return result
     }
 
     private fun readChangeCounters(): ChangeCounters {
@@ -243,17 +280,23 @@ internal class ConnectionSqlDriver(
 
     /**
      * One level of transaction. Only the outermost level (no [enclosingTransaction]) commits or
-     * rolls back; nested levels only release their hold on [lock].
+     * rolls back, and releases the hold on [lock] that [newTransaction] kept for it. A nested
+     * level only makes its enclosing transaction current again.
      */
     private inner class Transaction(
         override val enclosingTransaction: Transaction?,
     ) : Transacter.Transaction() {
-        // SQLDelight calls this on the thread that opened the transaction, which holds [lock].
+        // SQLDelight calls this on the thread that opened the transaction. That thread holds
+        // [lock] until the outermost transaction ends.
         override fun endTransaction(successful: Boolean): QueryResult<Unit> {
-            try {
-                if (enclosingTransaction == null) commitOrRollback(successful)
-            } finally {
+            if (enclosingTransaction != null) {
                 transaction = enclosingTransaction
+                return QueryResult.Unit
+            }
+            try {
+                commitOrRollback(successful)
+            } finally {
+                transaction = null
                 lock.unlock()
             }
             return QueryResult.Unit
@@ -279,3 +322,13 @@ internal class ConnectionSqlDriver(
         }
     }
 }
+
+/**
+ * Runs `wal_checkpoint(TRUNCATE)` and returns whether it finished. Its first column, `busy`, is 1
+ * if another connection's read kept it from copying and truncating the whole WAL.
+ */
+private fun SQLiteConnection.checkpointWal(): Boolean =
+    prepare("PRAGMA wal_checkpoint(TRUNCATE)").use { statement ->
+        statement.step()
+        statement.getLong(0) == 0L
+    }

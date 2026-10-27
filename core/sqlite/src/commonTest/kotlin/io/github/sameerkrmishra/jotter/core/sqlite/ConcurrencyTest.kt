@@ -2,13 +2,17 @@ package io.github.sameerkrmishra.jotter.core.sqlite
 
 import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /** One driver used from several threads at once. */
 class ConcurrencyTest {
@@ -97,6 +101,20 @@ class ConcurrencyTest {
             }
         }
 
+    @Test
+    fun rejectedNoEnclosingTransactionDoesNotKeepTheDriverLocked() =
+        withNotesDatabase { db ->
+            db.transaction {
+                db.insert("a")
+                // SQLDelight opens the nested transaction, then throws without ending it.
+                assertFailsWith<IllegalStateException> { db.transaction(noEnclosing = true) {} }
+            }
+            // Not a child of runBlocking: if the lock had leaked, this thread would block for
+            // good, and the test must fail on the timeout instead of hanging.
+            val count = CoroutineScope(testThreads).async { db.count() }
+            assertEquals(1L, runBlocking { withTimeout(5.seconds) { count.await() } })
+        }
+
     private fun SqlDriver.increment() {
         val value = checkNotNull(queryLong("SELECT value FROM counter"))
         execute(1, "UPDATE counter SET value = ?", 1) { bindLong(0, value + 1) }
@@ -105,6 +123,10 @@ class ConcurrencyTest {
     private companion object {
         const val WORKERS = 8
         const val INCREMENTS = 25
+
+        // The tests above that hold a transaction open for HOLD assume the other thread runs
+        // within that time. A scheduling stall can make them pass without testing anything
+        // (the other thread runs after the transaction), but never fail falsely.
         val HOLD = 200.milliseconds
     }
 }

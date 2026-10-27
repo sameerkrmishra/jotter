@@ -10,7 +10,7 @@ plugin (`generateAsync = false`, `sqlite-3-44-dialect`) and the repositories.
 val driver: SqlDriver = openSqliteDriver(path, JotterDatabase.Schema)
 val db = JotterDatabase(driver)
 // ...
-driver.close() // checkpoints the WAL: the file can be copied afterwards
+driver.close() // checkpoints the WAL
 ```
 
 **Dependency rule:** depends only on SQLDelight's runtime, androidx SQLite and
@@ -28,25 +28,34 @@ atomicfu. No other Jotter module.
 ## Design
 
 - **One connection, one mutex.** Every call takes a reentrant lock, so any
-  thread may use the driver. A transaction holds the lock from
+  thread may use the driver. The outermost transaction holds the lock from
   `newTransaction()` to `endTransaction()`, so other threads wait for the whole
   transaction instead of running inside it. Thread confinement does not fit
   SQLDelight's synchronous API, where the transaction body runs on the
-  caller's thread. Consequence: a transaction body must not wait for another
-  thread that uses the database (deadlock).
+  caller's thread. Consequences: a transaction begins and ends on one thread
+  (the synchronous API guarantees it; the suspending API and
+  `generateAsync = true` are not supported), and a transaction body must not
+  wait for another thread that uses the database (deadlock).
+- **Reads.** Every transaction uses `BEGIN IMMEDIATE`, read-only ones too, and
+  so takes the write lock across processes. `core/storage` should therefore
+  not wrap pure reads in transactions; a single query needs none.
 - **Transactions.** Only the outermost one runs SQL: `BEGIN IMMEDIATE`, then
   `COMMIT` or `ROLLBACK`. Nested transactions join it (SQLDelight semantics):
   if any of them fails, everything rolls back. A failed `COMMIT` (deferred
   foreign key) is rolled back, so the connection never stays in a transaction.
   `afterCommit`/`afterRollback` and listener notifications are handled by
   SQLDelight's `TransacterImpl` after the lock is released.
-- **Listeners.** A separate lock guards the listener map; it never nests with
-  the connection lock and is released before listeners are called.
+- **Listeners.** A separate lock guards the listener map. Lock order is
+  connection lock, then listener lock, never the reverse; listeners are
+  called with neither held by the driver.
 - **Statement cache.** Up to 32 prepared statements, least recently used
   evicted, keyed by SQLDelight's query identifier. Statements are finalised
   on eviction, on failure and on close.
 - **Close.** `PRAGMA wal_checkpoint(TRUNCATE)`, then close. When it is the last
-  connection to the file, `-wal` and `-shm` disappear.
+  connection to the file, `-wal` and `-shm` disappear. If another process is
+  still reading, the checkpoint gives up after `busy_timeout` without an
+  error and the WAL stays. The file is only safe to copy on its own after the
+  last connection (app and CLI) has closed.
 
 The fallback if one connection becomes a bottleneck (UI reads blocked behind
 sync writes) is in ADR-0002.
