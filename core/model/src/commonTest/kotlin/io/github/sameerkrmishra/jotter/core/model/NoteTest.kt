@@ -20,7 +20,7 @@ class NoteTest {
 
     @Test
     fun notesAreComparedByValueWithNormalisedTags() {
-        val sameNote = note.copy(tags = setOf(TagName.parse(" shopping ")))
+        val sameNote = note.copy(tags = setOf(TagName.parse(" Shopping ")))
 
         assertEquals(note, sameNote)
         assertEquals(note.hashCode(), sameNote.hashCode())
