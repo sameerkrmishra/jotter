@@ -14,8 +14,9 @@ import kotlin.jvm.JvmInline
  *    points in [WHITESPACE], not [Char.isWhitespace], whose answer depends on the platform.
  * 2. Letter case is kept as typed. Case folding needs Unicode tables, which differ between
  *    platforms (older Android versions in particular), and it would lose the user's spelling.
- * 3. The result must be 1 to [MAX_LENGTH] characters (UTF-16 code units) long and must not
- *    contain a control character (Unicode category Cc: U+0000-U+001F, U+007F-U+009F).
+ * 3. The result must be 1 to [MAX_LENGTH] characters (UTF-16 code units) long, must not
+ *    contain a control character (Unicode category Cc: U+0000-U+001F, U+007F-U+009F) and must
+ *    not contain an unpaired surrogate, which has no UTF-8 encoding.
  *
  * Unicode normalisation (NFC) is not applied, so the same word typed with combining accents
  * and with precomposed letters gives two tags. That risk is accepted. To limit duplicates, the
@@ -39,13 +40,14 @@ public value class TagName private constructor(
         public const val MAX_LENGTH: Int = 100
 
         /**
-         * The characters [parse] treats as whitespace: the Unicode `White_Space` property, which
-         * has not changed since Unicode 6.0. All of them are in the Basic Multilingual Plane.
+         * The characters [parse] treats as whitespace: the Unicode `White_Space` property as of
+         * Unicode 6.3, which removed U+180E (Mongolian vowel separator); it has not changed since.
+         * All of them are in the Basic Multilingual Plane.
          */
         public const val WHITESPACE: String =
-            "\u0009\u000A\u000B\u000C\u000D \u0085  " +
-                "           " +
-                "    　"
+            "\u0009\u000A\u000B\u000C\u000D\u0020\u0085\u00A0\u1680" +
+                "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A" +
+                "\u2028\u2029\u202F\u205F\u3000"
 
         private const val LAST_C0_CONTROL = '\u001F'
         private val c1Controls = '\u007F'..'\u009F'
@@ -54,7 +56,7 @@ public value class TagName private constructor(
          * Normalises user input [text] into a tag, by the rules described on [TagName].
          *
          * @throws IllegalArgumentException if the normalised text is empty, longer than
-         *   [MAX_LENGTH] or contains a control character.
+         *   [MAX_LENGTH], or contains a control character or an unpaired surrogate.
          */
         public fun parse(text: String): TagName =
             requireNotNull(parseOrNull(text)) { "Not a valid tag: \"$text\"" }
@@ -62,7 +64,10 @@ public value class TagName private constructor(
         /** Like [parse], but returns `null` instead of throwing if [text] is not a valid tag. */
         public fun parseOrNull(text: String): TagName? {
             val normalised = collapseWhitespace(text)
-            val isValid = normalised.length in 1..MAX_LENGTH && normalised.none(::isControl)
+            val isValid =
+                normalised.length in 1..MAX_LENGTH &&
+                    normalised.none(::isControl) &&
+                    hasOnlyPairedSurrogates(normalised)
             return if (isValid) TagName(normalised) else null
         }
 
@@ -88,6 +93,18 @@ public value class TagName private constructor(
                         spacePending = false
                         append(char)
                     }
+                }
+            }
+
+        // A lone surrogate cannot be encoded as UTF-8, so SQLite or a serialiser would replace
+        // it, and devices could end up with different tags.
+        private fun hasOnlyPairedSurrogates(text: String): Boolean =
+            text.indices.none { index ->
+                val char = text[index]
+                when {
+                    char.isHighSurrogate() -> text.getOrNull(index + 1)?.isLowSurrogate() != true
+                    char.isLowSurrogate() -> text.getOrNull(index - 1)?.isHighSurrogate() != true
+                    else -> false
                 }
             }
 

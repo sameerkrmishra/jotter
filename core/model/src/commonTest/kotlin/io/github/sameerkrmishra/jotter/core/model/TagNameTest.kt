@@ -19,7 +19,7 @@ class TagNameTest {
 
     @Test
     fun keepsLetterCaseAndComparesExactly() {
-        assertEquals("ÄRGER", TagName.parse("ÄRGER").toString())
+        assertEquals("\u00C4RGER", TagName.parse("\u00C4RGER").toString())
         assertNotEquals(TagName.parse("Work"), TagName.parse("work"))
     }
 
@@ -34,7 +34,7 @@ class TagNameTest {
     fun keepsCharactersOutsideTheWhitespaceList() {
         // Zero-width space and the Mongolian vowel separator are not White_Space (any more),
         // whatever a platform's Char.isWhitespace says.
-        listOf("a​b", "a᠎b").forEach {
+        listOf("a\u200Bb", "a\u180Eb").forEach {
             assertEquals(it, TagName.parse(it).toString())
         }
     }
@@ -61,8 +61,24 @@ class TagNameTest {
         listOf('\u0000', '\u001F', '\u007F', '\u009F').forEach {
             assertNull(TagName.parseOrNull("a${it}b"), "Expected null for U+${it.code}")
         }
-        listOf('~', '¡').forEach {
+        listOf('\u007E', '\u00A1').forEach {
             assertEquals("a${it}b", TagName.parse("a${it}b").toString())
+        }
+    }
+
+    @Test
+    fun acceptsSurrogatePairs() {
+        // U+1F6D2 (shopping trolley), outside the Basic Multilingual Plane.
+        val emoji = "\uD83D\uDED2"
+
+        assertEquals("$emoji list", TagName.parse("$emoji  list").toString())
+    }
+
+    @Test
+    fun rejectsUnpairedSurrogates() {
+        // A high surrogate before a non-surrogate or at the end, and lone low surrogates.
+        listOf("a\uD800b", "a\uD800", "a\uDC00b", "\uDC00\uD800").forEach {
+            assertNull(TagName.parseOrNull(it), "Expected null for \"$it\"")
         }
     }
 

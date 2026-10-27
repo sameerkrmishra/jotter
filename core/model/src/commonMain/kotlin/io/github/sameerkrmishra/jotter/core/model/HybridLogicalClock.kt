@@ -18,8 +18,9 @@ import kotlin.time.Duration.Companion.days
  *   than all of them.
  * - `now(after = parent)` is always greater than `parent`, as ADR-0003 requires of a user
  *   revision and its parent, even when the parent's timestamp is too far ahead to observe.
- * - The clock's [HybridTimestamp.physicalMillis] never jumps to more than [maxDrift] ahead of
- *   the wall-clock reading at the time of the jump.
+ * - When the clock's [HybridTimestamp.physicalMillis] jumps ahead, it lands at most [maxDrift]
+ *   ahead of the wall-clock reading at that moment, plus 1 ms if the counter overflowed at the
+ *   same time (see [HybridTimestamp]: a full counter moves to the next millisecond).
  *
  * **Persistence and sharing.** The clock has no persistence of its own, and the app and the
  * CLI share one database and one device id. So [last] must be read from the database and
@@ -57,18 +58,29 @@ public class HybridLogicalClock(
      * result is [after]'s immediate successor but the clock itself stays put: the far-future
      * time spreads only through that note's revisions, not to the whole clock. Later timestamps
      * for other events are then not guaranteed to be greater than this result.
+     *
+     * @throws IllegalArgumentException if [after] is [HybridTimestamp.MAX], which only corrupt
+     *   data can contain, as no timestamp follows it. The clock stays unchanged.
      */
     public fun now(after: HybridTimestamp? = null): HybridTimestamp {
         val wallMillis = wallMillis()
-        if (after != null && isWithinDrift(after, wallMillis)) last = maxOf(last, after)
+        val known =
+            if (after != null &&
+                isWithinDrift(after, wallMillis)
+            ) {
+                maxOf(last, after)
+            } else {
+                last
+            }
         val next =
-            if (wallMillis > last.physicalMillis) {
+            if (wallMillis > known.physicalMillis) {
                 HybridTimestamp(wallMillis, 0)
             } else {
-                last.successor()
+                known.successor()
             }
+        val result = if (after != null && after >= next) after.successor() else next
         last = next
-        return if (after != null && after >= next) after.successor() else next
+        return result
     }
 
     /**

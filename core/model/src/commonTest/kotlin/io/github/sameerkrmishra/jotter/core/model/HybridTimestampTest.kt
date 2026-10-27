@@ -31,5 +31,19 @@ class HybridTimestampTest {
     }
 
     @Test
+    fun nothingFollowsTheGreatestTimestamp() {
+        val error = assertFailsWith<IllegalArgumentException> { HybridTimestamp.MAX.successor() }
+
+        assertEquals(
+            "No timestamp follows ${HybridTimestamp.MAX}; it is likely corrupt",
+            error.message,
+        )
+        assertEquals(
+            HybridTimestamp(Long.MAX_VALUE, 0),
+            HybridTimestamp(Long.MAX_VALUE - 1, Int.MAX_VALUE).successor(),
+        )
+    }
+
+    @Test
     fun orderIsTotalAndConsistentWithEquals() = runTest { checkTotalOrderLaws(timestamps) }
 }
