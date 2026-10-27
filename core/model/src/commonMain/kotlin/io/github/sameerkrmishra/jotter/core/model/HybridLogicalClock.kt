@@ -10,25 +10,28 @@ import kotlin.time.Duration.Companion.days
  *
  * Guarantees:
  *
- * - Every timestamp it returns is greater than every timestamp it returned or accepted before,
- *   even if the wall clock goes backwards. While the wall clock lags behind, the
- *   [HybridTimestamp.counter] grows instead.
- * - After [receive] accepts a timestamp from another device, every later timestamp is greater
+ * - Every timestamp [now] returns is greater than [last], that is, than every timestamp the
+ *   clock issued or observed before, even if the wall clock goes backwards. While the wall clock
+ *   lags behind, the [HybridTimestamp.counter] grows instead.
+ * - After [observe] accepts a timestamp from another device, every later timestamp is greater
  *   than it. A user revision made after applying remote revisions is therefore stamped later
- *   than all of them, as ADR-0003 requires.
- * - [receive] moves the clock at most [maxDrift] ahead of the wall-clock reading at that moment.
- *   Without received timestamps, [HybridTimestamp.physicalMillis] follows the greatest
- *   wall-clock reading seen, or the [last] value the clock started from.
+ *   than all of them.
+ * - `now(after = parent)` is always greater than `parent`, as ADR-0003 requires of a user
+ *   revision and its parent, even when the parent's timestamp is too far ahead to observe.
+ * - The clock's [HybridTimestamp.physicalMillis] never jumps to more than [maxDrift] ahead of
+ *   the wall-clock reading at the time of the jump.
  *
- * The clock has no persistence of its own. Store [last] with the data it stamped and pass it in
- * again on the next start; otherwise a wall clock that went backwards while the app was closed
- * could repeat timestamps. Instances are not thread-safe: each one needs a single owner that
- * serialises calls, such as the database write transaction that stores the stamped revision.
+ * **Persistence and sharing.** The clock has no persistence of its own, and the app and the
+ * CLI share one database and one device id. So [last] must be read from the database and
+ * written back in the same write transaction that stores the revisions it stamped. The simplest
+ * way is to build a clock per write transaction from the persisted value. Otherwise two
+ * processes could issue the same timestamp, or a wall clock that went backwards while the app
+ * was closed could repeat one. For the same reason instances are not thread-safe.
  *
  * @param wallClock The device's wall clock. Readings before the Unix epoch count as zero.
- * @param last The greatest timestamp issued or accepted so far, [HybridTimestamp.ZERO] for a new
- *   device.
- * @property maxDrift How far a received timestamp may be ahead of the wall clock. See [receive].
+ * @param last The greatest timestamp issued or observed so far, as persisted, or
+ *   [HybridTimestamp.ZERO] for a new device.
+ * @property maxDrift How far ahead of the wall clock an observed timestamp may be. See [observe].
  */
 public class HybridLogicalClock(
     private val wallClock: Clock,
@@ -41,51 +44,58 @@ public class HybridLogicalClock(
         }
     }
 
-    /** The greatest timestamp issued or accepted so far. Persist it to restart the clock. */
+    /** The greatest timestamp issued or observed so far. Persist it after every use. */
     public var last: HybridTimestamp = last
         private set
 
-    /** Returns a new timestamp for a local event, such as a user revision. */
-    public fun now(): HybridTimestamp = advance(from = last)
+    /**
+     * Returns a new timestamp for a local event, such as a user revision, greater than [last].
+     *
+     * If [after] is given, typically the timestamp of the revision being edited, the result is
+     * also greater than [after]. When [after] is within [maxDrift] of the wall clock, the clock
+     * first observes it, so later timestamps are greater too. When it is further ahead, the
+     * result is [after]'s immediate successor but the clock itself stays put: the far-future
+     * time spreads only through that note's revisions, not to the whole clock. Later timestamps
+     * for other events are then not guaranteed to be greater than this result.
+     */
+    public fun now(after: HybridTimestamp? = null): HybridTimestamp {
+        val wallMillis = wallMillis()
+        if (after != null && isWithinDrift(after, wallMillis)) last = maxOf(last, after)
+        val next =
+            if (wallMillis > last.physicalMillis) {
+                HybridTimestamp(wallMillis, 0)
+            } else {
+                last.successor()
+            }
+        last = next
+        return if (after != null && after >= next) after.successor() else next
+    }
 
     /**
-     * Accepts [remote], the timestamp of an event from another device, and returns a new
-     * timestamp for receiving it. That timestamp and every later one is greater than [remote].
+     * Records [remote], the timestamp of an event from another device, so that every later
+     * timestamp from [now] is greater than it.
      *
      * A [remote] timestamp more than [maxDrift] ahead of the wall clock is rejected: the clock
      * stays unchanged and [ClockDriftException] is thrown. Accepting it would drag this clock,
-     * and through it every device it syncs with, that far into the future for good. Clamping
-     * it instead would break the guarantee that later timestamps are greater than [remote], so
-     * an edit could sort before the revision it edits. Rejecting the timestamp does not reject
-     * the revision: the caller can still store it, and should tell the user which device's clock
-     * is wrong.
+     * and through it every device it syncs with, that far into the future for good. Rejecting
+     * the timestamp does not reject the revision: the caller still stores it, should tell the
+     * user which device's clock is wrong, and edits on top of it use `now(after = ...)`.
      *
      * @throws ClockDriftException if [remote] is too far ahead of the wall clock.
      */
-    public fun receive(remote: HybridTimestamp): HybridTimestamp {
+    public fun observe(remote: HybridTimestamp) {
         val wallMillis = wallMillis()
-        // Both sides are non-negative, so the subtraction cannot overflow.
-        if (remote.physicalMillis - wallMillis > maxDrift.inWholeMilliseconds) {
+        if (!isWithinDrift(remote, wallMillis)) {
             throw ClockDriftException(remote, wallMillis, maxDrift)
         }
-        return advance(from = maxOf(last, remote), wallMillis)
+        last = maxOf(last, remote)
     }
 
-    // The standard HLC update, in one form for both kinds of event: take the wall clock if it is
-    // ahead of everything known, otherwise move just past the greatest known timestamp.
-    private fun advance(
-        from: HybridTimestamp,
-        wallMillis: Long = wallMillis(),
-    ): HybridTimestamp {
-        val next =
-            if (wallMillis > from.physicalMillis) {
-                HybridTimestamp(wallMillis, 0)
-            } else {
-                from.successor()
-            }
-        last = next
-        return next
-    }
+    // Both sides are non-negative, so the subtraction cannot overflow.
+    private fun isWithinDrift(
+        timestamp: HybridTimestamp,
+        wallMillis: Long,
+    ): Boolean = timestamp.physicalMillis - wallMillis <= maxDrift.inWholeMilliseconds
 
     private fun wallMillis(): Long = wallClock.now().toEpochMilliseconds().coerceAtLeast(0)
 
@@ -101,7 +111,7 @@ public class HybridLogicalClock(
 }
 
 /**
- * Thrown by [HybridLogicalClock.receive] when a remote timestamp is too far ahead of this
+ * Thrown by [HybridLogicalClock.observe] when a remote timestamp is too far ahead of this
  * device's wall clock. Either the sending device's clock or this one is badly wrong.
  *
  * @property remote The rejected timestamp.

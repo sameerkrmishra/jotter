@@ -13,8 +13,10 @@ import kotlin.time.Instant
  * @property tags The tags.
  * @property isPinned Whether the note is pinned to the top.
  * @property state Whether the note is active, archived or in the trash.
- * @property createdAt When the note was created, by the creating device's wall clock. For
- *   display only; it plays no part in merging.
+ * @property createdAt When the note was created: the [HybridTimestamp.physicalMillis] of its
+ *   first revision. Like any HLC time it may be ahead of the creating device's wall clock,
+ *   for example after that device synced with one whose clock runs ahead. For display only;
+ *   it plays no part in merging.
  * @property updatedAt The timestamp of the revision the note was materialised from.
  */
 public data class Note(
