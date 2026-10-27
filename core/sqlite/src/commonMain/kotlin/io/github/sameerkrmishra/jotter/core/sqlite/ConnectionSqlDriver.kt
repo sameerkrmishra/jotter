@@ -34,9 +34,11 @@ internal const val STATEMENT_CACHE_SIZE = 32
  * [Transaction.endTransaction]. Another thread's statements therefore wait for the whole
  * transaction, instead of landing inside it or seeing its uncommitted rows. The lock is reentrant,
  * so the transaction's own thread can still run statements, nested transactions and
- * [currentTransaction] while holding it. Nested transactions keep no hold of their own: if one is
- * never ended (SQLDelight's `transaction(noEnclosing = true)` opens one and then throws), ending
- * the outer transaction still releases the lock.
+ * [currentTransaction] while holding it. Nested transactions keep no hold of their own, so a
+ * nested transaction that is never ended (SQLDelight's `transaction(noEnclosing = true)` opens
+ * one and then throws) cannot keep the lock. It does break SQLDelight's bookkeeping for the rest
+ * of the outer transaction (failed inner transactions, hooks, notifications), so the outer
+ * transaction then always rolls back, and throws if it would otherwise have committed.
  *
  * Invariant: when a thread holds [lock], [transaction] is either null or a transaction opened by
  * that same thread. This is what makes [currentTransaction] correct for every thread.
@@ -293,11 +295,19 @@ internal class ConnectionSqlDriver(
                 transaction = enclosingTransaction
                 return QueryResult.Unit
             }
+            // A nested transaction that was never ended is still current. SQLDelight recorded
+            // later failures and hooks on it, so `successful` cannot be trusted: roll back.
+            val orphaned = transaction !== this
             try {
-                commitOrRollback(successful)
+                commitOrRollback(successful && !orphaned)
             } finally {
                 transaction = null
                 lock.unlock()
+            }
+            // Only when a commit was refused: a failed body's own exception must not be hidden.
+            check(!orphaned || !successful) {
+                "Rolled back: a nested transaction was never ended " +
+                    "(transaction(noEnclosing = true) inside a transaction)"
             }
             return QueryResult.Unit
         }

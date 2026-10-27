@@ -8,6 +8,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
@@ -102,18 +103,56 @@ class ConcurrencyTest {
         }
 
     @Test
-    fun rejectedNoEnclosingTransactionDoesNotKeepTheDriverLocked() =
+    fun rejectedNoEnclosingTransactionRollsBackAndReleasesTheDriver() =
+        withNotesDatabase { db ->
+            val error =
+                assertFailsWith<IllegalStateException> {
+                    db.transaction {
+                        db.insert("a")
+                        // SQLDelight opens the nested transaction, then throws without ending it.
+                        assertFailsWith<IllegalStateException> {
+                            db.transaction(noEnclosing = true) {}
+                        }
+                    }
+                }
+            assertContains(error.message.orEmpty(), "nested transaction was never ended")
+            assertEquals(0L, countFromAnotherThread(db))
+        }
+
+    @Test
+    fun failedInnerTransactionAfterARejectedNoEnclosingOneStillRollsBack() =
+        withNotesDatabase { db ->
+            assertFailsWith<IllegalStateException> {
+                db.transaction {
+                    assertFailsWith<IllegalStateException> { db.transaction(noEnclosing = true) {} }
+                    // SQLDelight records this failure on the orphan, not on the outer transaction.
+                    runCatching { db.transaction { error("inner failed") } }
+                    db.insert("must not commit")
+                }
+            }
+            assertEquals(0L, countFromAnotherThread(db))
+        }
+
+    @Test
+    fun rolledBackOuterTransactionWithARejectedNoEnclosingOneDoesNotThrow() =
         withNotesDatabase { db ->
             db.transaction {
                 db.insert("a")
-                // SQLDelight opens the nested transaction, then throws without ending it.
                 assertFailsWith<IllegalStateException> { db.transaction(noEnclosing = true) {} }
+                rollback()
             }
-            // Not a child of runBlocking: if the lock had leaked, this thread would block for
-            // good, and the test must fail on the timeout instead of hanging.
-            val count = CoroutineScope(testThreads).async { db.count() }
-            assertEquals(1L, runBlocking { withTimeout(5.seconds) { count.await() } })
+            assertEquals(0L, countFromAnotherThread(db))
         }
+
+    /**
+     * Counts the notes on another thread. Not a child of runBlocking: if the driver's lock had
+     * leaked, that thread would block for good, and the test must fail on the timeout instead of
+     * hanging.
+     */
+    private fun countFromAnotherThread(db: NotesDatabase): Long {
+        val count = CoroutineScope(testThreads).async { db.count() }
+        return runBlocking { withTimeout(5.seconds) { count.await() } }
+    }
 
     private fun SqlDriver.increment() {
         val value = checkNotNull(queryLong("SELECT value FROM counter"))
