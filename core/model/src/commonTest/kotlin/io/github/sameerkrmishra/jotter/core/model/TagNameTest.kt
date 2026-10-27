@@ -7,24 +7,36 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 class TagNameTest {
     @Test
-    fun normalisesCaseAndWhitespace() {
-        assertEquals("shopping list", TagName.parse("  Shopping \t\n LIST ").toString())
-        assertEquals(TagName.parse("work"), TagName.parse("Work"))
+    fun trimsAndCollapsesWhitespace() {
+        assertEquals("Shopping list", TagName.parse("  Shopping \t\r\n list ").toString())
+        assertEquals(TagName.parse("Work"), TagName.parse(" Work\n"))
     }
 
     @Test
-    fun collapsesUnicodeWhitespace() {
-        // No-break space and ideographic space, which a `\s` regex misses on the JVM.
-        assertEquals("a b", TagName.parse(" a　 b ").toString())
+    fun keepsLetterCaseAndComparesExactly() {
+        assertEquals("ÄRGER", TagName.parse("ÄRGER").toString())
+        assertNotEquals(TagName.parse("Work"), TagName.parse("work"))
     }
 
     @Test
-    fun lowercasesBeyondAscii() {
-        assertEquals("ärger", TagName.parse("ÄRGER").toString())
+    fun collapsesEveryListedWhitespaceCharacter() {
+        val text = TagName.WHITESPACE + "a" + TagName.WHITESPACE + "b" + TagName.WHITESPACE
+
+        assertEquals("a b", TagName.parse(text).toString())
+    }
+
+    @Test
+    fun keepsCharactersOutsideTheWhitespaceList() {
+        // Zero-width space and the Mongolian vowel separator are not White_Space (any more),
+        // whatever a platform's Char.isWhitespace says.
+        listOf("a​b", "a᠎b").forEach {
+            assertEquals(it, TagName.parse(it).toString())
+        }
     }
 
     @Test
@@ -45,8 +57,23 @@ class TagNameTest {
 
     @Test
     fun rejectsControlCharacters() {
-        assertNull(TagName.parseOrNull("a\u0000b"))
-        assertNull(TagName.parseOrNull("bell\u0007"))
+        // The edges of both control ranges, and characters just outside them.
+        listOf('\u0000', '\u001F', '\u007F', '\u009F').forEach {
+            assertNull(TagName.parseOrNull("a${it}b"), "Expected null for U+${it.code}")
+        }
+        listOf('~', '¡').forEach {
+            assertEquals("a${it}b", TagName.parse("a${it}b").toString())
+        }
+    }
+
+    @Test
+    fun fromNormalisedAcceptsOnlyNormalisedText() {
+        assertEquals(TagName.parse("Shopping list"), TagName.fromNormalised("Shopping list"))
+
+        listOf(" Shopping", "Shopping  list", "Shopping\tlist", "", "a\u0000").forEach {
+            val error = assertFailsWith<IllegalArgumentException> { TagName.fromNormalised(it) }
+            assertEquals("Not a normalised tag: \"$it\"", error.message)
+        }
     }
 
     @Test
@@ -54,7 +81,7 @@ class TagNameTest {
         runTest {
             checkAll(Arb.string(0..TagName.MAX_LENGTH)) { text ->
                 val tag = TagName.parseOrNull(text) ?: return@checkAll
-                assertEquals(tag, TagName.parse(tag.toString()))
+                assertEquals(tag, TagName.fromNormalised(tag.toString()))
             }
         }
 }
