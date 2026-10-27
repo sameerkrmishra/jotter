@@ -76,7 +76,9 @@ later milestone needs more than one connection per process, we stop extending
 the adapter. The observable signal is UI reads measurably blocked behind sync
 writes (for example more than 100 ms), which concurrent readers would fix. We
 then switch to `com.eygraber:sqldelight-androidx-driver`, which already pools
-connections.
+connections. Until then every transaction, read-only ones included, uses
+`BEGIN IMMEDIATE` and holds the write lock, so pure reads stay outside
+transactions.
 That switch is **not** drop-in: the eygraber driver only accepts an async
 schema, so it needs `generateAsync = true`, and every generated query and
 every call site in `core/storage` becomes `suspend`. It is a migration to plan,
