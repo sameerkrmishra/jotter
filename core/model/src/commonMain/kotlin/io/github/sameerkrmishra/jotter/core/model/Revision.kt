@@ -11,7 +11,8 @@ package io.github.sameerkrmishra.jotter.core.model
  * - A user revision has no parent (it creates the note) or one.
  * - An automatic merge has exactly two parents, and a conflicted one names one of them as the
  *   loser and carries a [RevisionContent.Snapshot], whose text is the one shown.
- * - A revision is not its own parent.
+ * - A revision is not its own parent, and a tombstone has a parent: only an existing note can
+ *   be deleted.
  *
  * Rules that need other revisions, such as a user revision's timestamp being greater than its
  * parents', are the job of the code that creates and applies revisions.
@@ -38,6 +39,9 @@ public data class Revision(
 ) {
     init {
         require(id !in parents) { "Revision $id cannot be its own parent" }
+        require(parents.isNotEmpty() || content is RevisionContent.Snapshot) {
+            "The first revision of a note cannot be a tombstone"
+        }
         when (kind) {
             RevisionKind.User -> {
                 require(!id.isMergeHash) { "A user revision needs a UUID id, not $id" }

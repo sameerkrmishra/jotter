@@ -55,6 +55,18 @@ class RevisionTest {
     }
 
     @Test
+    fun deletingForeverNeedsAParent() {
+        val deletion = userRevision(second, setOf(first), content = RevisionContent.Tombstone)
+        assertEquals(RevisionContent.Tombstone, deletion.content)
+
+        val error =
+            assertFailsWith<IllegalArgumentException> {
+                userRevision(first, emptySet(), content = RevisionContent.Tombstone)
+            }
+        assertEquals("The first revision of a note cannot be a tombstone", error.message)
+    }
+
+    @Test
     fun cleanMergeOfTwoHeads() {
         val kind = RevisionKind.AutomaticMerge(losingParent = null)
 
@@ -130,7 +142,8 @@ class RevisionTest {
     private fun userRevision(
         id: RevisionId,
         parents: Set<RevisionId>,
-    ) = Revision(id, sampleNote, parents, timestamp, sampleDevice, RevisionKind.User, snapshot)
+        content: RevisionContent = snapshot,
+    ) = Revision(id, sampleNote, parents, timestamp, sampleDevice, RevisionKind.User, content)
 
     private fun merge(
         kind: RevisionKind.AutomaticMerge,
