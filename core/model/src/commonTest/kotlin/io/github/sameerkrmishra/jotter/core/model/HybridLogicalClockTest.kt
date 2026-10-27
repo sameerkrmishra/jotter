@@ -54,7 +54,9 @@ class HybridLogicalClockTest {
         wall.millis = -5_000
 
         assertEquals(HybridTimestamp(0, 1), clock.now())
-        assertEquals(HybridTimestamp(9_999, 1), clock.receive(HybridTimestamp(9_999, 0)))
+        // The drift is measured from zero, so 10 s is still within it.
+        clock.observe(HybridTimestamp(10_000, 0))
+        assertEquals(HybridTimestamp(10_000, 1), clock.now())
     }
 
     @Test
@@ -65,31 +67,38 @@ class HybridLogicalClockTest {
     }
 
     @Test
-    fun receivingAnEarlierTimestampFollowsTheWallClock() {
-        assertEquals(HybridTimestamp(1_000, 0), clock.receive(HybridTimestamp(200, 7)))
+    fun observingAnEarlierTimestampChangesNothing() {
+        val before = clock.now()
+
+        clock.observe(HybridTimestamp(200, 7))
+
+        assertSame(before, clock.last)
+        assertEquals(HybridTimestamp(1_000, 1), clock.now())
     }
 
     @Test
-    fun receivingALaterTimestampMovesPastIt() {
-        val remote = HybridTimestamp(3_000, 7)
+    fun observingALaterTimestampMovesTheClockPastIt() {
+        clock.observe(HybridTimestamp(3_000, 7))
 
-        assertEquals(HybridTimestamp(3_000, 8), clock.receive(remote))
-        assertEquals(HybridTimestamp(3_000, 9), clock.now())
+        assertEquals(HybridTimestamp(3_000, 7), clock.last)
+        assertEquals(HybridTimestamp(3_000, 8), clock.now())
     }
 
     @Test
-    fun receivingInTheSameMillisecondTakesTheGreaterCounter() {
-        clock.receive(HybridTimestamp(3_000, 7))
+    fun observingInTheSameMillisecondKeepsTheGreaterCounter() {
+        clock.observe(HybridTimestamp(3_000, 7))
+        clock.observe(HybridTimestamp(3_000, 2))
+        assertEquals(HybridTimestamp(3_000, 7), clock.last)
 
-        assertEquals(HybridTimestamp(3_000, 9), clock.receive(HybridTimestamp(3_000, 2)))
-        assertEquals(HybridTimestamp(3_000, 21), clock.receive(HybridTimestamp(3_000, 20)))
+        clock.observe(HybridTimestamp(3_000, 20))
+        assertEquals(HybridTimestamp(3_000, 21), clock.now())
     }
 
     @Test
     fun acceptsATimestampExactlyMaxDriftAhead() {
-        val remote = HybridTimestamp(11_000, 0)
+        clock.observe(HybridTimestamp(11_000, 0))
 
-        assertEquals(HybridTimestamp(11_000, 1), clock.receive(remote))
+        assertEquals(HybridTimestamp(11_000, 1), clock.now())
     }
 
     @Test
@@ -97,7 +106,7 @@ class HybridLogicalClockTest {
         val before = clock.now()
         val remote = HybridTimestamp(11_001, 0)
 
-        val error = assertFailsWith<ClockDriftException> { clock.receive(remote) }
+        val error = assertFailsWith<ClockDriftException> { clock.observe(remote) }
 
         assertEquals(remote, error.remote)
         assertEquals(1_000, error.wallMillis)
@@ -107,6 +116,31 @@ class HybridLogicalClockTest {
             error.message,
         )
         assertSame(before, clock.last)
+        assertEquals(HybridTimestamp(1_000, 1), clock.now())
+    }
+
+    @Test
+    fun nowAfterAnEarlierTimestampIsAnOrdinaryReading() {
+        assertEquals(HybridTimestamp(1_000, 0), clock.now(after = HybridTimestamp(500, 3)))
+        assertEquals(HybridTimestamp(1_000, 0), clock.last)
+    }
+
+    @Test
+    fun nowAfterATimestampWithinTheDriftMovesTheClockPastIt() {
+        val parent = HybridTimestamp(5_000, 2)
+
+        assertEquals(HybridTimestamp(5_000, 3), clock.now(after = parent))
+        assertEquals(HybridTimestamp(5_000, 3), clock.last)
+        assertEquals(HybridTimestamp(5_000, 4), clock.now())
+    }
+
+    @Test
+    fun nowAfterAFarFutureTimestampFollowsItWithoutMovingTheClock() {
+        // A parent written by a device whose clock was a year ahead.
+        val parent = HybridTimestamp(31_536_000_000, 0)
+
+        assertEquals(HybridTimestamp(31_536_000_000, 1), clock.now(after = parent))
+        assertEquals(HybridTimestamp(1_000, 0), clock.last)
         assertEquals(HybridTimestamp(1_000, 1), clock.now())
     }
 
@@ -125,7 +159,7 @@ class HybridLogicalClockTest {
     }
 
     @Test
-    fun everyTimestampIsGreaterThanEverythingIssuedOrAcceptedBefore() =
+    fun timestampsFollowEverythingIssuedOrObservedAndStayWithinTheDrift() =
         runTest {
             checkAll(clockOperations) { operations ->
                 val wall = FakeClock(millis = START)
@@ -134,25 +168,17 @@ class HybridLogicalClockTest {
                     val before = clock.last
                     when (operation) {
                         is Operation.MoveWallClock -> wall.millis += operation.byMillis
-
-                        Operation.LocalEvent -> {
-                            val next = clock.now()
-                            assertTrue(next > before, "$next after $before")
-                            assertIsHybridOf(next, wall.millis, before)
-                        }
-
-                        is Operation.Receive -> {
-                            val remote = operation.remoteAt(wall.millis)
-                            if (remote.physicalMillis - wall.millis > MAX_DRIFT) {
-                                assertFailsWith<ClockDriftException> { clock.receive(remote) }
-                                assertSame(before, clock.last)
-                            } else {
-                                val next = clock.receive(remote)
-                                assertTrue(next > before && next > remote, "$next: $before $remote")
-                                assertIsHybridOf(next, wall.millis, maxOf(before, remote))
-                            }
-                        }
+                        Operation.LocalEvent -> checkLocalEvent(clock, wall.millis, before)
+                        is Operation.Observe ->
+                            checkObserve(clock, wall.millis, operation.at(wall.millis))
+                        is Operation.LocalEventAfter ->
+                            checkLocalEventAfter(clock, wall.millis, operation.at(wall.millis))
                     }
+                    val physical = clock.last.physicalMillis
+                    assertTrue(
+                        physical == before.physicalMillis || physical - wall.millis <= MAX_DRIFT,
+                        "Clock jumped to ${clock.last}, too far ahead of ${wall.millis}",
+                    )
                 }
             }
         }
@@ -161,7 +187,7 @@ class HybridLogicalClockTest {
     fun timestampsRespectCausalityAcrossDevices() =
         runTest {
             // Each device's clock is skewed, but by less than the allowed drift. A device that
-            // receives an event has that event, and everything before it, in its causal past.
+            // observes an event has that event, and everything before it, in its causal past.
             checkAll(Arb.list(Arb.long(-SKEW..SKEW), 3..3), deviceSteps) { skews, steps ->
                 val walls = skews.map { FakeClock(millis = START + it) }
                 val clocks = walls.map { HybridLogicalClock(it) }
@@ -172,28 +198,72 @@ class HybridLogicalClockTest {
                     val sent = clocks[sender].now()
                     assertTrue(sent > causalPast[sender], "Device $sender: $sent")
                     causalPast[sender] = sent
-                    val received = clocks[receiver].receive(sent)
-                    assertTrue(received > maxOf(causalPast[receiver], sent), "Device $receiver")
-                    causalPast[receiver] = received
+                    clocks[receiver].observe(sent)
+                    causalPast[receiver] = maxOf(causalPast[receiver], sent)
+                }
+                clocks.forEachIndexed { device, clock ->
+                    assertTrue(clock.now() > causalPast[device], "Device $device")
                 }
             }
         }
 
-    // The timestamp is the wall clock if that is ahead of everything known, and otherwise the
-    // smallest step past the greatest known timestamp: an HLC never runs ahead needlessly.
-    private fun assertIsHybridOf(
-        next: HybridTimestamp,
+    private fun checkLocalEvent(
+        clock: HybridLogicalClock,
+        wallMillis: Long,
+        before: HybridTimestamp,
+    ) {
+        val next = clock.now()
+        assertTrue(next > before, "$next after $before")
+        assertEquals(hybridOf(wallMillis, before), next)
+        assertEquals(next, clock.last)
+    }
+
+    private fun checkObserve(
+        clock: HybridLogicalClock,
+        wallMillis: Long,
+        remote: HybridTimestamp,
+    ) {
+        val before = clock.last
+        if (remote.physicalMillis - wallMillis > MAX_DRIFT) {
+            assertFailsWith<ClockDriftException> { clock.observe(remote) }
+            assertSame(before, clock.last)
+        } else {
+            clock.observe(remote)
+            assertEquals(maxOf(before, remote), clock.last)
+        }
+    }
+
+    private fun checkLocalEventAfter(
+        clock: HybridLogicalClock,
+        wallMillis: Long,
+        parent: HybridTimestamp,
+    ) {
+        val before = clock.last
+        val next = clock.now(after = parent)
+        assertTrue(next > parent && next > before, "$next after $parent and $before")
+        if (parent.physicalMillis - wallMillis <= MAX_DRIFT) {
+            assertEquals(hybridOf(wallMillis, maxOf(before, parent)), next)
+            assertEquals(next, clock.last)
+        } else {
+            // The clock ticks as if there were no parent; the result jumps past the parent only
+            // if the clock is not already ahead of it.
+            val reading = hybridOf(wallMillis, before)
+            assertEquals(reading, clock.last)
+            assertEquals(if (parent >= reading) parent.successor() else reading, next)
+        }
+    }
+
+    // The wall clock if that is ahead of everything known, and otherwise the smallest step past
+    // the greatest known timestamp: an HLC never runs ahead needlessly.
+    private fun hybridOf(
         wallMillis: Long,
         greatestKnown: HybridTimestamp,
-    ) {
-        val expected =
-            if (wallMillis > greatestKnown.physicalMillis) {
-                HybridTimestamp(wallMillis, 0)
-            } else {
-                greatestKnown.successor()
-            }
-        assertEquals(expected, next)
-    }
+    ): HybridTimestamp =
+        if (wallMillis > greatestKnown.physicalMillis) {
+            HybridTimestamp(wallMillis, 0)
+        } else {
+            greatestKnown.successor()
+        }
 
     private sealed interface Operation {
         data class MoveWallClock(
@@ -202,12 +272,20 @@ class HybridLogicalClockTest {
 
         data object LocalEvent : Operation
 
-        data class Receive(
+        /** Observing a remote timestamp [offsetMillis] from the wall clock. */
+        data class Observe(
             val offsetMillis: Long,
             val counter: Int,
         ) : Operation {
-            fun remoteAt(wallMillis: Long) =
-                HybridTimestamp((wallMillis + offsetMillis).coerceAtLeast(0), counter)
+            fun at(wallMillis: Long) = remoteAt(wallMillis, offsetMillis, counter)
+        }
+
+        /** Editing a revision whose timestamp is [offsetMillis] from the wall clock. */
+        data class LocalEventAfter(
+            val offsetMillis: Long,
+            val counter: Int,
+        ) : Operation {
+            fun at(wallMillis: Long) = remoteAt(wallMillis, offsetMillis, counter)
         }
     }
 
@@ -216,15 +294,23 @@ class HybridLogicalClockTest {
         const val MAX_DRIFT = 1_000L
         const val SKEW = 3_600_000L
 
-        // Small moves, often backwards; remote timestamps behind, ahead and beyond the drift.
+        fun remoteAt(
+            wallMillis: Long,
+            offsetMillis: Long,
+            counter: Int,
+        ) = HybridTimestamp((wallMillis + offsetMillis).coerceAtLeast(0), counter)
+
+        // Offsets behind the wall clock, ahead of it and beyond the drift.
+        val offsets = Arb.long(-2 * MAX_DRIFT..2 * MAX_DRIFT)
+
+        // Small moves of the wall clock, often backwards, between events.
         val clockOperations: Arb<List<Operation>> =
             Arb.list(
                 Arb.choice(
                     Arb.long(-50L..50L).map { Operation.MoveWallClock(it) },
                     Arb.constant(Operation.LocalEvent),
-                    Arb.bind(Arb.long(-2 * MAX_DRIFT..2 * MAX_DRIFT), Arb.int(0..3)) { o, c ->
-                        Operation.Receive(o, c)
-                    },
+                    Arb.bind(offsets, Arb.int(0..3)) { o, c -> Operation.Observe(o, c) },
+                    Arb.bind(offsets, Arb.int(0..3)) { o, c -> Operation.LocalEventAfter(o, c) },
                 ),
                 0..50,
             )
