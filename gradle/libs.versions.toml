@@ -1,6 +1,10 @@
 [versions]
 # AGP 9.4 requires Gradle 9.x and provides the Android-KMP library plugin (jotter.kmp-library).
 agp = "9.4.1"
+# sqlite-bundled 2.7.1 ships SQLite 3.50.1 on Android, the JVM and linuxX64 (ADR-0002, ADR-0006).
+androidx-sqlite = "2.7.1"
+androidx-test-runner = "1.7.0"
+atomicfu = "0.33.0"
 kotlin = "2.4.21"
 # detekt 1.23.x embeds Kotlin 2.0.21 and cannot analyse Kotlin 2.1+ sources. 2.0.0-alpha.6
 # embeds Kotlin 2.4.10, the only detekt release that matches our compiler.
@@ -10,6 +14,8 @@ kotest = "6.2.6"
 kotlinx-coroutines = "1.11.0"
 kover = "0.9.11"
 ktlint-gradle = "14.2.0"
+okio = "3.18.2"
+sqldelight = "2.4.1"
 
 [libraries]
 # Gradle plugins, consumed by build-logic/ as regular dependencies.
@@ -19,7 +25,17 @@ kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", ve
 kover-gradlePlugin = { module = "org.jetbrains.kotlinx:kover-gradle-plugin", version.ref = "kover" }
 ktlint-gradlePlugin = { module = "org.jlleitschuh.gradle:ktlint-gradle", version.ref = "ktlint-gradle" }
 
+# Libraries.
+androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidx-sqlite" }
+androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "androidx-sqlite" }
+atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
+sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
+
 # Test libraries.
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 # runTest, to call Kotest's suspending property checks from kotlin.test.
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
+sqldelight-coroutines-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
