@@ -90,6 +90,7 @@ jotter/
 ├── core/
 │   ├── model/          # Note, Tag, ids, hybrid logical clock (pure Kotlin)
 │   ├── merge/          # three-way Markdown merge (diff3) (pure Kotlin)
+│   ├── sqlite/         # SQLDelight driver over the bundled SQLite (WAL, locking)
 │   ├── storage/        # SQLDelight schema, repositories, FTS search
 │   ├── sync/           # revision DAG, change segments, SyncEngine
 │   └── logging/        # thin wrapper over Kermit + rotating file sink

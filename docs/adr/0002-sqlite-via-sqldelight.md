@@ -48,8 +48,9 @@ and on Android emulators at API 26 and API 36. The platform SQLite failed with
 `no such module: fts5` on both API levels. The adapter and multi-process rules
 below are not proven yet; M1 tests them.
 
-SQLDelight has no driver for the androidx `SQLiteDriver` API, so `core/storage`
-contains our own synchronous `SqlDriver` adapter over androidx
+SQLDelight has no driver for the androidx `SQLiteDriver` API, so `core/sqlite`
+(its own small module, so `core/storage` stays focused on schema and
+repositories) contains our own synchronous `SqlDriver` adapter over androidx
 `SQLiteConnection`, with synchronous code generation (`generateAsync = false`).
 The spike version is 109 lines and is not production-ready: it shares one
 connection with no lock, and its listener map is not synchronised. The M1
