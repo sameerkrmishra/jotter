@@ -19,7 +19,8 @@ internal const val BUSY_TIMEOUT_MILLIS = 5_000
 /**
  * Opens the SQLite database file at [path] with the bundled SQLite build (the same one on Android,
  * the JVM and Linux), creating the file if it does not exist, and returns a SQLDelight driver
- * for it. Close the driver when done: closing checkpoints the WAL, so the file can be copied.
+ * for it. Close the driver when done: closing checkpoints the WAL. Once the last connection to
+ * the file (in any process) has closed, the file can be copied on its own.
  *
  * The connection is configured with:
  * - `journal_mode = WAL`, so readers and a writer in different processes do not block each other;

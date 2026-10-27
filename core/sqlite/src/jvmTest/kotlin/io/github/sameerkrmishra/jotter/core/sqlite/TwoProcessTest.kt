@@ -81,7 +81,11 @@ class TwoProcessTest {
     }
 
     internal companion object {
-        /** How long the child holds its first transaction open. */
+        /**
+         * How long the child holds its first transaction open. If the child is stalled (a slow
+         * machine), the concurrent phase may overlap less and prove less, but the test cannot
+         * fail falsely: every write must still succeed.
+         */
         val HOLD = 500.milliseconds
         const val ROWS = 50
         const val TIMEOUT_SECONDS = 60L
