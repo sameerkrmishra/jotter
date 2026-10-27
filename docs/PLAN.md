@@ -349,6 +349,9 @@ codec. Documented as ADR-0007 in M6.
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.
+  TODO: an emulator job (API 26 and 36) on pushes to `main` or nightly, running
+  `connectedAndroidDeviceTest`. Until then the Android device tests of
+  `core/sqlite` run by hand.
 - **Reproducible F-Droid builds:** no Google Play Services, no proprietary
   dependencies.
 
@@ -388,7 +391,7 @@ Tasks inside a milestone that touch different modules run in parallel.
 | M2 | Linux desktop + CLI + Keep import | `shared-ui` (note grid, editor with Markdown preview, tag filter, search, archive and trash views), `app/desktop`, `app/cli`, `keep-import`, `markdown-export`. Measure `jotter add` startup on the JVM ([ADR-0006](adr/0006-native-compatible-shared-modules.md)) | **Keep notes can be imported and the app used daily on Linux**. `jotter add` meets ADR-0006's 200 ms threshold, or a native CLI is decided in a new ADR |
 | M3 | Sync engine | `core/merge` (diff3), `core/sync`, `backend/api` + contract tests, `backend/localfolder`, conflict UI | Property-based tests: N simulated devices with random offline edits always converge |
 | M4 | WebDAV + PC hub | `backend/webdav` (tested against a containerised WebDAV server), `server` peer endpoint, backend management UI (add, remove, status, last sync) | Desktop ↔ mailbox.org ↔ second desktop converge |
-| M5 | Android | `app/android`, Share-to target, WorkManager sync, F-Droid metadata and reproducible build | Phone and PC converge over Tailscale and over WebDAV |
+| M5 | Android | `app/android`, Share-to target, WorkManager sync, F-Droid metadata and reproducible build, CI emulator job (API 26 + 36) running `connectedAndroidDeviceTest` (TODO from §8) | Phone and PC converge over Tailscale and over WebDAV |
 | M6 | v1.0 hardening | ADR-0007 and ADR-0008, debug log export, error states, backup/restore docs, user guide, release | Tagged v1.0 on GitHub, APK + AppImage/Flatpak |
 
 **Later:** web app, E2E encryption, multi-user + login, Dropbox/Drive/S3,
