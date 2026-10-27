@@ -192,14 +192,16 @@ merges them:
 | Field | Rule |
 |---|---|
 | `body` and `title` | Three-way line merge (diff3) against the common ancestor revision. Non-overlapping edits merge cleanly, e.g. ticking item 3 on the phone and adding item 7 on the PC. Overlapping edits → **conflict** |
-| `tags` | Set merge: tags added on either side are kept, tags removed on either side are removed. If one side adds a tag the other side removed, the add wins (OR-set semantics) |
-| `isPinned`, `state` | Last writer wins by stamp order (below). An automatic merge carries the winning value with that value's original stamp, not its own |
+| `tags` | Set merge: tags added on either side are kept, tags removed on either side are removed. If one side adds a tag the other side removed, the add wins (OR-set semantics). Tags compare exactly and keep their case |
+| `isPinned`, `state` | Last writer wins by stamp order (below). Each field's stamp changes only when a revision writes that field. An automatic merge carries the winning value with that value's original stamp, not its own |
 | Delete vs. edit | The edit wins and the note comes back in the trash (state `TRASHED`), so nothing is silently lost |
 
 **Stamps:** every revision has an HLC timestamp and a device id. Revisions are
 ordered by HLC timestamp, then device id, then revision id, with ids compared
 as unsigned byte strings. This one order is used wherever this section says
-"higher" or "last writer".
+"higher" or "last writer". A device's clock does not take on a received
+timestamp more than one day ahead of its wall clock, but a user revision is
+always stamped above its parent (ADR-0003, refinements).
 
 **Two kinds of revision:** a *user revision* (edit, pin, delete, conflict
 resolution) gets the device's fresh HLC timestamp, strictly greater than its

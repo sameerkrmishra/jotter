@@ -20,7 +20,7 @@ stay small, stable and fully tested.
 | `TagName` | A normalised tag (rules below) |
 | `NoteState` | `ACTIVE`, `ARCHIVED` or `TRASHED`. "Delete forever" is a tombstone revision, not a state |
 | `HybridTimestamp` | Wall-clock millis plus a logical counter |
-| `HybridLogicalClock` | Issues `HybridTimestamp`s for local events (`now`) and received ones (`receive`) |
+| `HybridLogicalClock` | Issues `HybridTimestamp`s for local events (`now`, optionally `after` a parent's timestamp) and records remote ones (`observe`) |
 | `Stamp` | The one total order of ADR-0003: timestamp, then device id, then revision id |
 | `Stamped<T>` | A last-writer-wins value with the stamp of the revision that wrote it |
 | `Revision` | One immutable version of a note in its DAG, with `RevisionKind` (user or automatic merge, possibly conflicted) and `RevisionContent` (a full `Snapshot` or a `Tombstone`) |
@@ -28,23 +28,29 @@ stay small, stable and fully tested.
 
 ## Decisions
 
-- **Tags** are trimmed, inner whitespace runs become one space, and they are
-  lowercased; 1 to 100 characters, no control characters. Storing one
-  spelling keeps tag sets plain sets for the OR-set merge, with no rule needed
-  for which spelling wins. Google Keep labels map cleanly because Keep does not
-  allow two labels that differ only in case.
+- **Tags** keep their case and compare exactly. Leading and trailing
+  whitespace is trimmed and inner runs become one space, using a fixed list of
+  Unicode `White_Space` characters; 1 to 100 characters, no control (Cc)
+  characters. Nothing depends on platform Unicode tables (no case folding, no
+  `Char.isWhitespace`), so every device derives the same tag sets and merge
+  hashes. NFC is not applied (accepted risk). Decoders use
+  `TagName.fromNormalised`, which rejects text that is not already normalised
+  instead of rewriting it. Google Keep labels map one to one.
 - **Revision ids** of both kinds share one hex text form. Hex text order is
   exactly unsigned byte order, so ids compare as strings, and the length tells
-  the kind apart.
-- **Clock drift:** `HybridLogicalClock.receive` rejects a timestamp more than
+  the kind apart. A user revision id is therefore written without dashes,
+  while a `NoteId` or `DeviceId` keeps the dashed UUID form; this is
+  intentional.
+- **Clock drift:** `HybridLogicalClock.observe` rejects a timestamp more than
   `maxDrift` (default one day) ahead of the wall clock with
-  `ClockDriftException` and leaves the clock unchanged. Accepting it would push
-  every synced clock into the future for good; clamping it would let a later
-  edit sort before the revision it edits. The revision itself can still be
-  stored; the caller reports the clock problem.
-- **The clock is not persistent or thread-safe.** Its owner stores `last` and
-  passes it back on start, and serialises calls (for example in the database
-  write transaction).
+  `ClockDriftException` and leaves the clock unchanged, so one wrong clock
+  cannot push every synced clock into the future. The revision is still
+  stored. An edit on top of it uses `now(after = parentTimestamp)`, which is
+  always above the parent without moving the clock that far.
+- **The clock is not persistent or thread-safe.** The app and the CLI share
+  one database and device id, so `last` is read and written inside the write
+  transaction that stores the stamped revisions; the simplest way is a clock
+  per write transaction, built from the persisted value.
 - `generateV4()` and `generateV7()` from `kotlin.uuid` are still experimental
   in Kotlin 2.4; their opt-ins are confined to the id factories.
 
