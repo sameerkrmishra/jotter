@@ -145,6 +145,20 @@ class HybridLogicalClockTest {
     }
 
     @Test
+    fun nowAfterACorruptGreatestTimestampFailsClearlyAndStaysUnchanged() {
+        val before = clock.now()
+
+        val error =
+            assertFailsWith<IllegalArgumentException> { clock.now(after = HybridTimestamp.MAX) }
+
+        assertEquals(
+            "No timestamp follows ${HybridTimestamp.MAX}; it is likely corrupt",
+            error.message,
+        )
+        assertSame(before, clock.last)
+    }
+
+    @Test
     fun defaultsToOneDayOfDrift() {
         assertEquals(HybridLogicalClock.DEFAULT_MAX_DRIFT, HybridLogicalClock(wall).maxDrift)
     }
