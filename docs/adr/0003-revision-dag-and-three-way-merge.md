@@ -96,6 +96,25 @@ Further details:
   choice of ancestor is deferred to M3.
 - The merge code lives in `core/merge` and is pure Kotlin with no I/O.
 
+**Refinements (M1, 2026-10-27).** These make the rules above precise for
+`core/model`. They do not change the decision.
+
+- A stamp, as a comparable value, includes the revision id: (HLC timestamp,
+  device id, revision id). An automatic merge's stamp is the timestamp and
+  device id of its greater parent with the merge's own id.
+- A per-field LWW stamp (`isPinned`, `state`) changes only when a revision
+  writes that field. A user revision that edits only the body keeps the
+  stamps it inherited, so it cannot beat a concurrent pin it never touched.
+- Clock drift: a device's HLC does not take on a received timestamp more
+  than one day ahead of its wall clock. The revision is still stored and
+  the clock problem is reported. A user revision on top of such a parent
+  still gets a timestamp just above the parent's, so "strictly greater than
+  its parents'" always holds; the far-future time spreads only through that
+  note's revisions, not to the device's clock.
+- Tags are identified exactly and keep their case. Normalisation (trimming
+  and collapsing a fixed list of whitespace characters) uses no Unicode
+  tables, so every platform derives the same tag sets and merge hashes.
+
 ## Consequences
 
 ### Positive
