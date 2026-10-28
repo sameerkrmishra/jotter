@@ -157,6 +157,7 @@ Each module has one job and a small public API. Internal details are marked
 ```kotlin
 data class Note(
     val id: NoteId,             // UUIDv7: sortable, generated offline
+    val revisionId: RevisionId, // the revision it was materialised from
     val title: String,          // may be empty (Keep style)
     val body: String,           // Markdown
     val tags: Set<TagName>,

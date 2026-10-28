@@ -8,6 +8,8 @@ import kotlin.time.Instant
  * A note deleted forever has no [Note], only a [RevisionContent.Tombstone].
  *
  * @property id The note's identity.
+ * @property revisionId The revision this note was materialised from. An editor passes it back
+ *   with an edit, to say which revision the edit is based on.
  * @property title The title, possibly empty (as in Google Keep).
  * @property body The Markdown body.
  * @property tags The tags.
@@ -17,10 +19,11 @@ import kotlin.time.Instant
  *   first revision. Like any HLC time it may be ahead of the creating device's wall clock,
  *   for example after that device synced with one whose clock runs ahead. For display only;
  *   it plays no part in merging.
- * @property updatedAt The timestamp of the revision the note was materialised from.
+ * @property updatedAt The timestamp of the revision [revisionId] names.
  */
 public data class Note(
     val id: NoteId,
+    val revisionId: RevisionId,
     val title: String,
     val body: String,
     val tags: Set<TagName>,

@@ -9,6 +9,7 @@ class NoteTest {
     private val note =
         Note(
             id = sampleNote,
+            revisionId = RevisionId.parse("0192e6f08b4a7c3e9d2f1a2b3c4d5e6f"),
             title = "",
             body = "buy milk",
             tags = setOf(TagName.parse("Shopping")),
