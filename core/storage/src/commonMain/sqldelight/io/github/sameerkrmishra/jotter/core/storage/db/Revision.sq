@@ -1,0 +1,116 @@
+-- Every revision of every note (ADR-0003): user revisions and automatic merges, snapshots and
+-- tombstones. Rows are never updated or deleted. Ids are stored in their canonical text form,
+-- whose text order is their byte order, so ORDER BY gives Stamp order.
+CREATE TABLE revision (
+  id TEXT NOT NULL PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  hlc_physical INTEGER NOT NULL CHECK (hlc_physical >= 0),
+  hlc_counter INTEGER NOT NULL CHECK (hlc_counter BETWEEN 0 AND 2147483647),
+  device_id TEXT NOT NULL,
+  -- RevisionKind: 0 for a user revision, 1 for an automatic merge.
+  is_merge INTEGER AS kotlin.Boolean NOT NULL CHECK (is_merge IN (0, 1)),
+  -- AutomaticMerge.losingParent: set only for a conflicted merge, which is never a tombstone.
+  losing_parent TEXT CHECK (losing_parent IS NULL OR (is_merge = 1 AND is_tombstone = 0)),
+  is_tombstone INTEGER AS kotlin.Boolean NOT NULL CHECK (is_tombstone IN (0, 1)),
+  -- The Snapshot: every column below is set for a snapshot and NULL for a tombstone.
+  title TEXT,
+  body TEXT,
+  pinned INTEGER AS kotlin.Boolean CHECK (pinned IN (0, 1)),
+  pinned_hlc_physical INTEGER CHECK (pinned_hlc_physical >= 0),
+  pinned_hlc_counter INTEGER CHECK (pinned_hlc_counter BETWEEN 0 AND 2147483647),
+  pinned_device_id TEXT,
+  pinned_revision_id TEXT,
+  state TEXT CHECK (state IN ('ACTIVE', 'ARCHIVED', 'TRASHED')),
+  state_hlc_physical INTEGER CHECK (state_hlc_physical >= 0),
+  state_hlc_counter INTEGER CHECK (state_hlc_counter BETWEEN 0 AND 2147483647),
+  state_device_id TEXT,
+  state_revision_id TEXT,
+  CHECK (
+    CASE is_tombstone
+      WHEN 0 THEN
+        title IS NOT NULL AND body IS NOT NULL AND
+        pinned IS NOT NULL AND pinned_hlc_physical IS NOT NULL AND
+        pinned_hlc_counter IS NOT NULL AND pinned_device_id IS NOT NULL AND
+        pinned_revision_id IS NOT NULL AND
+        state IS NOT NULL AND state_hlc_physical IS NOT NULL AND
+        state_hlc_counter IS NOT NULL AND state_device_id IS NOT NULL AND
+        state_revision_id IS NOT NULL
+      ELSE
+        title IS NULL AND body IS NULL AND
+        pinned IS NULL AND pinned_hlc_physical IS NULL AND
+        pinned_hlc_counter IS NULL AND pinned_device_id IS NULL AND
+        pinned_revision_id IS NULL AND
+        state IS NULL AND state_hlc_physical IS NULL AND
+        state_hlc_counter IS NULL AND state_device_id IS NULL AND
+        state_revision_id IS NULL
+    END
+  )
+) WITHOUT ROWID;
+
+CREATE INDEX revision_by_note ON revision(note_id);
+
+-- A revision's parents, one row each. parent_id has no foreign key: in M3 a revision can arrive
+-- by sync before its parent.
+CREATE TABLE revision_parent (
+  revision_id TEXT NOT NULL REFERENCES revision(id),
+  parent_id TEXT NOT NULL,
+  PRIMARY KEY (revision_id, parent_id)
+) WITHOUT ROWID;
+
+CREATE INDEX revision_parent_by_parent ON revision_parent(parent_id);
+
+-- A snapshot's tags, one row each.
+CREATE TABLE revision_tag (
+  revision_id TEXT NOT NULL REFERENCES revision(id),
+  tag TEXT NOT NULL,
+  PRIMARY KEY (revision_id, tag)
+) WITHOUT ROWID;
+
+insertSnapshot:
+INSERT INTO revision(
+  id, note_id, hlc_physical, hlc_counter, device_id, is_merge, losing_parent, is_tombstone,
+  title, body,
+  pinned, pinned_hlc_physical, pinned_hlc_counter, pinned_device_id, pinned_revision_id,
+  state, state_hlc_physical, state_hlc_counter, state_device_id, state_revision_id
+) VALUES (
+  :id, :noteId, :hlcPhysical, :hlcCounter, :deviceId, :isMerge, :losingParent, 0,
+  :title, :body,
+  :pinned, :pinnedHlcPhysical, :pinnedHlcCounter, :pinnedDeviceId, :pinnedRevisionId,
+  :state, :stateHlcPhysical, :stateHlcCounter, :stateDeviceId, :stateRevisionId
+);
+
+insertTombstone:
+INSERT INTO revision(
+  id, note_id, hlc_physical, hlc_counter, device_id, is_merge, losing_parent, is_tombstone
+) VALUES (:id, :noteId, :hlcPhysical, :hlcCounter, :deviceId, :isMerge, :losingParent, 1);
+
+insertParent:
+INSERT INTO revision_parent(revision_id, parent_id) VALUES (:revisionId, :parentId);
+
+insertTag:
+INSERT INTO revision_tag(revision_id, tag) VALUES (:revisionId, :tag);
+
+selectRevision:
+SELECT * FROM revision WHERE id = :id;
+
+selectParents:
+SELECT parent_id FROM revision_parent WHERE revision_id = :revisionId;
+
+selectTags:
+SELECT tag FROM revision_tag WHERE revision_id = :revisionId;
+
+-- In Stamp order: timestamp, then device id, then revision id.
+selectRevisionsOfNote:
+SELECT * FROM revision
+WHERE note_id = :noteId
+ORDER BY hlc_physical, hlc_counter, device_id, id;
+
+selectParentsOfNote:
+SELECT revision_parent.revision_id, revision_parent.parent_id
+FROM revision_parent JOIN revision ON revision.id = revision_parent.revision_id
+WHERE revision.note_id = :noteId;
+
+selectTagsOfNote:
+SELECT revision_tag.revision_id, revision_tag.tag
+FROM revision_tag JOIN revision ON revision.id = revision_tag.revision_id
+WHERE revision.note_id = :noteId;

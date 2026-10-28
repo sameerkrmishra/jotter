@@ -1,0 +1,69 @@
+-- The current state of every note that is not deleted forever, materialised from its head
+-- revision: what the UI and search read. fts_rowid exists only because an FTS5 index with
+-- external content needs an integer key.
+CREATE TABLE note (
+  fts_rowid INTEGER PRIMARY KEY,
+  id TEXT NOT NULL UNIQUE,
+  revision_id TEXT NOT NULL REFERENCES revision(id),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_pinned INTEGER AS kotlin.Boolean NOT NULL CHECK (is_pinned IN (0, 1)),
+  state TEXT NOT NULL CHECK (state IN ('ACTIVE', 'ARCHIVED', 'TRASHED')),
+  -- The first revision's physical time. Set when the row is inserted, never updated.
+  created_at_millis INTEGER NOT NULL,
+  updated_hlc_physical INTEGER NOT NULL,
+  updated_hlc_counter INTEGER NOT NULL
+);
+
+-- The list order: pinned first, then the most recently updated.
+CREATE INDEX note_by_list_order
+  ON note(state, is_pinned DESC, updated_hlc_physical DESC, updated_hlc_counter DESC);
+
+-- The materialised tags. The tag list is a GROUP BY over this table; there is no tag table.
+CREATE TABLE note_tag (
+  note_id TEXT NOT NULL REFERENCES note(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (note_id, tag)
+) WITHOUT ROWID;
+
+CREATE INDEX note_tag_by_tag ON note_tag(tag, note_id);
+
+-- Inserts the note, or updates every column but fts_rowid and created_at_millis. A new row's
+-- creation time is the earliest revision's: a user revision is stamped after its parents and an
+-- automatic merge copies a parent's timestamp, so that is the first revision's.
+upsertNote:
+INSERT INTO note(
+  id, revision_id, title, body, is_pinned, state, created_at_millis,
+  updated_hlc_physical, updated_hlc_counter
+) VALUES (
+  :id, :revisionId, :title, :body, :isPinned, :state,
+  (SELECT min(hlc_physical) FROM revision WHERE note_id = :id),
+  :updatedPhysical, :updatedCounter
+)
+ON CONFLICT (id) DO UPDATE SET
+  revision_id = excluded.revision_id,
+  title = excluded.title,
+  body = excluded.body,
+  is_pinned = excluded.is_pinned,
+  state = excluded.state,
+  updated_hlc_physical = excluded.updated_hlc_physical,
+  updated_hlc_counter = excluded.updated_hlc_counter;
+
+-- Its note_tag rows go with it (ON DELETE CASCADE).
+deleteNote:
+DELETE FROM note WHERE id = :id;
+
+deleteTags:
+DELETE FROM note_tag WHERE note_id = :noteId;
+
+insertTag:
+INSERT INTO note_tag(note_id, tag) VALUES (:noteId, :tag);
+
+-- The tags are joined with U+001F, which a tag cannot contain (it is a control character).
+selectNote:
+SELECT
+  id, revision_id, title, body, is_pinned, state, created_at_millis,
+  updated_hlc_physical, updated_hlc_counter,
+  (SELECT group_concat(tag, char(31)) FROM note_tag WHERE note_id = note.id) AS tags
+FROM note
+WHERE id = :id;
