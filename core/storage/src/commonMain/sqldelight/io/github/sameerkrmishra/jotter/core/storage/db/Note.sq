@@ -67,3 +67,23 @@ SELECT
   (SELECT group_concat(tag, char(31)) FROM note_tag WHERE note_id = note.id) AS tags
 FROM note
 WHERE id = :id;
+
+-- The list order: pinned first, then the most recently updated, then by id, so that it is total.
+-- :tag is null for every tag.
+selectNotes:
+SELECT
+  id, revision_id, title, body, is_pinned, state, created_at_millis,
+  updated_hlc_physical, updated_hlc_counter,
+  (SELECT group_concat(tag, char(31)) FROM note_tag WHERE note_id = note.id) AS tags
+FROM note
+WHERE state = :state
+  AND (:tag IS NULL OR id IN (SELECT note_id FROM note_tag WHERE tag = :tag))
+ORDER BY is_pinned DESC, updated_hlc_physical DESC, updated_hlc_counter DESC, id;
+
+-- The tags of notes that are not in the trash, with how many such notes have each.
+selectTagCounts:
+SELECT note_tag.tag, count(*) AS note_count
+FROM note_tag JOIN note ON note.id = note_tag.note_id
+WHERE note.state != 'TRASHED'
+GROUP BY note_tag.tag
+ORDER BY note_tag.tag;

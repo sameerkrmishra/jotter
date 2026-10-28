@@ -127,3 +127,5 @@ val revisions: Arb<Revision> =
             }
         Revision(id, noteIds.bind(), parents, timestamps.bind(), deviceIds.bind(), kind, content)
     }
+
+val sampleDevice: DeviceId = DeviceId.parse("5f0c2a9e-1b3d-4e6f-8a7b-9c0d1e2f3a4b")

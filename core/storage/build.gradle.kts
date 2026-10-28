@@ -28,7 +28,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.core.model)
+            // Flow appears in NoteService's API.
+            api(libs.kotlinx.coroutines.core)
             implementation(projects.core.sqlite)
+            implementation(libs.sqldelight.coroutines.extensions)
         }
         commonTest.dependencies {
             implementation(libs.kotest.property)
