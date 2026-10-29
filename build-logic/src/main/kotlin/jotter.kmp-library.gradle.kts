@@ -9,10 +9,17 @@ plugins {
     id("com.android.lint")
 }
 
+// Lint checks that compare our dependency versions with the latest releases online. Their result
+// changes whenever upstream ships a release, so the same commit would pass today and fail
+// tomorrow. Dependency updates are a deliberate change, not a lint error.
+val onlineVersionChecks =
+    setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable")
+
 // Lint options for the JVM target. The Android target has its own block below.
 lint {
     warningsAsErrors = true
     abortOnError = true
+    disable += onlineVersionChecks
 }
 
 kotlin {
@@ -41,6 +48,7 @@ kotlin {
         lint {
             warningsAsErrors = true
             abortOnError = true
+            disable += onlineVersionChecks
         }
     }
 
