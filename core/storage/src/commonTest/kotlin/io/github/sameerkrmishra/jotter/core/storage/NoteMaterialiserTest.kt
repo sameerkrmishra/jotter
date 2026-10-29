@@ -145,6 +145,8 @@ class NoteMaterialiserTest {
             assertEquals(Instant.fromEpochMilliseconds(1_000), db.readNote(noteId)?.createdAt)
         }
 
+    // The two queries below mirror selectRevisionsOfNote (Revision.sq) and the created_at_millis
+    // subquery of upsertNote (Note.sq); keep them in sync when those statements change.
     @Test
     fun theRevisionIndexServesHistoryAndTheCreationTime() =
         withMaterialiser { _, _, _, driver ->

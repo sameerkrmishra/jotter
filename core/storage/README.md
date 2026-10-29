@@ -119,9 +119,11 @@ Encoding:
   encode an unpaired surrogate, and the bundled build is not consistent
   about it: on the JVM a lone surrogate turns into another character (a high
   one swallows the character after it), on Native into U+FFFD. U+FFFE and
-  U+FFFF come back as U+FFFD on both. A U+FEFF that starts the text is
-  dropped as a byte order mark on the JVM and becomes U+FFFD on Native, and
-  on Native text ends at the first NUL. `NoteService` replaces all of these
+  U+FFFF elsewhere in the text come back as U+FFFD on both. At the start of
+  the text, both platforms drop U+FEFF as a byte order mark, and treat
+  U+FFFE as a byte-swapped one: it is dropped and the rest of the text comes
+  back byte-swapped. On Native text ends at the first NUL. `NoteService`
+  replaces all of these
   in titles and bodies with U+FFFD, the revision store rejects them, and
   `TagName` does not allow them, so nothing is stored that does not read
   back equal on every platform. U+FEFF elsewhere round-trips.
@@ -135,11 +137,11 @@ list order, filtered by state and tag like `list`.
 - **User text is never FTS5 syntax.** The query is split at whitespace
   (`TagName.WHITESPACE`, and NUL); each word becomes a quoted string with `"`
   doubled, the words are ANDed, and the last one is a prefix (`"wor"*`), so
-  results follow typing. The query is split only at whitespace, so a word
+  results follow typing. Because nothing else splits it, a word
   with punctuation inside (`e-mail`, `bread,milk`) is an FTS5 phrase: its
   parts must be adjacent and in order. A query without words gives no hits,
-  and no input throws (a property test feeds arbitrary strings, FTS5 operators, quotes,
-  emoji, NUL and lone surrogates). NUL must be a separator: FTS5 reads the
+  and no input throws (a property test feeds arbitrary strings, FTS5
+  operators, quotes, emoji, NUL and lone surrogates). NUL must be a separator: FTS5 reads the
   query as a C string, so a NUL inside a quoted word is a syntax error.
 - **Tokenizer:** `unicode61 remove_diacritics 2`, so case and accents fold
   (`cafe` finds `Café`). `prefix = '2 3'` adds prefix indexes, because every

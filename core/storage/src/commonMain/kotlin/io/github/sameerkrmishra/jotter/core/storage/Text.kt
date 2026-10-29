@@ -11,8 +11,10 @@ private const val REPLACEMENT_CHARACTER = '\uFFFD'
  * SQLite keeps text as UTF-8, which cannot encode an unpaired surrogate, and the bundled SQLite
  * build does not agree with itself across platforms: on the JVM a lone surrogate turns into some
  * other character (a high one swallows the character after it), on Native into U+FFFD. U+FFFE
- * and U+FFFF come back as U+FFFD on both. A leading U+FEFF is dropped as a byte order mark on the
- * JVM and becomes U+FFFD on Native, and on Native text ends at the first NUL. Text is therefore
+ * and U+FFFF elsewhere in the text come back as U+FFFD on both. At the start of the text, both
+ * platforms read U+FEFF as a byte order mark and drop it, and read U+FFFE as a byte-swapped one:
+ * it is dropped and the rest of the text comes back byte-swapped. On Native text also ends at
+ * the first NUL. Text is therefore
  * made storable before it reaches the database, so that what is stored reads back equal on every
  * platform. U+FEFF anywhere but at the start round-trips and is kept.
  */

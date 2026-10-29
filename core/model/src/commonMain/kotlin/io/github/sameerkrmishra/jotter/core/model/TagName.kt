@@ -18,7 +18,8 @@ import kotlin.jvm.JvmInline
  *    contain a control character (Unicode category Cc: U+0000-U+001F, U+007F-U+009F), must
  *    not contain an unpaired surrogate, which has no UTF-8 encoding, must not contain the
  *    noncharacters U+FFFE or U+FFFF, which the bundled SQLite build reads back as U+FFFD, and
- *    must not start with U+FEFF, which it drops as a byte order mark.
+ *    must not start with U+FEFF, which it drops as a byte order mark. (U+FFFE, which it would
+ *    read as a byte-swapped byte order mark at the start, is already excluded.)
  *
  * Unicode normalisation (NFC) is not applied, so the same word typed with combining accents
  * and with precomposed letters gives two tags. That risk is accepted. To limit duplicates, the

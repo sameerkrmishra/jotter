@@ -37,8 +37,8 @@ import kotlin.time.Instant
  * stamps it with its own [Revision.stamp], and every other revision carries the stamp over
  * unchanged.
  *
- * Text is stored as given, except that the characters SQLite cannot store unchanged (unpaired
- * surrogates, U+FFFE and U+FFFF) become U+FFFD.
+ * Text is stored as given, except that the characters SQLite cannot store unchanged become
+ * U+FFFD: unpaired surrogates, NUL, U+FFFE, U+FFFF, and U+FEFF as the first character.
  *
  * All functions block on database I/O: call them off the UI thread. They may be called from any
  * thread. The observation flows re-run their query after every change made through this
@@ -235,12 +235,12 @@ public class NoteService internal constructor(
      * [limit] hits, best first. Hits are ranked by BM25 with the title weighing ten times the
      * body; equal ranks come in list order.
      *
-     * [query] is plain text, never search syntax. It is split into words at whitespace only; the
-     * words must all occur, in any order, and the last one may be the start of a word, so results
-     * follow typing. A word with punctuation inside, such as `e-mail` or `bread,milk`, matches as
-     * a phrase: its parts must occur next to each other and in that order. Matching ignores case
-     * and accents (`cafe` finds `Café`), with SQLite's `unicode61` tokenizer. A query without
-     * words gives no hits. No query makes this throw.
+     * [query] is plain text, never search syntax. It is split into words at whitespace and NUL
+     * only; the words must all occur, in any order, and the last one may be the start of a word,
+     * so results follow typing. A word with punctuation inside, such as `e-mail` or
+     * `bread,milk`, matches as a phrase: its parts must occur next to each other and in that
+     * order. Matching ignores case and accents (`cafe` finds `Café`), with SQLite's `unicode61`
+     * tokenizer. A query without words gives no hits. No query makes this throw.
      *
      * Exactly [limit] hits may mean that more were left out. A last word of a single letter is
      * the slowest query, as no prefix index covers it (about 110 ms over 10,000 notes, see

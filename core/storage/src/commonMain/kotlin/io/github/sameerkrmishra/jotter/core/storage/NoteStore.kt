@@ -74,7 +74,10 @@ public class NoteStore private constructor(
             val stored =
                 queries.selectDevice().executeAsOneOrNull()
                     ?: run {
-                        queries.insertDeviceIfAbsent(DeviceId.generate().toString(), deviceName)
+                        queries.insertDeviceIfAbsent(
+                            DeviceId.generate().toString(),
+                            deviceName.toStorableText(),
+                        )
                         queries.selectDevice().executeAsOne()
                     }
             return DeviceId.parse(stored.id)
