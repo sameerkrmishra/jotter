@@ -2,11 +2,11 @@ package io.github.sameerkrmishra.jotter.core.storage
 
 import io.github.sameerkrmishra.jotter.core.model.TagName
 
-/** Marks where a match starts in the text that `highlight()` and `snippet()` return (Note.sq). */
-private const val MATCH_START = '\uE000'
+/** Marks where a match starts in the text that `snippet()` returns (Note.sq), U+E000. */
+internal const val MATCH_START = '\uE000'
 
-/** Marks where a match ends. */
-private const val MATCH_END = '\uE001'
+/** Marks where a match ends, U+E001. */
+internal const val MATCH_END = '\uE001'
 
 /** What separates words in a query: [TagName.WHITESPACE] and NUL. */
 private const val SEPARATORS = TagName.WHITESPACE + "\u0000"
@@ -18,7 +18,9 @@ private const val SEPARATORS = TagName.WHITESPACE + "\u0000"
  * string, with any `"` doubled, so `AND`, `NEAR`, `*`, `-`, `:` and parentheses match literally.
  * FTS5 ANDs the strings. The last one matches as a prefix (`"wor"*` finds "world"), so results
  * appear while the person types. Whitespace is [TagName.WHITESPACE], for the same reason as in
- * tags: it does not depend on platform Unicode tables.
+ * tags: it does not depend on platform Unicode tables. The text is split only there: a piece
+ * with punctuation inside, such as `e-mail` or `bread,milk`, is an FTS5 phrase, whose words must
+ * occur next to each other and in that order.
  *
  * A piece without any letter or digit, such as `-`, holds no token; FTS5 ignores it next to
  * others and matches nothing if it is alone. NUL also separates words: FTS5 reads the query as
@@ -35,8 +37,8 @@ internal fun ftsQuery(text: String): String? {
 }
 
 /**
- * Removes the match markers from [marked], the output of FTS5's `highlight()` or `snippet()`
- * (Note.sq), and returns the text with the ranges they enclosed.
+ * Removes the match markers from [marked], the output of FTS5's `snippet()` (Note.sq), and
+ * returns the text with the ranges they enclosed.
  *
  * A note's own U+E000 and U+E001 characters (Unicode private use, so rare) cannot be told apart
  * from the markers. They are removed too, and may move, join or drop highlights in that note's
@@ -59,11 +61,14 @@ internal fun parseHighlighted(marked: String): Highlighted {
     return Highlighted(text.toString(), matches)
 }
 
-/** The snippet for a hit: the body excerpt if the body matched, otherwise the title. */
+/**
+ * The snippet for a hit: the body excerpt if the body has a match, otherwise the title excerpt.
+ * A stray pair of marker characters in the body counts as a match (see [parseHighlighted]).
+ */
 internal fun snippetOf(
-    titleHighlight: String?,
+    titleSnippet: String?,
     bodySnippet: String?,
 ): Highlighted {
     val body = parseHighlighted(bodySnippet.orEmpty())
-    return if (body.matches.isNotEmpty()) body else parseHighlighted(titleHighlight.orEmpty())
+    return if (body.matches.isNotEmpty()) body else parseHighlighted(titleSnippet.orEmpty())
 }

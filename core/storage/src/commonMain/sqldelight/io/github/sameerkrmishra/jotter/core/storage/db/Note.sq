@@ -128,8 +128,9 @@ ORDER BY note_tag.tag;
 
 -- The best :limit matches of :query (FTS5 syntax), ranked by bm25 with the title weighing ten
 -- times the body, ties in list order. The inner query ranks every match without touching its
--- text; the outer one makes the title highlight and body snippet only for the hits it returns.
--- Matches are marked with U+E000 and U+E001 (char(57344), char(57345)).
+-- text; the outer one makes the title and body snippets only for the hits it returns.
+-- Matches are marked with U+E000 and U+E001 (char(57344), char(57345)); char(8230) is the
+-- ellipsis where an excerpt leaves text out.
 -- SQLDelight 2.4.1 cannot generate code for an unaliased FTS5 rowid column, so the hits are
 -- picked by note.fts_rowid, the same value.
 search:
@@ -147,8 +148,8 @@ SELECT
   note.id, note.revision_id, note.title, note.body, note.is_pinned, note.state,
   note.created_at_millis, note.updated_hlc_physical, note.updated_hlc_counter,
   (SELECT group_concat(tag, char(31)) FROM note_tag WHERE note_tag.note_id = note.id) AS tags,
-  highlight(note_fts, 0, char(57344), char(57345)) AS title_highlight,
-  snippet(note_fts, 1, char(57344), char(57345), '…', 24) AS body_snippet
+  snippet(note_fts, 0, char(57344), char(57345), char(8230), 24) AS title_snippet,
+  snippet(note_fts, 1, char(57344), char(57345), char(8230), 24) AS body_snippet
 FROM note_fts JOIN note ON note.fts_rowid = note_fts.rowid
 WHERE note_fts MATCH :query AND note.fts_rowid IN (SELECT hit_rowid FROM hit)
 ORDER BY bm25(note_fts, 10.0, 1.0), note.is_pinned DESC, note.updated_hlc_physical DESC,

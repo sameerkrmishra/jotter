@@ -135,8 +135,10 @@ list order, filtered by state and tag like `list`.
 - **User text is never FTS5 syntax.** The query is split at whitespace
   (`TagName.WHITESPACE`, and NUL); each word becomes a quoted string with `"`
   doubled, the words are ANDed, and the last one is a prefix (`"wor"*`), so
-  results follow typing. A query without words gives no hits, and no input
-  throws (a property test feeds arbitrary strings, FTS5 operators, quotes,
+  results follow typing. The query is split only at whitespace, so a word
+  with punctuation inside (`e-mail`, `bread,milk`) is an FTS5 phrase: its
+  parts must be adjacent and in order. A query without words gives no hits,
+  and no input throws (a property test feeds arbitrary strings, FTS5 operators, quotes,
   emoji, NUL and lone surrogates). NUL must be a separator: FTS5 reads the
   query as a C string, so a NUL inside a quoted word is a syntax error.
 - **Tokenizer:** `unicode61 remove_diacritics 2`, so case and accents fold
@@ -144,13 +146,17 @@ list order, filtered by state and tag like `list`.
   query ends in a prefix and a short prefix otherwise merges the posting
   lists of every word starting with it. It roughly doubles the index (15 MB
   to 32 MB for the benchmark's 10,000 notes).
-- **Snippets.** `highlight()` (title) and `snippet()` (body, 24 tokens) mark
+- **Snippets.** `snippet()` (24 tokens) on the body and on the title marks
   matches with U+E000/U+E001, which `parseHighlighted` removes, returning
-  ranges into the clean text. The body excerpt is used if the body matched,
-  otherwise the title. Limitation: a note's own U+E000/U+E001 characters
-  cannot be told from the markers. They are dropped from its snippet and may
-  move or drop highlights there, but ranges stay valid (in bounds, ordered,
-  non-empty).
+  ranges into the clean text. The body excerpt is used if it has a match,
+  otherwise the title's, so a long title is trimmed too. Limitations of the
+  private-use markers, for notes that contain U+E000 or U+E001 themselves:
+  the characters are dropped from the snippet and may move or drop
+  highlights there (ranges stay valid: in bounds, ordered, non-empty); a
+  stray pair in a body that did not match makes the snippet show the body
+  instead of the title; and `unicode61` treats them as letters, so one
+  inside a word makes it a different word for matching.
+- **Results may be truncated.** Exactly `limit` hits can mean more matched.
 - **Two-step query.** A CTE ranks every match using only the index and the
   short `note` columns, takes the best `limit`, and only those get a
   snippet. `snippet()` on every match costs far more (see "all hits" below).
@@ -178,19 +184,21 @@ are noisy) generates 10,000 notes with a fixed seed: 10 to 100 Markdown
 lines each, words drawn from a Zipf distribution (common English words, then
 note words, then a long tail of made-up words), 0 to 3 of 10 tags. It then
 runs each query 20 times to warm up and measures 100 runs, through
-`NoteService.search` on one thread.
+`NoteService.search` on one thread. `check` compiles and analyses the
+benchmark without running it.
 
-Measured 2026-10-29 on an Intel Xeon W-2135 @ 3.70 GHz (6 cores, 12
+Measured 2026-10-29 (after the review fixes: rowid `revision` table, title
+snippets) on an Intel Xeon W-2135 @ 3.70 GHz (6 cores, 12
 threads), Linux 6.18, OpenJDK 21.0.12:
 
 | Query | Text | Hits | Median | p95 | Median, all hits | p95, all hits |
 |---|---|---|---|---|---|---|
-| common word | `the` | 10000 | 39.2 ms | 40.2 ms | 612.2 ms | 615.9 ms |
-| rare word | `memesu` | 36 | 1.4 ms | 1.5 ms | 1.4 ms | 1.4 ms |
-| 3-letter prefix | `pro` | 8916 | 27.9 ms | 28.7 ms | 261.0 ms | 266.4 ms |
-| 1-letter prefix | `t` | 10000 | 109.8 ms | 110.5 ms | 1234.5 ms | 1242.8 ms |
-| two words | `meeting project` | 1797 | 10.5 ms | 10.7 ms | 62.6 ms | 63.1 ms |
-| word + tag filter | `project` in `work` | 579 | 16.0 ms | 16.3 ms | 30.0 ms | 30.2 ms |
+| common word | `the` | 10000 | 39.2 ms | 40.1 ms | 611.8 ms | 616.2 ms |
+| rare word | `memesu` | 36 | 1.4 ms | 1.5 ms | 1.4 ms | 1.5 ms |
+| 3-letter prefix | `pro` | 8916 | 27.9 ms | 28.8 ms | 264.2 ms | 269.4 ms |
+| 1-letter prefix | `t` | 10000 | 110.0 ms | 110.9 ms | 1231.3 ms | 1246.4 ms |
+| two words | `meeting project` | 1797 | 10.4 ms | 10.6 ms | 62.7 ms | 63.4 ms |
+| word + tag filter | `project` in `work` | 579 | 15.7 ms | 15.9 ms | 29.8 ms | 30.2 ms |
 
 "Median" and "p95" use the default limit of 100 hits; "all hits" passes no
 effective limit, which computes a snippet for every match. All five PLAN.md

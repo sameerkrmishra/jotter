@@ -112,7 +112,9 @@ class SearchTest {
                     "Caf\u00E9 \"NEAR\" (notes)",
                     "a b: c - d * e ^f \uD83D\uDE00 \u0000 x",
                 )
-                store.notes.create("", "\uE000milk\uE001 \uE001 \uE000")
+                // A note with the marker characters in it, paired, stray and inside a word.
+                val (start, end) = MATCH_START to MATCH_END
+                store.notes.create("${start}caf$end", "${start}milk$end $end b${start}c $start")
                 val syntax =
                     Arb.element(
                         "\"",
@@ -172,6 +174,32 @@ class SearchTest {
 
             assertEquals("Groceries for the weekend", snippet.text)
             assertEquals(listOf("weekend"), snippet.matches.map(snippet.text::substring))
+        }
+
+    @Test
+    fun aLongTitleIsCutAroundTheMatchToo() =
+        withStore(clock) { store ->
+            val words = List(100) { "word$it" }
+            store.notes.create(words.joinToString(" "), "body")
+
+            val snippet =
+                store.notes
+                    .search("word50")
+                    .single()
+                    .snippet
+
+            assertTrue(snippet.text.length < words.joinToString(" ").length, snippet.text)
+            assertEquals(listOf("word50"), snippet.matches.map(snippet.text::substring))
+        }
+
+    @Test
+    fun punctuationInsideAWordMakesAPhrase() =
+        withStore(clock) { store ->
+            val notes = store.notes
+            val adjacent = notes.create("", "send an e-mail")
+            notes.create("", "mail e")
+
+            assertEquals(listOf(adjacent), notes.search("e-mail").map(SearchHit::note))
         }
 
     @Test
@@ -260,14 +288,15 @@ class SearchTest {
 
     @Test
     fun highlightMarkersAreRemovedAndOnlyWellFormedOnesKept() {
+        val (start, end) = MATCH_START to MATCH_END
         val cases =
             mapOf(
                 "" to Highlighted("", emptyList()),
                 "no match" to Highlighted("no match", emptyList()),
-                "\uE000a\uE001 b \uE000cd\uE001" to Highlighted("a b cd", listOf(0..0, 4..5)),
+                "${start}a$end b ${start}cd$end" to Highlighted("a b cd", listOf(0..0, 4..5)),
                 // A note's own marker characters: unpaired or empty ones give no range.
-                "\uE001a\uE000\uE001b\uE000" to Highlighted("ab", emptyList()),
-                "\uE000a\uE000b\uE001" to Highlighted("ab", listOf(1..1)),
+                "${end}a$start${end}b$start" to Highlighted("ab", emptyList()),
+                "${start}a${start}b$end" to Highlighted("ab", listOf(1..1)),
             )
 
         cases.forEach { (marked, expected) ->

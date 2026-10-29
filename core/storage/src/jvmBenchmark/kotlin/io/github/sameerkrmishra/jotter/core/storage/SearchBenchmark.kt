@@ -1,3 +1,6 @@
+// The shape of the synthetic notes (line counts, percentages) is spelled out where it is used.
+@file:Suppress("MagicNumber")
+
 package io.github.sameerkrmishra.jotter.core.storage
 
 import io.github.sameerkrmishra.jotter.core.model.TagName
@@ -36,6 +39,7 @@ private val queries =
         BenchmarkQuery("word + tag filter", "project", NoteFilter(tag = TagName.parse("work"))),
     )
 
+/** Generates the notes in a temporary database, runs the queries and prints the results. */
 public fun main() {
     val dir = Files.createTempDirectory("jotter-search-benchmark").toFile()
     try {
@@ -96,7 +100,7 @@ private class Timings(
     val p95: String = format(p95)
 
     private fun format(duration: Duration): String =
-        "%.1f ms".format(duration.inWholeMicroseconds / 1_000.0)
+        "%.1f ms".format(java.util.Locale.ROOT, duration.inWholeMicroseconds / 1_000.0)
 }
 
 private fun machine(): String {

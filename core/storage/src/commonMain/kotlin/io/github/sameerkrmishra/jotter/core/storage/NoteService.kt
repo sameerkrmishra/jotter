@@ -235,10 +235,20 @@ public class NoteService internal constructor(
      * [limit] hits, best first. Hits are ranked by BM25 with the title weighing ten times the
      * body; equal ranks come in list order.
      *
-     * [query] is plain text, never search syntax: its words must all occur, in any order, and the
-     * last one may be the start of a word, so results follow typing. Matching ignores case and
-     * accents (`cafe` finds `Café`); words are split as by SQLite's `unicode61` tokenizer. A query
-     * without words gives no hits. No query makes this throw.
+     * [query] is plain text, never search syntax. It is split into words at whitespace only; the
+     * words must all occur, in any order, and the last one may be the start of a word, so results
+     * follow typing. A word with punctuation inside, such as `e-mail` or `bread,milk`, matches as
+     * a phrase: its parts must occur next to each other and in that order. Matching ignores case
+     * and accents (`cafe` finds `Café`), with SQLite's `unicode61` tokenizer. A query without
+     * words gives no hits. No query makes this throw.
+     *
+     * Exactly [limit] hits may mean that more were left out. A last word of a single letter is
+     * the slowest query, as no prefix index covers it (about 110 ms over 10,000 notes, see
+     * README.md); search as you type may want to wait for a second letter.
+     *
+     * The snippet marks matches with private-use characters, so a note that itself contains
+     * U+E000 or U+E001 may get a wrong highlight or its body instead of its title as snippet, and
+     * such a character inside a word is part of that word for matching.
      *
      * @throws IllegalArgumentException if [limit] is not positive.
      */
@@ -261,7 +271,7 @@ public class NoteService internal constructor(
                 physical,
                 counter,
                 tags,
-                titleHighlight,
+                titleSnippet,
                 bodySnippet,
                 ->
                 val note =
@@ -277,7 +287,7 @@ public class NoteService internal constructor(
                         counter,
                         tags,
                     )
-                SearchHit(note, snippetOf(titleHighlight, bodySnippet))
+                SearchHit(note, snippetOf(titleSnippet, bodySnippet))
             }.executeAsList()
     }
 

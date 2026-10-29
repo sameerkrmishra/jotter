@@ -59,6 +59,11 @@ tasks.named { it == "testAndroidHostTest" }.configureEach {
 
 // PLAN.md §10: search over 10,000 synthetic notes in under 50 ms. Not part of `check`, because
 // timings on shared CI machines are noisy. Results are in README.md.
+// `check` compiles and analyses the benchmark, without running it, so it cannot rot.
+tasks.named("check") {
+    dependsOn("compileBenchmarkKotlinJvm", "detektBenchmarkJvm")
+}
+
 tasks.register<JavaExec>("searchBenchmark") {
     group = "verification"
     description = "Measures search over 10,000 synthetic notes on the JVM."
