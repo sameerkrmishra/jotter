@@ -1,0 +1,21 @@
+-- This device: exactly one row, written when the database is created.
+CREATE TABLE device (
+  singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+  id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  -- The hybrid logical clock's last issued or observed timestamp. Every write transaction reads
+  -- and advances it, so the clock survives restarts and the desktop app and the CLI share it.
+  hlc_physical INTEGER NOT NULL CHECK (hlc_physical >= 0),
+  hlc_counter INTEGER NOT NULL CHECK (hlc_counter BETWEEN 0 AND 2147483647)
+);
+
+-- Does nothing if the row exists, e.g. when another process created the database first.
+insertDeviceIfAbsent:
+INSERT OR IGNORE INTO device(singleton, id, name, hlc_physical, hlc_counter)
+VALUES (1, :id, :name, 0, 0);
+
+selectDevice:
+SELECT id, hlc_physical, hlc_counter FROM device;
+
+updateClock:
+UPDATE device SET hlc_physical = :hlcPhysical, hlc_counter = :hlcCounter;

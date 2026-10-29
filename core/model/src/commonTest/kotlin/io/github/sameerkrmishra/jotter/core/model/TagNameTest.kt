@@ -83,6 +83,16 @@ class TagNameTest {
     }
 
     @Test
+    fun rejectsWhatSqliteCannotStoreUnchanged() {
+        listOf("a\uFFFEb", "a\uFFFF", "\uFEFFa").forEach {
+            assertNull(TagName.parseOrNull(it), "Expected null for \"$it\"")
+        }
+        // The characters next to them are fine.
+        assertEquals("a\uFFFDb", TagName.parse("a\uFFFDb").toString())
+        assertEquals("a\uFEFFb", TagName.parse("a\uFEFFb").toString())
+    }
+
+    @Test
     fun fromNormalisedAcceptsOnlyNormalisedText() {
         assertEquals(TagName.parse("Shopping list"), TagName.fromNormalised("Shopping list"))
 

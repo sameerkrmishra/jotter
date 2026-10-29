@@ -157,6 +157,7 @@ Each module has one job and a small public API. Internal details are marked
 ```kotlin
 data class Note(
     val id: NoteId,             // UUIDv7: sortable, generated offline
+    val revisionId: RevisionId, // the revision it was materialised from
     val title: String,          // may be empty (Keep style)
     val body: String,           // Markdown
     val tags: Set<TagName>,
@@ -167,17 +168,23 @@ data class Note(
 )
 ```
 
-Local SQLite tables (simplified):
+Local SQLite tables (simplified; the schema is in `core/storage`):
 
 - `note`: current materialised state of each note (what the UI reads).
 - `note_fts`: FTS5 virtual table over title and body.
-- `tag`, `note_tag`.
-- `revision`: every revision of every note, with parent revision ids (a DAG,
-  like git commits). This history is what makes three-way merge possible.
+- `note_tag`: each note's current tags. There is no separate `tag` table: the
+  tag list is a `GROUP BY` over `note_tag`.
+- `revision`: every revision of every note, with parent revision ids in
+  `revision_parent` (a DAG, like git commits) and tags in `revision_tag`.
+  This history is what makes three-way merge possible.
+- `device`: this device's id and name, and the last timestamp of its hybrid
+  logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
 - `backend`: configured backends and their settings.
 - `sync_cursor`: per backend, per remote device: the last segment applied.
-- `device`: this device's id and name.
+
+Schema version 1 (M1) has no `conflict`, `backend` or `sync_cursor` table.
+M3 and M4, which need them, add them with schema migrations.
 
 "Delete forever" from trash writes a tombstone revision so the deletion syncs.
 Tombstones stay until log compaction (deferred).
