@@ -3,6 +3,7 @@ package io.github.sameerkrmishra.jotter.core.storage
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
+import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.db.NoteQueries
 
 /**
@@ -19,8 +20,10 @@ internal class NoteMaterialiser(
      * Makes the note of [head] show [head]: writes its `note` row and `note_tag` rows, or deletes
      * them if [head] is a tombstone. Runs in one transaction, or as part of the caller's.
      *
-     * A new row's [Note.createdAt] is the physical time of the note's earliest stored revision,
-     * which is its first; an existing row keeps its own. [Note.updatedAt] is [head]'s timestamp.
+     * [Note.createdAt] is the physical time of the note's earliest stored revision, which is its
+     * first. It is recomputed every time, because in M3 an ancestor can arrive after its
+     * descendants; it can then only move back. [Note.updatedAt] is [head]'s timestamp. Tags the
+     * note keeps are not rewritten.
      *
      * [head] must already be stored, as the `note` row refers to it.
      */
@@ -43,7 +46,7 @@ internal class NoteMaterialiser(
                         updatedPhysical = head.timestamp.physicalMillis,
                         updatedCounter = head.timestamp.counter.toLong(),
                     )
-                    queries.deleteTags(noteId)
+                    queries.deleteTagsExcept(noteId, content.tags.map(TagName::toString))
                     content.tags.forEach { tag -> queries.insertTag(noteId, tag.toString()) }
                 }
             }

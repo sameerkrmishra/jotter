@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.core.storage
 
+import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
@@ -129,6 +130,39 @@ class NoteMaterialiserTest {
             assertEquals(emptySet(), note?.tags)
         }
 
+    @Test
+    fun theCreationTimeMovesBackWhenAnEarlierRevisionArrivesLater() =
+        withMaterialiser { store, materialiser, db, _ ->
+            // As sync in M3 may deliver it: a child before its parent.
+            val second = nextRevision(first, HybridTimestamp(7_000, 0), created)
+            store.insert(second)
+            materialiser.materialise(second)
+            assertEquals(Instant.fromEpochMilliseconds(7_000), db.readNote(noteId)?.createdAt)
+
+            store.insert(first)
+            materialiser.materialise(second)
+
+            assertEquals(Instant.fromEpochMilliseconds(1_000), db.readNote(noteId)?.createdAt)
+        }
+
+    @Test
+    fun theRevisionIndexServesHistoryAndTheCreationTime() =
+        withMaterialiser { _, _, _, driver ->
+            val history =
+                "SELECT * FROM revision WHERE note_id = ? " +
+                    "ORDER BY hlc_physical, hlc_counter, device_id, id"
+            val creation = "SELECT min(hlc_physical) FROM revision WHERE note_id = ?"
+
+            assertEquals(
+                listOf("SEARCH revision USING INDEX revision_by_note (note_id=?)"),
+                driver.queryPlan(history),
+            )
+            assertEquals(
+                listOf("SEARCH revision USING COVERING INDEX revision_by_note (note_id=?)"),
+                driver.queryPlan(creation),
+            )
+        }
+
     /** A user revision on top of [parent]. */
     private fun nextRevision(
         parent: Revision,
@@ -148,6 +182,19 @@ class NoteMaterialiserTest {
         block(RevisionStore(db.revisionQueries), NoteMaterialiser(db.noteQueries), db, driver)
     }
 }
+
+/** The details of `EXPLAIN QUERY PLAN` for [sql], whose one parameter is bound to "x". */
+internal fun SqlDriver.queryPlan(sql: String): List<String> =
+    executeQuery(
+        identifier = null,
+        sql = "EXPLAIN QUERY PLAN $sql",
+        mapper = { cursor ->
+            val details = mutableListOf<String>()
+            while (cursor.next().value) details += checkNotNull(cursor.getString(3))
+            QueryResult.Value(details)
+        },
+        parameters = 1,
+    ) { bindString(0, "x") }.value
 
 /** Reads the materialised note [id], or null if there is no `note` row for it. */
 internal fun JotterDatabase.readNote(id: NoteId): Note? =

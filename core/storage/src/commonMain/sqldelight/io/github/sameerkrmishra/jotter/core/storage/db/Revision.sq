@@ -1,6 +1,7 @@
 -- Every revision of every note (ADR-0003): user revisions and automatic merges, snapshots and
 -- tombstones. Rows are never updated or deleted. Ids are stored in their canonical text form,
--- whose text order is their byte order, so ORDER BY gives Stamp order.
+-- whose text order is their byte order, so ORDER BY gives Stamp order. An ordinary rowid table:
+-- its rows hold whole bodies, which a WITHOUT ROWID table stores less compactly and reads slower.
 CREATE TABLE revision (
   id TEXT NOT NULL PRIMARY KEY,
   note_id TEXT NOT NULL,
@@ -45,9 +46,11 @@ CREATE TABLE revision (
         state_revision_id IS NULL
     END
   )
-) WITHOUT ROWID;
+);
 
-CREATE INDEX revision_by_note ON revision(note_id);
+-- A note's revisions in Stamp order: history reads them in this order, and materialisation reads
+-- the earliest timestamp from it.
+CREATE INDEX revision_by_note ON revision(note_id, hlc_physical, hlc_counter, device_id, id);
 
 -- A revision's parents, one row each. parent_id has no foreign key: in M3 a revision can arrive
 -- by sync before its parent.

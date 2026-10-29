@@ -7,10 +7,10 @@ CREATE TABLE note (
   revision_id TEXT NOT NULL REFERENCES revision(id),
   is_pinned INTEGER AS kotlin.Boolean NOT NULL CHECK (is_pinned IN (0, 1)),
   state TEXT NOT NULL CHECK (state IN ('ACTIVE', 'ARCHIVED', 'TRASHED')),
-  -- The first revision's physical time. Set when the row is inserted, never updated.
+  -- The physical time of the earliest stored revision, the note's first.
   created_at_millis INTEGER NOT NULL,
-  updated_hlc_physical INTEGER NOT NULL,
-  updated_hlc_counter INTEGER NOT NULL,
+  updated_hlc_physical INTEGER NOT NULL CHECK (updated_hlc_physical >= 0),
+  updated_hlc_counter INTEGER NOT NULL CHECK (updated_hlc_counter BETWEEN 0 AND 2147483647),
   -- The text comes last: a long body spills into overflow pages, which a query that needs only
   -- the columns before it (ranking, filtering) then does not read.
   title TEXT NOT NULL,
@@ -62,9 +62,11 @@ BEGIN
   INSERT INTO note_fts(rowid, title, body) VALUES (new.fts_rowid, new.title, new.body);
 END;
 
--- Inserts the note, or updates every column but fts_rowid and created_at_millis. A new row's
--- creation time is the earliest revision's: a user revision is stamped after its parents and an
--- automatic merge copies a parent's timestamp, so that is the first revision's.
+-- Inserts the note, or updates every column but fts_rowid. The creation time is the earliest
+-- stored revision's: a user revision is stamped after its parents and an automatic merge copies a
+-- parent's timestamp, so that is the first revision's. It is recomputed on every update because
+-- in M3 a revision can arrive before its ancestors; it can then only move back. revision_by_note
+-- answers it from the index.
 upsertNote:
 INSERT INTO note(
   id, revision_id, title, body, is_pinned, state, created_at_millis,
@@ -80,6 +82,7 @@ ON CONFLICT (id) DO UPDATE SET
   body = excluded.body,
   is_pinned = excluded.is_pinned,
   state = excluded.state,
+  created_at_millis = excluded.created_at_millis,
   updated_hlc_physical = excluded.updated_hlc_physical,
   updated_hlc_counter = excluded.updated_hlc_counter;
 
@@ -87,11 +90,12 @@ ON CONFLICT (id) DO UPDATE SET
 deleteNote:
 DELETE FROM note WHERE id = :id;
 
-deleteTags:
-DELETE FROM note_tag WHERE note_id = :noteId;
+-- With insertTag, replaces a note's tags without rewriting the ones it keeps.
+deleteTagsExcept:
+DELETE FROM note_tag WHERE note_id = :noteId AND tag NOT IN :kept;
 
 insertTag:
-INSERT INTO note_tag(note_id, tag) VALUES (:noteId, :tag);
+INSERT OR IGNORE INTO note_tag(note_id, tag) VALUES (:noteId, :tag);
 
 -- The tags are joined with U+001F, which a tag cannot contain (it is a control character).
 selectNote:

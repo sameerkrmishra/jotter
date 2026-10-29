@@ -62,6 +62,11 @@ Encoding:
   parent's stamp (ADR-0003, refinements).
 - `revision_parent.parent_id` has no foreign key: in M3 a revision can arrive
   by sync before its parent.
+- `revision` is an ordinary rowid table (its rows hold whole bodies, which a
+  WITHOUT ROWID table stores larger and reads slower); the small edge tables
+  are WITHOUT ROWID. `revision_by_note` indexes
+  `(note_id, hlc_physical, hlc_counter, device_id, id)`, which serves both
+  `history` in `Stamp` order and the `createdAt` minimum.
 - `note.fts_rowid` exists only because an FTS5 index with external content
   needs an integer key.
 
@@ -73,7 +78,8 @@ Encoding:
 - **Materialisation.** `NoteMaterialiser` (internal) writes a note's `note`
   and `note_tag` rows from its head revision, or deletes them for a
   tombstone. `createdAt` is the earliest stored revision's physical time,
-  set when the row is inserted and never changed; `updatedAt` is the head's
+  recomputed on every write from an index (in M3 an ancestor may arrive
+  after its descendants, so it can move back); `updatedAt` is the head's
   timestamp. In M1 every note has exactly one head, because a user revision
   always builds on the current head in the same transaction. Finding heads
   and merging them is M3.
