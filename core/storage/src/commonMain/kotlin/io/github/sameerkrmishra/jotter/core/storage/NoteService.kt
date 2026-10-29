@@ -210,6 +210,57 @@ public class NoteService internal constructor(
      */
     public fun history(id: NoteId): List<Revision> = revisions.forNote(id)
 
+    /**
+     * Searches the title and body of the notes that [filter] selects, and returns the best
+     * [limit] hits, best first. Hits are ranked by BM25 with the title weighing ten times the
+     * body; equal ranks come in list order.
+     *
+     * [query] is plain text, never search syntax: its words must all occur, in any order, and the
+     * last one may be the start of a word, so results follow typing. Matching ignores case and
+     * accents (`cafe` finds `Café`); words are split as by SQLite's `unicode61` tokenizer. A query
+     * without words gives no hits. No query makes this throw.
+     *
+     * @throws IllegalArgumentException if [limit] is not positive.
+     */
+    public fun search(
+        query: String,
+        filter: NoteFilter = NoteFilter(),
+        limit: Int = DEFAULT_SEARCH_LIMIT,
+    ): List<SearchHit> {
+        require(limit > 0) { "limit must be positive: $limit" }
+        val match = ftsQuery(query) ?: return emptyList()
+        return database.noteQueries
+            .search(match, filter.state.name, filter.tag?.toString(), limit.toLong()) {
+                id,
+                revisionId,
+                title,
+                body,
+                isPinned,
+                state,
+                createdAt,
+                physical,
+                counter,
+                tags,
+                titleHighlight,
+                bodySnippet,
+                ->
+                val note =
+                    noteFromRow(
+                        id,
+                        revisionId,
+                        title,
+                        body,
+                        isPinned,
+                        state,
+                        createdAt,
+                        physical,
+                        counter,
+                        tags,
+                    )
+                SearchHit(note, snippetOf(titleHighlight, bodySnippet))
+            }.executeAsList()
+    }
+
     private fun noteQuery(id: NoteId) =
         database.noteQueries.selectNote(id.toString(), ::noteFromRow)
 
@@ -320,4 +371,13 @@ public class NoteService internal constructor(
             createdAt = createdAt,
             updatedAt = revision.timestamp,
         )
+
+    /** Defaults for [NoteService]. */
+    public companion object {
+        /**
+         * How many hits [search] returns by default: more than a results list shows at once, few
+         * enough to make each search cheap.
+         */
+        public const val DEFAULT_SEARCH_LIMIT: Int = 100
+    }
 }

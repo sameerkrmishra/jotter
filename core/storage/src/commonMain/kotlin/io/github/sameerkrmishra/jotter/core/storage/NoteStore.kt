@@ -16,7 +16,7 @@ import kotlin.time.Clock
  * @property notes Creates, changes, lists, observes and searches the notes.
  */
 public class NoteStore private constructor(
-    private val driver: SqlDriver,
+    internal val driver: SqlDriver,
     internal val database: JotterDatabase,
     public val deviceId: DeviceId,
     public val notes: NoteService,

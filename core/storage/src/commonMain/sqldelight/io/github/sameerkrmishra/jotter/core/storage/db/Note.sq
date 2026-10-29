@@ -5,14 +5,16 @@ CREATE TABLE note (
   fts_rowid INTEGER PRIMARY KEY,
   id TEXT NOT NULL UNIQUE,
   revision_id TEXT NOT NULL REFERENCES revision(id),
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
   is_pinned INTEGER AS kotlin.Boolean NOT NULL CHECK (is_pinned IN (0, 1)),
   state TEXT NOT NULL CHECK (state IN ('ACTIVE', 'ARCHIVED', 'TRASHED')),
   -- The first revision's physical time. Set when the row is inserted, never updated.
   created_at_millis INTEGER NOT NULL,
   updated_hlc_physical INTEGER NOT NULL,
-  updated_hlc_counter INTEGER NOT NULL
+  updated_hlc_counter INTEGER NOT NULL,
+  -- The text comes last: a long body spills into overflow pages, which a query that needs only
+  -- the columns before it (ranking, filtering) then does not read.
+  title TEXT NOT NULL,
+  body TEXT NOT NULL
 );
 
 -- The list order: pinned first, then the most recently updated.
@@ -27,6 +29,38 @@ CREATE TABLE note_tag (
 ) WITHOUT ROWID;
 
 CREATE INDEX note_tag_by_tag ON note_tag(tag, note_id);
+
+-- The full-text index over title and body. External content: the text lives only in `note`, and
+-- the triggers below keep the index in step with it. `remove_diacritics 2` folds accents, so
+-- "cafe" finds "café". The prefix indexes make the prefix match of the last word that search
+-- adds fast for two and three letters; a short prefix otherwise merges the lists of every word
+-- that starts with it (see README.md).
+CREATE VIRTUAL TABLE note_fts USING fts5(
+  title,
+  body,
+  content = 'note',
+  content_rowid = 'fts_rowid',
+  tokenize = 'unicode61 remove_diacritics 2',
+  prefix = '2 3'
+);
+
+CREATE TRIGGER note_fts_after_insert AFTER INSERT ON note BEGIN
+  INSERT INTO note_fts(rowid, title, body) VALUES (new.fts_rowid, new.title, new.body);
+END;
+
+CREATE TRIGGER note_fts_after_delete AFTER DELETE ON note BEGIN
+  INSERT INTO note_fts(note_fts, rowid, title, body)
+  VALUES ('delete', old.fts_rowid, old.title, old.body);
+END;
+
+-- Only when the text changed: pinning or archiving a note does not touch the index.
+CREATE TRIGGER note_fts_after_update AFTER UPDATE OF title, body ON note
+WHEN old.title IS NOT new.title OR old.body IS NOT new.body
+BEGIN
+  INSERT INTO note_fts(note_fts, rowid, title, body)
+  VALUES ('delete', old.fts_rowid, old.title, old.body);
+  INSERT INTO note_fts(rowid, title, body) VALUES (new.fts_rowid, new.title, new.body);
+END;
 
 -- Inserts the note, or updates every column but fts_rowid and created_at_millis. A new row's
 -- creation time is the earliest revision's: a user revision is stamped after its parents and an
@@ -87,3 +121,31 @@ FROM note_tag JOIN note ON note.id = note_tag.note_id
 WHERE note.state != 'TRASHED'
 GROUP BY note_tag.tag
 ORDER BY note_tag.tag;
+
+-- The best :limit matches of :query (FTS5 syntax), ranked by bm25 with the title weighing ten
+-- times the body, ties in list order. The inner query ranks every match without touching its
+-- text; the outer one makes the title highlight and body snippet only for the hits it returns.
+-- Matches are marked with U+E000 and U+E001 (char(57344), char(57345)).
+-- SQLDelight 2.4.1 cannot generate code for an unaliased FTS5 rowid column, so the hits are
+-- picked by note.fts_rowid, the same value.
+search:
+WITH hit AS (
+  SELECT note.fts_rowid AS hit_rowid
+  FROM note_fts JOIN note ON note.fts_rowid = note_fts.rowid
+  WHERE note_fts MATCH :query
+    AND note.state = :state
+    AND (:tag IS NULL OR note.id IN (SELECT note_id FROM note_tag WHERE tag = :tag))
+  ORDER BY bm25(note_fts, 10.0, 1.0), note.is_pinned DESC, note.updated_hlc_physical DESC,
+    note.updated_hlc_counter DESC, note.id
+  LIMIT :limit
+)
+SELECT
+  note.id, note.revision_id, note.title, note.body, note.is_pinned, note.state,
+  note.created_at_millis, note.updated_hlc_physical, note.updated_hlc_counter,
+  (SELECT group_concat(tag, char(31)) FROM note_tag WHERE note_tag.note_id = note.id) AS tags,
+  highlight(note_fts, 0, char(57344), char(57345)) AS title_highlight,
+  snippet(note_fts, 1, char(57344), char(57345), '…', 24) AS body_snippet
+FROM note_fts JOIN note ON note.fts_rowid = note_fts.rowid
+WHERE note_fts MATCH :query AND note.fts_rowid IN (SELECT hit_rowid FROM hit)
+ORDER BY bm25(note_fts, 10.0, 1.0), note.is_pinned DESC, note.updated_hlc_physical DESC,
+  note.updated_hlc_counter DESC, note.id;

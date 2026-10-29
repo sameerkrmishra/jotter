@@ -25,6 +25,15 @@ sqldelight {
 }
 
 kotlin {
+    jvm {
+        // The search benchmark (src/jvmBenchmark), run by the searchBenchmark task below. It sees
+        // the module's internals, as tests do.
+        val main = compilations.getByName("main")
+        compilations.create("benchmark") {
+            associateWith(main)
+        }
+    }
+
     sourceSets {
         commonMain.dependencies {
             api(projects.core.model)
@@ -46,4 +55,23 @@ kotlin {
 // target (with SQLite for the host) and on linuxX64.
 tasks.named { it == "testAndroidHostTest" }.configureEach {
     enabled = false
+}
+
+// PLAN.md §10: search over 10,000 synthetic notes in under 50 ms. Not part of `check`, because
+// timings on shared CI machines are noisy. Results are in README.md.
+tasks.register<JavaExec>("searchBenchmark") {
+    group = "verification"
+    description = "Measures search over 10,000 synthetic notes on the JVM."
+    val benchmark = kotlin.jvm().compilations.getByName("benchmark")
+    classpath = files(benchmark.output.allOutputs, benchmark.runtimeDependencyFiles)
+    mainClass = "io.github.sameerkrmishra.jotter.core.storage.SearchBenchmarkKt"
+}
+
+kover {
+    currentProject {
+        sources {
+            // The benchmark is a tool, not product code: it has no tests and is not counted.
+            excludedSourceSets.add("benchmark")
+        }
+    }
 }
