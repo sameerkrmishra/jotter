@@ -13,9 +13,11 @@ public class NoSuchNoteException(
 ) : NoSuchElementException("No note with id $noteId")
 
 /**
- * Thrown by [NoteService.edit] when the note changed since the editor read it: its current
- * revision is no longer the one the edit is based on, so writing the edit would silently drop the
- * other change to the text. The editor should reload the note and let the user redo the edit.
+ * Thrown by [NoteService.edit] when the note's text changed since the editor read it: the title
+ * or body of the revision the edit is based on differ from the current ones (or that revision is
+ * not one of this note's), so writing the edit would silently drop the other change. Tag, pin
+ * and state changes in between do not cause it. The editor should reload the note and let the
+ * user redo the edit.
  *
  * This is a stopgap for M1, where a note has only one head. From M3 on, an edit on an older
  * revision becomes a branch in the note's revision DAG and is merged (ADR-0003).
@@ -29,5 +31,5 @@ public class StaleEditException(
     public val basedOn: RevisionId,
     public val current: RevisionId,
 ) : IllegalStateException(
-        "Note $noteId changed: the edit is based on revision $basedOn, the current one is $current",
+        "The text of note $noteId changed since revision $basedOn; the current one is $current",
     )

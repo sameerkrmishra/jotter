@@ -8,6 +8,7 @@ import app.cash.sqldelight.db.use
 import io.github.sameerkrmishra.jotter.core.sqlite.openSqliteDriver
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -58,7 +59,8 @@ class NoteStoreTest {
             // Schema version 1, as Jotter's, but none of its tables.
             openSqliteDriver(dir.path, EmptySchemaVersion1).use { }
 
-            assertFailsWith<Exception> { openStore(dir.path) }
+            val error = assertFailsWith<Exception> { openStore(dir.path) }
+            assertContains(error.message.orEmpty(), "no such table: device")
             // The store closed its connection again, which removed the WAL.
             assertFalse(dir.exists("-wal"))
         }

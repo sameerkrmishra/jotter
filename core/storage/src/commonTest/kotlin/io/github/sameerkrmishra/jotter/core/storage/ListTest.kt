@@ -97,8 +97,20 @@ class ListTest {
             val trashed = notes.create("", "c", setOf(work, TagName.parse("old")))
             notes.setState(trashed.id, NoteState.TRASHED)
 
+            // U+FF21 (fullwidth A) sorts before U+1F6D2 (a surrogate pair in UTF-16): code
+            // point order, not UTF-16 order.
+            val fullwidth = TagName.parse("\uFF21")
+            val trolley = TagName.parse("\uD83D\uDED2")
+            notes.create("", "d", setOf(trolley, fullwidth))
+
             assertEquals(
-                listOf(TagCount(shopping, 1), TagCount(workUpperCase, 1), TagCount(work, 2)),
+                listOf(
+                    TagCount(shopping, 1),
+                    TagCount(workUpperCase, 1),
+                    TagCount(work, 2),
+                    TagCount(fullwidth, 1),
+                    TagCount(trolley, 1),
+                ),
                 notes.tags(),
             )
         }

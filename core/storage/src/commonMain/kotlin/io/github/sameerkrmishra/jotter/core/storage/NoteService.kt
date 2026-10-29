@@ -18,6 +18,7 @@ import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -82,29 +83,48 @@ public class NoteService internal constructor(
     public fun list(filter: NoteFilter = NoteFilter()): List<Note> =
         listQuery(filter).executeAsList()
 
-    /** Emits [list] for [filter] now and after every change. */
+    /**
+     * Emits [list] for [filter] now and again whenever it changes. See [observe] for when the
+     * query re-runs.
+     */
     public fun observeList(filter: NoteFilter = NoteFilter()): Flow<List<Note>> =
-        listQuery(filter).asFlow().mapToList(queryContext)
-
-    /** Emits [get] for [id] now and after every change; null while there is no such note. */
-    public fun observe(id: NoteId): Flow<Note?> =
-        noteQuery(id).asFlow().mapToOneOrNull(queryContext)
+        listQuery(filter).asFlow().mapToList(queryContext).distinctUntilChanged()
 
     /**
-     * Returns the tags of the notes that are not in the trash, ordered by tag (by UTF-16 code
-     * unit, so case-sensitively), each with the number of such notes that have it.
+     * Emits [get] for [id] now and again whenever it changes; null while there is no such note.
+     *
+     * The query re-runs on `queryContext` after every write transaction through this [NoteStore]
+     * that touches the tables it reads, also when the write does not affect its result; equal
+     * results are not emitted again. Emissions are conflated: a slow collector sees the latest
+     * result, not every intermediate one. Writes by another process do not trigger it.
+     */
+    public fun observe(id: NoteId): Flow<Note?> =
+        noteQuery(id).asFlow().mapToOneOrNull(queryContext).distinctUntilChanged()
+
+    /**
+     * Returns the tags of the notes that are not in the trash, each with the number of such notes
+     * that have it, ordered by tag by Unicode code point (SQLite's binary order of UTF-8), so
+     * case-sensitively.
      */
     public fun tags(): List<TagCount> = tagsQuery().executeAsList()
 
-    /** Emits [tags] now and after every change. */
-    public fun observeTags(): Flow<List<TagCount>> = tagsQuery().asFlow().mapToList(queryContext)
+    /**
+     * Emits [tags] now and again whenever they change. See [observe] for when the query re-runs.
+     */
+    public fun observeTags(): Flow<List<TagCount>> =
+        tagsQuery().asFlow().mapToList(queryContext).distinctUntilChanged()
 
     /**
-     * Replaces the title and body of the note [id], keeping its tags, pinning and state.
+     * Replaces the title and body of the note [id] and keeps its current tags, pinning and state.
+     *
+     * The edit builds on the note's current revision. [basedOn] is only checked: if the title or
+     * body changed since that revision, someone else edited the text in the meantime and saving
+     * would silently drop their change, so the edit is rejected. Tag, pin and state changes in
+     * the meantime are fine and are kept.
      *
      * @param basedOn The [Note.revisionId] the editor showed when the user started editing.
-     * @throws StaleEditException if the note's current revision is not [basedOn]: someone else
-     *   changed it in the meantime, and saving would silently drop that change.
+     * @throws StaleEditException if [basedOn] is not a revision of this note, or its title or body
+     *   differ from the current ones.
      * @throws NoSuchNoteException if there is no note [id].
      */
     public fun edit(
@@ -284,10 +304,11 @@ public class NoteService internal constructor(
     ): Note =
         write { hlc ->
             val current = currentNote(id)
-            if (basedOn != null && basedOn != current.revisionId) {
+            val snapshot = snapshotOf(current)
+            if (basedOn != null && !hasTextOf(id, basedOn, snapshot)) {
                 throw StaleEditException(id, basedOn, current.revisionId)
             }
-            val build = change(snapshotOf(current)) ?: return@write current
+            val build = change(snapshot) ?: return@write current
             val stamp = nextStamp(hlc, after = current.updatedAt)
             val content = build(stamp)
             val revision = userRevision(stamp, current.id, current.revisionId, content)
@@ -313,6 +334,17 @@ public class NoteService internal constructor(
             }
             result
         }
+
+    /** Whether [basedOn] is a revision of the note [id] with the title and body of [current]. */
+    private fun hasTextOf(
+        id: NoteId,
+        basedOn: RevisionId,
+        current: RevisionContent.Snapshot,
+    ): Boolean {
+        val base = revisions.get(basedOn)
+        val text = if (base?.noteId == id) base.content as? RevisionContent.Snapshot else null
+        return text != null && text.title == current.title && text.body == current.body
+    }
 
     private fun currentNote(id: NoteId): Note = get(id) ?: throw NoSuchNoteException(id)
 

@@ -96,19 +96,23 @@ Encoding:
 - **No-op writes** (the same title and body, a tag the note has, the current
   pin or state) write no revision and return the note unchanged.
 - **Stale edits.** `edit` takes the revision the editor started from and
-  fails with `StaleEditException` if the note has moved on, checked inside
-  the write transaction. Without merging (M3), saving would drop the other
-  change. Tag, pin and state changes apply to the current revision: they
-  touch one item and cannot lose concurrent text.
+  builds on the note's current revision. Inside the write transaction it
+  fails with `StaleEditException` if that revision is not one of the note's
+  or its title or body differ from the current ones: without merging (M3),
+  saving would drop the other edit. A tag, pin or state change in between is
+  fine and is kept. Tag, pin and state changes themselves apply to the
+  current revision: they touch one item and cannot lose concurrent text.
 - **Delete forever** is allowed only from the trash. It writes a tombstone
   and removes the `note` row; `history` still returns every revision.
 - **List order:** pinned first, then `updatedAt` descending, then note id,
   so it is total and stable.
 - **Flows** use SQLDelight's `asFlow()` and run their queries on the
-  `queryContext` passed to `open`. They re-run after every write made
-  through the same `NoteStore`, once per transaction. Writes from another
-  process (the CLI while the app runs) do not notify them; the app has to
-  refresh, for example when its window gains focus.
+  `queryContext` passed to `open`. A query re-runs after every write
+  transaction through the same `NoteStore` that touches its tables, even if
+  its result does not change; `distinctUntilChanged()` drops equal results.
+  Emissions are conflated, so a slow collector sees only the latest result.
+  Writes from another process (the CLI while the app runs) do not notify
+  them; the app has to refresh, for example when its window gains focus.
 - **Blocking API.** Every function blocks on SQLite I/O; callers move it off
   the UI thread. It may be called from any thread.
 - **Text must be storable.** SQLite keeps text as UTF-8, which cannot

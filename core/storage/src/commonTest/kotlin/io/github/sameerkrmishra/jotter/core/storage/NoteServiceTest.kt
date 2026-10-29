@@ -5,6 +5,7 @@ import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
+import io.github.sameerkrmishra.jotter.core.model.RevisionId
 import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
@@ -190,6 +191,43 @@ class NoteServiceTest {
 
             assertEquals("edited elsewhere", pinned.body)
             assertEquals(true, pinned.isPinned)
+        }
+
+    @Test
+    fun anEditSurvivesTagPinAndStateChangesSinceItsBase() =
+        withStore(clock) { store ->
+            val notes = store.notes
+            val opened = notes.create("title", "draft", setOf(shopping))
+            notes.setPinned(opened.id, true)
+            notes.addTag(opened.id, urgent)
+            notes.setState(opened.id, NoteState.ARCHIVED)
+
+            val edited = notes.edit(opened.id, opened.revisionId, "title", "my edit")
+
+            assertEquals("my edit", edited.body)
+            assertEquals(setOf(shopping, urgent), edited.tags)
+            assertEquals(true, edited.isPinned)
+            assertEquals(NoteState.ARCHIVED, edited.state)
+            val history = notes.history(opened.id)
+            assertEquals(setOf(history[history.size - 2].id), history.last().parents)
+        }
+
+    @Test
+    fun anEditBasedOnAnotherNotesOrAnUnknownRevisionIsRejected() =
+        withStore(clock) { store ->
+            val notes = store.notes
+            val note = notes.create("", "same")
+            val other = notes.create("", "same")
+            val unknown = RevisionId.parse("0192e6f08b4a7c3e9d2f1a2b3c4d5e6f")
+
+            listOf(other.revisionId, unknown).forEach { basedOn ->
+                val error =
+                    assertFailsWith<StaleEditException> {
+                        notes.edit(note.id, basedOn, "", "edit")
+                    }
+                assertEquals(basedOn, error.basedOn)
+            }
+            assertEquals(note, notes.get(note.id))
         }
 
     @Test

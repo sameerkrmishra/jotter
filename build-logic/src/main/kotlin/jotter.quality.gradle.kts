@@ -3,6 +3,7 @@
 
 import dev.detekt.gradle.Detekt
 import dev.detekt.gradle.extensions.FailOnSeverity
+import java.io.File
 
 plugins {
     id("org.jlleitschuh.gradle.ktlint")
@@ -11,7 +12,8 @@ plugins {
 }
 
 // Generated code (SQLDelight's, in core/storage) is in the build directory. It is not ours to
-// format or analyse, so ktlint and detekt skip it. (Each block reads the path into a local: a
+// format or analyse, so ktlint and detekt skip it. The trailing separator keeps a sibling such as
+// `build-tools/` included. (Each block reads the path into a local: a
 // lambda that refers to a script property cannot be stored in the configuration cache.)
 
 // ktlint reads its code style and line length from the root .editorconfig.
@@ -22,7 +24,7 @@ ktlint {
         val generated =
             layout.buildDirectory.asFile
                 .get()
-                .path
+                .path + File.separator
         exclude { element -> element.file.path.startsWith(generated) }
     }
 }
@@ -38,7 +40,7 @@ tasks.withType<Detekt>().configureEach {
     val generated =
         layout.buildDirectory.asFile
             .get()
-            .path
+            .path + File.separator
     exclude { element -> element.file.path.startsWith(generated) }
 }
 

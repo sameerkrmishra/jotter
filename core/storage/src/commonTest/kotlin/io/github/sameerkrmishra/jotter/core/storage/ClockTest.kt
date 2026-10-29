@@ -113,9 +113,13 @@ class ClockTest {
                                 .flatten()
                         }
 
-                    // Every write read the clock the previous one stored: no timestamp twice.
-                    val timestamps = created.map(Note::updatedAt)
-                    assertEquals(2 * CONCURRENT_WRITES, timestamps.toSet().size)
+                    // Every write read the clock the previous one stored, so with the wall clock
+                    // standing still the counter counts up without a gap or a repeat.
+                    val timestamps = created.map(Note::updatedAt).sorted()
+                    assertEquals(
+                        List(2 * CONCURRENT_WRITES) { HybridTimestamp(1_000, it) },
+                        timestamps,
+                    )
                     assertEquals(2 * CONCURRENT_WRITES, first.notes.list().size)
                 }
             }

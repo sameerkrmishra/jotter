@@ -35,14 +35,16 @@ public class NoteStore private constructor(
          * Opens the database file at [path], or creates it with a new [deviceId] named
          * [deviceName] if it does not exist. Blocking: call it off the UI thread.
          *
+         * If the file cannot be opened, or is a SQLite database that is not Jotter's, this throws
+         * the SQLite driver's exception (androidx `SQLiteException`, which is not part of this
+         * module's API) and leaves nothing open.
+         *
          * @param path The database file, on a local file system (see core/sqlite).
          * @param deviceName A name for this device, such as "Laptop". Used only when the database
          *   is created.
          * @param queryContext Where observation flows run their queries, e.g. an IO dispatcher.
          * @param clock The wall clock that the hybrid logical clock follows.
          * @throws IllegalStateException if the file was written by a newer version of Jotter.
-         * @throws androidx.sqlite.SQLiteException if the file cannot be opened or is not a Jotter
-         *   database.
          */
         public fun open(
             path: String,
