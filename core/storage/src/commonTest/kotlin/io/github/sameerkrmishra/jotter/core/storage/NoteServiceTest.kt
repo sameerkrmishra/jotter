@@ -8,6 +8,10 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.kotest.property.Arb
+import io.kotest.property.arbitrary.set
+import io.kotest.property.checkAll
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -245,10 +249,29 @@ class NoteServiceTest {
             val notes = store.notes
             val note = notes.create("a\uD83D", "\uDE00b")
 
-            assertEquals("a�", note.title)
-            assertEquals("�b", note.body)
+            assertEquals("a\uFFFD", note.title)
+            assertEquals("\uFFFDb", note.body)
             assertEquals(note, notes.get(note.id))
             // The same text again changes nothing.
             assertEquals(note, notes.edit(note.id, note.revisionId, "a\uD83D", "\uDE00b"))
+        }
+
+    @Test
+    fun whatIsStoredReadsBackEqualAndCanBeRedelivered() =
+        runTest {
+            withStore(clock) { store ->
+                val revisions = RevisionStore(store.database.revisionQueries)
+                checkAll(rawTexts, rawTexts, Arb.set(tagNames, 0..3)) { title, body, tags ->
+                    val note = store.notes.create(title, body, tags)
+
+                    assertEquals(title.toStorableText(), note.title)
+                    assertEquals(body.toStorableText(), note.body)
+                    assertEquals(note, store.notes.get(note.id))
+                    // As sync in M3 would: the same revision again must be a no-op.
+                    val revision = store.notes.history(note.id).single()
+                    revisions.insert(revision.copy())
+                    assertEquals(listOf(revision), store.notes.history(note.id))
+                }
+            }
         }
 }

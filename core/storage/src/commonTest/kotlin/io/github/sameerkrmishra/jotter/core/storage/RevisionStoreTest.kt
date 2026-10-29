@@ -115,20 +115,24 @@ class RevisionStoreTest {
         }
 
     @Test
-    fun textWithAnUnpairedSurrogateIsRejected() =
+    fun textThatCannotBeStoredUnchangedIsRejected() =
         runTest {
             withDatabase { db, _ ->
                 val store = RevisionStore(db.revisionQueries)
                 checkAll(revisions) { revision ->
                     val content = revision.content as? RevisionContent.Snapshot ?: return@checkAll
-                    val brokenTitle = content.copy(title = "\uDE00" + content.title)
-                    val brokenBody = content.copy(body = content.body + "\uD83D")
+                    val broken =
+                        listOf(
+                            content.copy(title = "\uDE00" + content.title),
+                            content.copy(body = content.body + "\uD83D"),
+                            content.copy(title = content.title + "\uFFFE"),
+                            content.copy(body = "\uFFFF" + content.body),
+                        )
 
-                    assertFailsWith<IllegalArgumentException> {
-                        store.insert(revision.copy(content = brokenTitle))
-                    }
-                    assertFailsWith<IllegalArgumentException> {
-                        store.insert(revision.copy(content = brokenBody))
+                    broken.forEach { brokenContent ->
+                        assertFailsWith<IllegalArgumentException> {
+                            store.insert(revision.copy(content = brokenContent))
+                        }
                     }
                     assertNull(store.get(revision.id))
                 }

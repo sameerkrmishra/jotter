@@ -28,14 +28,14 @@ internal class RevisionStore(
      * already stored does nothing.
      *
      * @throws IllegalArgumentException if a different revision is stored under the same id, or
-     *   if the title or body has an unpaired surrogate, which cannot be stored unchanged (see
-     *   [withoutLoneSurrogates]).
+     *   if the title or body has a character that cannot be stored unchanged (see
+     *   [toStorableText]).
      */
     fun insert(revision: Revision) {
         val content = revision.content
         if (content is RevisionContent.Snapshot) {
-            require(content.title.isValidUtf16() && content.body.isValidUtf16()) {
-                "Revision ${revision.id} has an unpaired surrogate in its text"
+            require(content.title.isStorableText() && content.body.isStorableText()) {
+                "Revision ${revision.id} has text that SQLite cannot store unchanged"
             }
         }
         queries.transaction {

@@ -31,7 +31,8 @@ stay small, stable and fully tested.
 - **Tags** keep their case and compare exactly. Leading and trailing
   whitespace is trimmed and inner runs become one space, using a fixed list of
   Unicode `White_Space` characters; 1 to 100 characters, no control (Cc)
-  characters. Nothing depends on platform Unicode tables (no case folding, no
+  characters, unpaired surrogates, U+FFFE/U+FFFF or a leading U+FEFF
+  (SQLite cannot store them unchanged). Nothing depends on platform Unicode tables (no case folding, no
   `Char.isWhitespace`), so every device derives the same tag sets and merge
   hashes. NFC is not applied (accepted risk). Decoders use
   `TagName.fromNormalised`, which rejects text that is not already normalised

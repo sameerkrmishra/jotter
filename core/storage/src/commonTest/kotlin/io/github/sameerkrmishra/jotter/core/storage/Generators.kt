@@ -58,10 +58,19 @@ val timestamps: Arb<HybridTimestamp> =
 val stamps: Arb<Stamp> = Arb.bind(timestamps, deviceIds, revisionIds, ::Stamp)
 
 /**
- * Text as a person types it: empty, ASCII (mixed case, punctuation, whitespace), other scripts and
- * characters outside the Basic Multilingual Plane (surrogate pairs). Every string is valid UTF-16.
+ * Characters that need care in storage: U+FEFF, which round-trips unless it starts the text, and
+ * the ones that do not and become U+FFFD ([toStorableText]): NUL, U+FFFE, U+FFFF and unpaired
+ * surrogates.
  */
-val texts: Arb<String> =
+private val awkwardCharacters: Arb<Codepoint> =
+    Arb.element(0x0000, 0xFEFF, 0xFFFE, 0xFFFF, 0xD83D, 0xDE00).map(::Codepoint)
+
+/**
+ * Text as a person or a buggy program may hand it over: empty, ASCII (mixed case, punctuation,
+ * whitespace), other scripts, characters outside the Basic Multilingual Plane (surrogate pairs)
+ * and [awkwardCharacters].
+ */
+val rawTexts: Arb<String> =
     Arb.choice(
         Arb.constant(""),
         Arb.string(0..40, Codepoint.printableAscii()),
@@ -73,12 +82,17 @@ val texts: Arb<String> =
                 Codepoint.cyrillic(),
                 Codepoint.katakana(),
                 Codepoint.egyptianHieroglyphs(),
+                awkwardCharacters,
             ),
         ),
     )
 
-/** Valid tags, mixed case and non-ASCII among them. */
-val tagNames: Arb<TagName> = texts.filter { TagName.parseOrNull(it) != null }.map(TagName::parse)
+/** [rawTexts] made storable, as [NoteService] stores them. */
+val texts: Arb<String> = rawTexts.map { it.toStorableText() }
+
+/** Valid tags, mixed case and non-ASCII among them. Parsing rejects the unstorable ones. */
+val tagNames: Arb<TagName> =
+    rawTexts.filter { TagName.parseOrNull(it) != null }.map(TagName::parse)
 
 val snapshots: Arb<RevisionContent.Snapshot> =
     Arb.bind(

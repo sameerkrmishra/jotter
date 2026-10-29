@@ -36,8 +36,8 @@ import kotlin.time.Instant
  * stamps it with its own [Revision.stamp], and every other revision carries the stamp over
  * unchanged.
  *
- * Text is stored as given, except that an unpaired surrogate (invalid UTF-16, which SQLite
- * cannot store) becomes U+FFFD.
+ * Text is stored as given, except that the characters SQLite cannot store unchanged (unpaired
+ * surrogates, U+FFFE and U+FFFF) become U+FFFD.
  *
  * All functions block on database I/O: call them off the UI thread. They may be called from any
  * thread. The observation flows re-run their query after every change made through this
@@ -64,8 +64,8 @@ public class NoteService internal constructor(
             val stamp = nextStamp(hlc, after = null)
             val content =
                 RevisionContent.Snapshot(
-                    title = title.withoutLoneSurrogates(),
-                    body = body.withoutLoneSurrogates(),
+                    title = title.toStorableText(),
+                    body = body.toStorableText(),
                     tags = tags,
                     pinned = Stamped(pinned, stamp),
                     state = Stamped(NoteState.ACTIVE, stamp),
@@ -114,8 +114,8 @@ public class NoteService internal constructor(
         body: String,
     ): Note =
         change(id, basedOn) { current ->
-            val newTitle = title.withoutLoneSurrogates()
-            val newBody = body.withoutLoneSurrogates()
+            val newTitle = title.toStorableText()
+            val newBody = body.toStorableText()
             if (newTitle == current.title && newBody == current.body) {
                 null
             } else {

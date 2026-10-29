@@ -3,10 +3,10 @@ package io.github.sameerkrmishra.jotter.core.storage
 import io.github.sameerkrmishra.jotter.core.model.TagName
 
 /** Marks where a match starts in the text that `highlight()` and `snippet()` return (Note.sq). */
-private const val MATCH_START = ''
+private const val MATCH_START = '\uE000'
 
 /** Marks where a match ends. */
-private const val MATCH_END = ''
+private const val MATCH_END = '\uE001'
 
 /** What separates words in a query: [TagName.WHITESPACE] and NUL. */
 private const val SEPARATORS = TagName.WHITESPACE + "\u0000"
@@ -25,8 +25,9 @@ private const val SEPARATORS = TagName.WHITESPACE + "\u0000"
  * a C string, where NUL would end it inside a quoted string, a syntax error.
  */
 internal fun ftsQuery(text: String): String? {
-    val spaced = text.withoutLoneSurrogates().map { if (it in SEPARATORS) ' ' else it }
-    val words = spaced.joinToString("").split(' ').filter { it.isNotEmpty() }
+    // Separators first: toStorableText would turn NUL into U+FFFD.
+    val spaced = text.map { if (it in SEPARATORS) ' ' else it }.joinToString("")
+    val words = spaced.toStorableText().split(' ').filter { it.isNotEmpty() }
     if (words.isEmpty()) return null
     return words.joinToString(separator = " ", postfix = "*") { word ->
         "\"" + word.replace("\"", "\"\"") + "\""

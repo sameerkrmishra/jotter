@@ -30,7 +30,7 @@ class SearchTest {
             notes.create("Bread", "")
 
             assertEquals(listOf(both), notes.search("bread milk").map(SearchHit::note))
-            assertEquals(listOf(both), notes.search("  MILK　Bread ").map(SearchHit::note))
+            assertEquals(listOf(both), notes.search("  MILK\u3000Bread ").map(SearchHit::note))
         }
 
     @Test
@@ -59,9 +59,9 @@ class SearchTest {
     fun accentsAndCaseAreIgnored() =
         withStore(clock) { store ->
             val notes = store.notes
-            val note = notes.create("", "Café au lait, crème brûlée")
+            val note = notes.create("", "Caf\u00E9 au lait, cr\u00E8me br\u00FBl\u00E9e")
 
-            listOf("cafe", "CAFÉ", "creme brulee", "Brûlée").forEach { query ->
+            listOf("cafe", "CAF\u00C9", "creme brulee", "Br\u00FBl\u00E9e").forEach { query ->
                 assertEquals(listOf(note), notes.search(query).map(SearchHit::note), query)
             }
         }
@@ -99,7 +99,7 @@ class SearchTest {
         withStore(clock) { store ->
             store.notes.create("", "- [ ] milk")
 
-            listOf("", " ", "　\t\n", "\"", "-", "*", "( )", "- [ ]").forEach { query ->
+            listOf("", " ", "\u3000\t\n", "\"", "-", "*", "( )", "- [ ]").forEach { query ->
                 assertEquals(emptyList(), store.notes.search(query), "\"$query\"")
             }
         }
@@ -108,8 +108,11 @@ class SearchTest {
     fun noQueryThrowsAndEveryHighlightIsValid() =
         runTest {
             withStore(clock) { store ->
-                store.notes.create("Café \"NEAR\" (notes)", "a b: c - d * e ^f 😀 \u0000 x")
-                store.notes.create("", "milk  ")
+                store.notes.create(
+                    "Caf\u00E9 \"NEAR\" (notes)",
+                    "a b: c - d * e ^f \uD83D\uDE00 \u0000 x",
+                )
+                store.notes.create("", "\uE000milk\uE001 \uE001 \uE000")
                 val syntax =
                     Arb.element(
                         "\"",
@@ -183,7 +186,10 @@ class SearchTest {
                     .single()
                     .snippet
 
-            assertTrue(snippet.text.startsWith("…") && snippet.text.endsWith("…"), snippet.text)
+            assertTrue(
+                snippet.text.startsWith("\u2026") && snippet.text.endsWith("\u2026"),
+                snippet.text,
+            )
             assertEquals(listOf("word150"), snippet.matches.map(snippet.text::substring))
         }
 
@@ -258,10 +264,10 @@ class SearchTest {
             mapOf(
                 "" to Highlighted("", emptyList()),
                 "no match" to Highlighted("no match", emptyList()),
-                "a b cd" to Highlighted("a b cd", listOf(0..0, 4..5)),
+                "\uE000a\uE001 b \uE000cd\uE001" to Highlighted("a b cd", listOf(0..0, 4..5)),
                 // A note's own marker characters: unpaired or empty ones give no range.
-                "ab" to Highlighted("ab", emptyList()),
-                "ab" to Highlighted("ab", listOf(1..1)),
+                "\uE001a\uE000\uE001b\uE000" to Highlighted("ab", emptyList()),
+                "\uE000a\uE000b\uE001" to Highlighted("ab", listOf(1..1)),
             )
 
         cases.forEach { (marked, expected) ->

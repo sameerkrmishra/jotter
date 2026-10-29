@@ -15,8 +15,10 @@ import kotlin.jvm.JvmInline
  * 2. Letter case is kept as typed. Case folding needs Unicode tables, which differ between
  *    platforms (older Android versions in particular), and it would lose the user's spelling.
  * 3. The result must be 1 to [MAX_LENGTH] characters (UTF-16 code units) long, must not
- *    contain a control character (Unicode category Cc: U+0000-U+001F, U+007F-U+009F) and must
- *    not contain an unpaired surrogate, which has no UTF-8 encoding.
+ *    contain a control character (Unicode category Cc: U+0000-U+001F, U+007F-U+009F), must
+ *    not contain an unpaired surrogate, which has no UTF-8 encoding, must not contain the
+ *    noncharacters U+FFFE or U+FFFF, which the bundled SQLite build reads back as U+FFFD, and
+ *    must not start with U+FEFF, which it drops as a byte order mark.
  *
  * Unicode normalisation (NFC) is not applied, so the same word typed with combining accents
  * and with precomposed letters gives two tags. That risk is accepted. To limit duplicates, the
@@ -56,7 +58,8 @@ public value class TagName private constructor(
          * Normalises user input [text] into a tag, by the rules described on [TagName].
          *
          * @throws IllegalArgumentException if the normalised text is empty, longer than
-         *   [MAX_LENGTH], or contains a control character or an unpaired surrogate.
+         *   [MAX_LENGTH], contains a control character, an unpaired surrogate, U+FFFE or
+         *   U+FFFF, or starts with U+FEFF.
          */
         public fun parse(text: String): TagName =
             requireNotNull(parseOrNull(text)) { "Not a valid tag: \"$text\"" }
@@ -67,6 +70,8 @@ public value class TagName private constructor(
             val isValid =
                 normalised.length in 1..MAX_LENGTH &&
                     normalised.none(::isControl) &&
+                    normalised.none(::isNoncharacter) &&
+                    !normalised.startsWith(BYTE_ORDER_MARK) &&
                     hasOnlyPairedSurrogates(normalised)
             return if (isValid) TagName(normalised) else null
         }
@@ -109,5 +114,11 @@ public value class TagName private constructor(
             }
 
         private fun isControl(char: Char): Boolean = char <= LAST_C0_CONTROL || char in c1Controls
+
+        // SQLite reads these back changed: the two noncharacters as U+FFFD, and the byte order
+        // mark not at all when it starts the text.
+        private const val BYTE_ORDER_MARK = '\uFEFF'
+
+        private fun isNoncharacter(char: Char): Boolean = char == '\uFFFE' || char == '\uFFFF'
     }
 }

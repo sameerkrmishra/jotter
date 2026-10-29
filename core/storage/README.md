@@ -105,13 +105,16 @@ Encoding:
   refresh, for example when its window gains focus.
 - **Blocking API.** Every function blocks on SQLite I/O; callers move it off
   the UI thread. It may be called from any thread.
-- **Text must be valid UTF-16.** SQLite keeps text as UTF-8, which cannot
+- **Text must be storable.** SQLite keeps text as UTF-8, which cannot
   encode an unpaired surrogate, and the bundled build is not consistent
   about it: on the JVM a lone surrogate turns into another character (a high
-  one swallows the character after it), on Native into U+FFFD. `NoteService`
-  replaces unpaired surrogates in titles and bodies with U+FFFD, and the
-  revision store rejects them, so nothing is stored that does not read back
-  equal.
+  one swallows the character after it), on Native into U+FFFD. U+FFFE and
+  U+FFFF come back as U+FFFD on both. A U+FEFF that starts the text is
+  dropped as a byte order mark on the JVM and becomes U+FFFD on Native, and
+  on Native text ends at the first NUL. `NoteService` replaces all of these
+  in titles and bodies with U+FFFD, the revision store rejects them, and
+  `TagName` does not allow them, so nothing is stored that does not read
+  back equal on every platform. U+FEFF elsewhere round-trips.
 
 ## Search
 
