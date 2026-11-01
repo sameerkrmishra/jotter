@@ -187,7 +187,10 @@ list order, filtered by state and tag like `list`.
   generation: the queries select `note.fts_rowid` instead.
 - FTS5 commands (`INSERT INTO note_fts(note_fts) VALUES (...)`) crash
   generation as named queries; inside triggers they are fine. Run them
-  through the driver (the tests' `integrity-check` does).
+  through the driver (the tests' `integrity-check` does). They do not compile
+  in `.sqm` files either, so a migration cannot run
+  `INSERT INTO note_fts(note_fts) VALUES ('rebuild')`. Re-insert from `note`
+  with a `SELECT` instead, which works.
 - On a join, `MATCH` and auxiliary functions need the table name, and a
   nested subquery that repeats `note` or `note_fts` is rejected ("multiple
   columns found"); SQLDelight also does not resolve an alias of the FTS
