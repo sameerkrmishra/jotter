@@ -28,6 +28,7 @@ of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
 | `NoteStore` | Opens or creates the database file and this device's id. The composition root owns it and closes it |
 | `NoteService` | `create`, `importNote`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows |
 | `ImportedNote`, `ImportResult` | What `importNote` takes, and whether it imported the note or skipped it |
+| `isStorableText` | Whether a title or body will be stored unchanged, or get characters replaced with U+FFFD |
 | `NoteFilter` | A state (active, archived or trash) and optionally a tag |
 | `TagCount` | A tag with the number of notes outside the trash that have it |
 | `SearchHit`, `Highlighted` | A search result: the note and a snippet with its match ranges |

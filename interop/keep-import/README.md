@@ -69,6 +69,7 @@ new one.
 | Edited not later than created | Imported with one revision, no warning (ADR-0009) |
 | A label `TagName` rejects | Imported without that tag, warning `INVALID_TAG` |
 | An attachment | Imported without it, warning `ATTACHMENT_DROPPED` |
+| A title or body with characters SQLite cannot store, such as a lone surrogate | Imported with U+FFFD in their place, warning `TEXT_REPLACED` naming `title` or `body` |
 | Sharees | Imported as a private note, warning `SHARING_DROPPED` with their number |
 | The note has a history here, even a tombstone | Skipped, with no warnings: nothing was imported |
 | The database cannot store the note, such as tens of thousands of labels | Failure `STORAGE_ERROR`; its transaction rolls back and the run goes on |

@@ -6,6 +6,7 @@ import io.github.sameerkrmishra.jotter.core.storage.ImportResult
 import io.github.sameerkrmishra.jotter.core.storage.ImportedNote
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
+import io.github.sameerkrmishra.jotter.core.storage.isStorableText
 import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepLabel
 import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepNote
 import kotlinx.serialization.json.Json
@@ -133,6 +134,7 @@ public class KeepImporter internal constructor(
                     this.imported += ref
                     val invalidLabels = tagsByLabel.filterValues { it == null }.keys
                     warnAbout(source, note, invalidLabels, editedUsec == null)
+                    warnAboutReplacedText(source, imported)
                 }
 
                 null -> {}
@@ -172,6 +174,18 @@ public class KeepImporter internal constructor(
                 warn(source, KeepImportWarning.Kind.INVALID_TAG, label)
             }
             if (editedTimeIsMissing) warn(source, KeepImportWarning.Kind.MISSING_EDITED_TIME, "")
+        }
+
+        private fun warnAboutReplacedText(
+            source: String,
+            note: ImportedNote,
+        ) {
+            if (!note.title.isStorableText()) {
+                warn(source, KeepImportWarning.Kind.TEXT_REPLACED, "title")
+            }
+            if (!note.body.isStorableText()) {
+                warn(source, KeepImportWarning.Kind.TEXT_REPLACED, "body")
+            }
         }
 
         /** The parser's message, without the excerpt of the file, which may hold personal data. */

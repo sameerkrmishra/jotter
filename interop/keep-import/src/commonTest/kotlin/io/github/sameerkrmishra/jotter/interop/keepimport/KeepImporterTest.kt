@@ -400,6 +400,25 @@ class KeepImporterTest {
         }
 
     @Test
+    fun replacedTextIsReportedPerField() =
+        withStore { store ->
+            val fields = """"title":"a\ud83db","textContent":"c\u0000d""""
+            val clean = takeout(2_000_000, """"title":"Fine","textContent":"Fine"""")
+
+            val report =
+                KeepImporter(
+                    store.notes,
+                ).import(documents(takeout(fields = fields), clean))
+
+            assertEquals(
+                listOf("note0.json" to "title", "note0.json" to "body"),
+                report.warnings
+                    .filter { it.kind == KeepImportWarning.Kind.TEXT_REPLACED }
+                    .map { it.source to it.detail },
+            )
+        }
+
+    @Test
     fun aLoneSurrogateInTheJsonIsStoredReplaced() =
         withStore { store ->
             val report =

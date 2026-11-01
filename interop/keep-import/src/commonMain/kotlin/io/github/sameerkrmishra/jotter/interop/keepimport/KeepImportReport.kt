@@ -38,8 +38,8 @@ public data class KeepNoteRef(
  *
  * @property source The [KeepDocument.name].
  * @property kind What happened.
- * @property detail The attachment's file path, the label, or the number of sharees; empty for a
- *   missing time.
+ * @property detail The attachment's file path, the label, the number of sharees, or `title` or
+ *   `body` for replaced text; empty for a missing time.
  */
 public data class KeepImportWarning(
     val source: String,
@@ -53,6 +53,9 @@ public data class KeepImportWarning(
 
         /** The note was shared. Jotter v1 has one user, so it came in as a private note. */
         SHARING_DROPPED,
+
+        /** The text had characters that cannot be stored; they became U+FFFD (see core:storage). */
+        TEXT_REPLACED,
 
         /** A label is not a valid tag. The note came in without it. */
         INVALID_TAG,

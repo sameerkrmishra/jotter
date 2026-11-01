@@ -38,8 +38,11 @@ internal fun String.toStorableText(): String {
     }
 }
 
-/** Whether this string can be stored unchanged, see [toStorableText]. */
-internal fun String.isStorableText(): Boolean = firstUnstorableIndex() < 0
+/**
+ * Whether this string can be stored unchanged. If not, [NoteService] replaces the characters SQLite
+ * cannot store with U+FFFD, so an importer can warn about it with this.
+ */
+public fun String.isStorableText(): Boolean = firstUnstorableIndex() < 0
 
 /** The index of the first character [toStorableText] would replace, or -1. Allocates nothing. */
 private fun String.firstUnstorableIndex(): Int {
