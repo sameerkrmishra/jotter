@@ -142,6 +142,7 @@ class JotterAppTest {
             openNote(note)
 
             onNodeWithTag(BODY_FIELD).performTextInput("mine ")
+            mainClock.advanceTimeBy(AUTOSAVE_IDLE_MS + 1_000)
 
             waitUntil(timeoutMillis = TIMEOUT_MS) { notes.get(note.id)?.body == "mine base" }
         }
@@ -161,7 +162,21 @@ class JotterAppTest {
 
             waitUntil(timeoutMillis = TIMEOUT_MS) { notes.get(note.id)?.body == "mine base" }
             val elapsed = mainClock.currentTime - typedAt
-            assertTrue(elapsed < AUTOSAVE_DELAY_MS, "the key saved, not the autosave: $elapsed")
+            assertTrue(elapsed < AUTOSAVE_IDLE_MS, "the key saved, not the autosave: $elapsed")
+        }
+
+    @Test
+    fun aPlainSDoesNotSave() =
+        app { notes ->
+            val note = notes.create("", "base")
+            awaitText("base")
+            openNote(note)
+            onNodeWithTag(BODY_FIELD).performTextInput("mine ")
+
+            onNodeWithTag(BODY_FIELD).performKeyInput { pressKey(Key.S) }
+            waitForIdle()
+
+            assertEquals("base", notes.get(note.id)?.body)
         }
 
     @Test

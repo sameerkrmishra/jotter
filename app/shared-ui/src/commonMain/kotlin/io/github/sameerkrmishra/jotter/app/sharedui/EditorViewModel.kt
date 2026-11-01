@@ -25,15 +25,24 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
-/** How long typing must pause before the draft saves itself. */
-internal const val AUTOSAVE_DELAY_MS = 1_000L
+/**
+ * How long typing must pause before the draft saves itself, and how long a failed autosave waits
+ * to try again. Every save is a full snapshot that is kept for good, so this is not as short as
+ * it could be: a 20 kB note saved at each short pause grows the database by megabytes an hour.
+ */
+internal const val AUTOSAVE_IDLE_MS = 5_000L
+
+/** The longest that typing can go on without a pause before the draft saves itself anyway. */
+internal const val AUTOSAVE_MAX_MS = 60_000L
 
 internal const val INVALID_TAG_MESSAGE = "That is not a valid tag."
 internal const val SAVE_FAILED_MESSAGE = "Your text is kept here but could not be saved."
@@ -131,11 +140,7 @@ internal class EditorViewModel(
                 .flatMapLatest(::observed)
                 .collect(::follow)
         }
-        // Not collectLatest: typing must not cancel a save whose write may already have happened,
-        // or the next edit would be based on the revision before it, and be refused as stale.
-        observation.launch {
-            typing.drop(1).debounce(AUTOSAVE_DELAY_MS).collect { autosave() }
-        }
+        observation.launch { autosaveWhileOpen() }
     }
 
     /**
@@ -229,10 +234,22 @@ internal class EditorViewModel(
         }
     }
 
-    // While a problem waits for the user's decision, saving again could only fail again.
-    private suspend fun autosave() {
-        if (problem == null) save()
+    // The save itself is outside the timeout: typing must not cancel a save whose write may already
+    // have happened, or the next edit would be based on the revision before it, and look stale.
+    private suspend fun autosaveWhileOpen() {
+        while (true) {
+            typing.drop(1).first()
+            do {
+                withTimeoutOrNull(AUTOSAVE_MAX_MS) {
+                    typing.debounce(AUTOSAVE_IDLE_MS).first()
+                }
+            } while (!autosave())
+        }
     }
+
+    // Returns whether the autosave is done until the next change to the draft. A failed save tries
+    // again by itself, but a problem waits for the user's decision: saving could only fail again.
+    private suspend fun autosave(): Boolean = problem != null || (save() && !isDirty)
 
     /** Stops observing the note. */
     fun close() {

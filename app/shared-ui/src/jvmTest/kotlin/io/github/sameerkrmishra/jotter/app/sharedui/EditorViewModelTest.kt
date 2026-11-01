@@ -450,15 +450,51 @@ class EditorViewModelTest : ViewModelTest() {
             val editor = open(note)
 
             editor.body = "first"
-            testScheduler.advanceTimeBy(AUTOSAVE_DELAY_MS - 1)
+            testScheduler.advanceTimeBy(AUTOSAVE_IDLE_MS - 1)
             editor.body = "second"
-            testScheduler.advanceTimeBy(AUTOSAVE_DELAY_MS - 1)
+            testScheduler.advanceTimeBy(AUTOSAVE_IDLE_MS - 1)
             assertEquals("base", notes.get(note.id)?.body, "typing goes on")
 
             testScheduler.advanceTimeBy(2)
 
             assertEquals("second", notes.get(note.id)?.body)
             assertFalse(editor.isDirty)
+        }
+
+    @Test
+    fun unbrokenTypingSavesAtTheMaximumInterval() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            val pause = AUTOSAVE_IDLE_MS - 1
+            val keystrokes = AUTOSAVE_MAX_MS / pause
+
+            repeat(keystrokes.toInt() - 1) {
+                editor.body = "text $it"
+                testScheduler.advanceTimeBy(pause)
+            }
+            assertEquals("base", notes.get(note.id)?.body, "not yet")
+
+            repeat(2) {
+                editor.body = "text at the end $it"
+                testScheduler.advanceTimeBy(pause)
+            }
+
+            assertContains(notes.get(note.id)?.body.orEmpty(), "text at the end")
+            assertEquals(2, notes.history(note.id).size, "one autosave in that minute")
+        }
+
+    @Test
+    fun aSettledNoteIsNotSavedAgain() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editor.body = "text"
+            settle()
+
+            testScheduler.advanceTimeBy(10 * AUTOSAVE_MAX_MS)
+
+            assertEquals(2, notes.history(note.id).size)
         }
 
     @Test
@@ -488,9 +524,8 @@ class EditorViewModelTest : ViewModelTest() {
             assertNull(app.pendingExit, "no dialog from the autosave")
 
             database.allowWrites()
-            editor.body = "mine and more"
             settle()
-            assertEquals("mine and more", notes.get(note.id)?.body)
+            assertEquals("mine", notes.get(note.id)?.body, "it tries again without more typing")
             assertNull(editor.message)
         }
 

@@ -53,11 +53,15 @@ Markdown preview comes later.
   Any other failure, such as a full or read-only disk, also keeps it and shows
   SQLite's reason; nothing may escape into a scope where it would end the app.
   Text typed while a save runs stays in the draft.
-- **Saving** is the Save button, Ctrl+S, Back, `requestExit`, and an autosave 1 s
-  after typing stops, all on the same path, so a crash loses about that second. A
-  failed autosave keeps the draft and shows the message like any other save, and
-  the next pause in typing tries again. It waits while a stale or deleted note
-  needs the user's decision, because only that can resolve it. Each autosave is a
+- **Saving** is the Save button, Ctrl+S, Back, `requestExit`, and an autosave, all
+  on the same path. The autosave runs 5 s after typing stops and at the latest
+  60 s after the last save while typing goes on. So a crash loses up to 5 s of
+  text after typing stopped, and up to a minute of unbroken typing. A failed
+  autosave keeps the draft and shows the message like any other save, and tries
+  again every 5 s until it works. It waits while a stale or deleted note needs the
+  user's decision, because only that can resolve it. Each autosave is a full
+  snapshot, kept for good, which is why it is not more frequent: a 20 kB note saved
+  at every 10 s pause adds about 7 MB an hour. Each autosave is a
   revision, so a note gets one per pause. A note emptied after its first
   autosave stays, empty. Back and closing save
   until the draft is clean, so that text typed during the save is not lost with the

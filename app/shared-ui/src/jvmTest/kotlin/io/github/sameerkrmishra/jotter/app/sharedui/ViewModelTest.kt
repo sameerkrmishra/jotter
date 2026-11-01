@@ -8,13 +8,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 
 /**
  * Runs view models against a real temporary store. Everything, the "UI thread" and the "IO
- * dispatcher" alike, runs on the test's dispatcher, so [Fixture.settle] waits for all of it.
+ * dispatcher" alike, runs on the test's dispatcher, on virtual time, so [Fixture.settle] waits for all of it and for an autosave.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 open class ViewModelTest {
@@ -39,7 +38,11 @@ open class ViewModelTest {
         val app = AppViewModel(notes, scope, dispatcher)
         internal val list get() = app.list
 
-        fun settle() = test.advanceUntilIdle()
+        // Not advanceUntilIdle: while a draft cannot be saved, the autosave never stops trying.
+        fun settle() {
+            testScheduler.advanceTimeBy(AUTOSAVE_IDLE_MS)
+            testScheduler.runCurrent()
+        }
 
         fun close() {
             scope.cancel()
