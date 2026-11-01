@@ -8,4 +8,5 @@ dependencies {
     kover(projects.core.model)
     kover(projects.core.sqlite)
     kover(projects.core.storage)
+    kover(projects.interop.keepImport)
 }

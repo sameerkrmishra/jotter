@@ -61,8 +61,10 @@ builds join CI once those modules exist.
 ## Testing
 
 - The coverage gate is 95% line and branch coverage. Generated code
-  (SQLDelight) and thin platform entry points (Activity, `main()`) are
-  excluded. Kover cannot measure Kotlin/Native, so the `linuxX64` tests must
+  (SQLDelight), serialization DTOs in a `dto` package and thin platform entry
+  points (Activity, `main()`) are excluded. A `dto` package holds plain data
+  only, because the serialization plugin's generated branches cannot all be
+  reached by tests and nothing in it is measured. Kover cannot measure Kotlin/Native, so the `linuxX64` tests must
   pass but do not count towards the gate.
 - Tests must be meaningful. They should check behaviour and edge cases, not
   just execute lines. Tests written only to raise coverage will be rejected in
