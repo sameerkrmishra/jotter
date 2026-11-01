@@ -61,7 +61,7 @@ internal fun yamlQuoted(text: String): String =
         append('"')
     }
 
-private fun Char.needsYamlEscape(): Boolean = isControl() || this in ESCAPED
+private fun Char.needsYamlEscape(): Boolean = isISOControl() || this in ESCAPED
 
 private fun StringBuilder.appendYamlEscape(char: Char) {
     append("\\u").append(

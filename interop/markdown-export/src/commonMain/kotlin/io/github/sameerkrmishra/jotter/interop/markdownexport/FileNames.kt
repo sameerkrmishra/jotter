@@ -84,7 +84,7 @@ private fun replaceUnsafe(title: String): String {
         when {
             char in TagName.WHITESPACE -> safe.append(' ')
             char.isInvisible() -> Unit
-            char.isControl() || char in FORBIDDEN -> safe.append(REPLACEMENT)
+            char.isISOControl() || char in FORBIDDEN -> safe.append(REPLACEMENT)
             title.isLoneSurrogate(index) -> safe.append(REPLACEMENT)
             else -> safe.append(char)
         }
