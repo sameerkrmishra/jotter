@@ -19,12 +19,14 @@ kotlin {
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
             implementation(libs.compose.ui)
+            implementation(libs.markdown)
         }
         jvmTest.dependencies {
             implementation(libs.androidx.sqlite)
             implementation(libs.androidx.sqlite.bundled)
             implementation(libs.compose.desktop.linux.x64)
             implementation(libs.compose.ui.test)
+            implementation(libs.kotest.property)
             implementation(libs.kotlinx.coroutines.test)
         }
     }
