@@ -383,6 +383,23 @@ class EditorViewModelTest : ViewModelTest() {
         }
 
     @Test
+    fun aTagAloneDoesNotCreateANote() =
+        test {
+            val editor = open(null)
+            editor.tagInput = "work"
+            editor.addTag()
+            editor.body = " "
+            assertFalse(editor.isDirty)
+            settle()
+
+            app.leaveEditor()
+            settle()
+
+            assertNull(app.editor)
+            assertEquals(emptyList(), notes.list())
+        }
+
+    @Test
     fun aTagChangeLeavesAStaleProblemInPlace() =
         test {
             val note = notes.create("", "base")

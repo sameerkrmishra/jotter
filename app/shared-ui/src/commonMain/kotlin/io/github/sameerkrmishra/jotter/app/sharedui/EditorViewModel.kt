@@ -132,7 +132,7 @@ internal class EditorViewModel(
     val isDirty: Boolean
         get() =
             base?.let { title != it.title || body != it.body }
-                ?: (title.isNotBlank() || body.isNotBlank() || tags.isNotEmpty())
+                ?: (title.isNotBlank() || body.isNotBlank())
 
     init {
         observation.launch {

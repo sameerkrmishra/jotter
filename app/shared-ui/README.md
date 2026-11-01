@@ -67,12 +67,13 @@ Markdown preview comes later.
   until the draft is clean, so that text typed during the save is not lost with the
   editor, and "Saving…" shows meanwhile, up to 5 s if the database is locked. If
   saving fails, Back stays in the editor with the message showing, and closing asks
-  whether to keep editing or close without saving. A new note that never had text
-  is not created.
+  whether to keep editing or close without saving. No note exists until it has
+  text that is not blank, whatever tags the draft has.
 - **Tags** are stored at once, not with the text: `addTag` and `removeTag` apply to
   the current revision and cannot lose text. The note they return does not become
   the editor's base, as it may hold someone else's text, which the next edit must
-  still notice. A new note keeps its tags in the editor until its first save.
+  still notice. A new note keeps its tags in the editor until its first save, and
+  they alone do not create it.
   Invalid input shows a message and stays in the field.
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
