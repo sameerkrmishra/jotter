@@ -45,11 +45,14 @@ class InteropEndToEndTest {
             put("HOME", directory.resolve("home").toString())
             put(DATABASE_ENVVAR, directory.resolve("notes.db").toString())
         }
+        // In files: reading a pipe here would block until end of file, past any timeout.
+        val stdout = directory.resolve("stdout")
         val stderr = directory.resolve("stderr")
-        val process = builder.redirectError(stderr.toFile()).start()
-        val output = process.inputStream.bufferedReader().readText()
-        assertTrue(process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS), "jotter did not exit")
-        return Exit(process.exitValue(), output, stderr.readText())
+        val process = builder.redirectOutput(stdout.toFile()).redirectError(stderr.toFile()).start()
+        val exited = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        if (!exited) process.destroyForcibly()
+        assertTrue(exited, "jotter did not exit")
+        return Exit(process.exitValue(), stdout.readText(), stderr.readText())
     }
 
     private fun assertSucceeds(
