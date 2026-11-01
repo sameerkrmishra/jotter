@@ -25,9 +25,12 @@ for the UI.
 ## Decisions
 
 The merged text of a clean merge goes into the automatic merge's hash id, so
-**every rule below is part of the sync format**. Two versions of the merge that
-disagree on a text produce different revisions from the same heads.
-`theMergedTextOfAHardMergeIsPinned` fails if the behaviour of a hard case moves.
+**every rule below, and `MAX_EDITS`, is part of the sync format**, and changing
+one needs a format version
+([ADR-0011](../../docs/adr/0011-touching-changes-and-merge-format.md)). Two
+versions of the merge that disagree on a text produce different revisions from
+the same heads. `theMergedTextOfAHardMergeIsPinned` fails if the behaviour of a
+hard case moves.
 
 - **Determinism.** The result depends only on the three strings. There is no
   locale, no platform line handling and no Unicode table: lines are cut only
@@ -41,8 +44,12 @@ disagree on a text produce different revisions from the same heads.
   a merge orders changes by their base position only. The one place where a
   merge would have to pick a side to go first, two different insertions at one
   position, is a conflict rather than a tie-break, so head order cannot change
-  an automatic merge's content, and so its id. The same insertion on both sides
-  is one insertion.
+  an automatic merge's content, and so its id.
+- **Identical insertions count as one.** That holds at one position, and for an
+  insertion touching the other side's change if all its lines repeat that
+  change's new lines at the end that touches it: base `b`, ours `B`, `milk`,
+  theirs `b`, `milk` gives `B`, `milk`. An insertion that only partly repeats the
+  change, or matches its far end, is kept whole, so such a line can appear twice.
 - **Touching changes merge.** Changes to adjacent lines, and an insertion right
   next to a changed line, are not a conflict. Git and classic diff3 do conflict
   here, because they need an unchanged line between two changes. We don't,
@@ -89,9 +96,11 @@ disagree on a text produce different revisions from the same heads.
   memory O(1024²), even for texts with nothing in common. Plain Myers would take
   about 10¹⁰ steps there. Two bodies of up to 512 lines each are always diffed
   exactly. Above the limit a diff is still correct, but it can be longer than
-  the shortest, which can only cost an extra conflict.
-- **Line ids.** Interning and comparing whole lines has no protection against
-  crafted hash collisions. Merge input comes from the user's own devices.
+  the shortest, which can cost an extra conflict or place a change differently.
+- **Line ids.** Lines are numbered through a hash map, which has no protection
+  against crafted collisions. 65,536 colliding lines took 134 ms on the JVM and
+  6 min 18 s on the Native debug binary. Only Native is quadratic here, and
+  nothing ships there yet (ADR-0006).
 
 ## Performance
 
@@ -116,7 +125,10 @@ line break, repeated lines, non-BMP characters and unpaired surrogates. The
 properties are `merge(a, a, b) == b`, `merge(a, b, a) == b`,
 `merge(a, b, b) == b`, `merge(a, a, a) == a`, symmetry on related and unrelated
 texts, that a clean merge holds only lines of its inputs, and that generated
-non-overlapping edits always merge to exactly both edits.
+non-overlapping edits always merge to exactly both edits. A generator of
+touching edits, built from lines that are unsafe to join and from repeated
+insertions, checks the laws, symmetry and that no line is altered. A second one
+checks that lines added on both sides next to an edit appear once.
 
 The tests for large bodies do not look at a clock. They count the diff's steps
 (`DiffCost`) and require them to stay within the linear bound, on inputs built
