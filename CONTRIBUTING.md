@@ -34,13 +34,14 @@ The reasons behind these are recorded in [docs/adr/](docs/adr/README.md).
 
 ## Everyday commands
 
-The exact task names are finalised by the build-skeleton task in milestone M0.
-The intended interface is:
-
 | Command | What it does |
 |---|---|
-| `./gradlew check` | Compiles, runs all tests (JVM, Android host and Kotlin/Native `linuxX64`), Android Lint, ktlint, detekt and the 95% Kover coverage gate |
+| `./gradlew check` | Compiles, runs all tests (JVM, Android host and Kotlin/Native `linuxX64`), Android Lint, ktlint, detekt and the 95% coverage gate |
 | `./gradlew ktlintFormat` | Reformats Kotlin sources to the project style |
+
+The coverage gate is the root project's `koverVerifyCoverage` task, which `check`
+runs. The plain `koverVerify` tasks have no rule and always pass, so do not use
+them.
 
 Run `./gradlew check` before every commit. CI
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same
@@ -101,8 +102,9 @@ Reviewers check: correctness and edge cases; readability; naming; fit with the
 module boundaries and ADRs; meaningful tests; present and accurate KDoc; no
 dead code and no premature abstraction.
 
-In addition, the maintainer reviews the project at milestone boundaries. Each
-milestone ends with a demo and a short summary of the decisions made.
+In addition, the maintainer reviews the project at the end, not at milestone
+boundaries. Each milestone still ends with a demo and a short summary of the
+decisions made, in [docs/milestones/](docs/milestones/).
 
 ## Proposing an architectural change
 
