@@ -47,3 +47,4 @@ rootProject.name = "jotter"
 include(":core:model")
 include(":core:sqlite")
 include(":core:storage")
+include(":interop:markdown-export")
