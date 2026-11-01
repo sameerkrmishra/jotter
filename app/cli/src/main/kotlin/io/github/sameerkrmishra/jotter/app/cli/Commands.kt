@@ -119,7 +119,7 @@ internal class TagsCommand(
     }
 }
 
-private fun NullableOption<String, String>.tag() =
+internal fun NullableOption<String, String>.tag() =
     convert("TAG") { TagName.parseOrNull(it) ?: fail("not a valid tag: \"$it\"") }
 
 /** An empty path would otherwise mean the current directory. */

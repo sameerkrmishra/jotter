@@ -35,6 +35,7 @@ internal class JotterCommand(
             SearchCommand(location),
             TagsCommand(location),
             ImportCommand(location),
+            ExportCommand(location),
         )
     }
 
