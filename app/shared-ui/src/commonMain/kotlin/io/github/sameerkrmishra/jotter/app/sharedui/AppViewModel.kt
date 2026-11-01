@@ -59,7 +59,7 @@ public class AppViewModel(
      */
     public fun requestExit(exit: () -> Unit) {
         scope.launch {
-            if (editor?.saveAll() != false) exit() else pendingExit = exit
+            if (editor?.finish() != false) exit() else pendingExit = exit
         }
     }
 
@@ -71,7 +71,7 @@ public class AppViewModel(
     /** Saves and closes the editor. If saving fails, it stays open and keeps the text. */
     internal fun leaveEditor() {
         scope.launch {
-            if (editor?.saveAll() == true) discardEditor()
+            if (editor?.finish() == true) discardEditor()
         }
     }
 

@@ -61,9 +61,9 @@ Markdown preview comes later.
   again every 5 s until it works. It waits while a stale or deleted note needs the
   user's decision, because only that can resolve it. Each autosave is a full
   snapshot, kept for good, which is why it is not more frequent: a 20 kB note saved
-  at every 10 s pause adds about 7 MB an hour. Each autosave is a
-  revision, so a note gets one per pause. A note emptied after its first
-  autosave stays, empty. Back and closing save
+  at every 10 s pause adds about 7 MB an hour.
+  A note that this editor created and the user then emptied goes to the trash on
+  Back or on closing. An older note that is emptied stays, empty. Back and closing save
   until the draft is clean, so that text typed during the save is not lost with the
   editor, and "Saving…" shows meanwhile, up to 5 s if the database is locked. If
   saving fails, Back stays in the editor with the message showing, and closing asks

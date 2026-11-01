@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
+import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.NoSuchNoteException
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
@@ -82,6 +83,9 @@ internal class EditorViewModel(
 
     // One save at a time: a second one must see the revision that the first one wrote.
     private val saving = Mutex()
+
+    // Whether a save of this editor created the note, so that it has no content from before.
+    private var createdHere = false
 
     // Counts changes to the draft, for the autosave to wait for a pause.
     private val typing = MutableStateFlow(0)
@@ -162,6 +166,7 @@ internal class EditorViewModel(
                             notes.edit(current.id, current.revisionId, draftTitle, draftBody)
                         }
                     }
+                createdHere = createdHere || current == null
                 stored(saved, draftTitle, draftBody)
             }
         }
@@ -176,6 +181,27 @@ internal class EditorViewModel(
         }
         return true
     }
+
+    /**
+     * Finishes editing, on Back or on exit: saves, and moves a note that this editor created and
+     * the user then emptied to the trash, as it would never have existed without the autosave. Any
+     * older note stays as it is, emptied or not. Returns whether it is safe to leave.
+     */
+    suspend fun finish(): Boolean = saveAll() && trashIfEmptied()
+
+    private suspend fun trashIfEmptied(): Boolean {
+        val id = base?.id?.takeIf { createdHere && title.isBlank() && body.isBlank() } ?: return true
+        return saving.withLock {
+            guarded(keepsProblem = true) {
+                withContext(io) {
+                    // It is read again, as the CLI may have given it text in the meantime.
+                    if (notes.get(id)?.isEmpty() == true) notes.setState(id, NoteState.TRASHED)
+                }
+            }
+        }
+    }
+
+    private fun Note.isEmpty() = title.isBlank() && body.isBlank()
 
     /** Stores the draft as a new note with the same tags, for when it cannot replace this one. */
     suspend fun saveAsNewNote(): Boolean =
@@ -218,7 +244,7 @@ internal class EditorViewModel(
     ) {
         saving.withLock {
             val id = base?.id
-            guarded(clearsProblem = false) {
+            guarded(keepsProblem = true) {
                 tags = if (id == null) inMemory(tags) else withContext(io) { inStore(id) }.tags
             }
         }
@@ -303,13 +329,13 @@ internal class EditorViewModel(
     // app, and a disk that is full or read-only must not cost the user their text.
     @Suppress("TooGenericExceptionCaught") // The driver's exception is not in NoteService's API.
     private suspend fun guarded(
-        clearsProblem: Boolean = true,
+        keepsProblem: Boolean = false,
         block: suspend () -> Unit,
     ): Boolean {
         isSaving = true
         try {
             block()
-            if (clearsProblem) problem = null
+            if (!keepsProblem) problem = null
             message = null
             return true
         } catch (e: CancellationException) {

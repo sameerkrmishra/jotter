@@ -400,6 +400,78 @@ class EditorViewModelTest : ViewModelTest() {
         }
 
     @Test
+    fun aNoteCreatedHereAndEmptiedGoesToTheTrashOnBack() =
+        test {
+            val editor = open(null)
+            editor.body = "text"
+            settle()
+            val id = notes.list().single().id
+            editor.body = ""
+
+            app.leaveEditor()
+            settle()
+
+            assertNull(app.editor)
+            assertEquals(NoteState.TRASHED, notes.get(id)?.state)
+        }
+
+    @Test
+    fun anOlderNoteThatIsEmptiedStays() =
+        test {
+            val note = notes.create("", "base")
+            open(note).body = ""
+
+            app.leaveEditor()
+            settle()
+
+            assertEquals(NoteState.ACTIVE, notes.get(note.id)?.state)
+        }
+
+    @Test
+    fun aNewNoteWithTextStays() =
+        test {
+            open(null).body = "text"
+
+            app.leaveEditor()
+            settle()
+
+            assertEquals(NoteState.ACTIVE, notes.list().single().state)
+        }
+
+    @Test
+    fun aNoteGivenTextElsewhereIsNotTrashed() =
+        test {
+            val editor = open(null)
+            editor.body = "text"
+            settle()
+            val note = notes.list().single()
+            editor.body = ""
+            assertTrue(editor.save())
+            database.fromOutside {
+                it.notes.edit(note.id, assertNotNull(editor.base).revisionId, "", "theirs")
+            }
+
+            app.leaveEditor()
+            settle()
+
+            assertEquals(NoteState.ACTIVE, notes.get(note.id)?.state)
+        }
+
+    @Test
+    fun aNoteDeletedElsewhereHasNothingToTrash() =
+        test {
+            val editor = open(null)
+            editor.body = "text"
+            settle()
+            val note = notes.list().single()
+            editor.body = ""
+            assertTrue(editor.save())
+            deleteFromOutside(note)
+
+            assertTrue(editor.finish())
+        }
+
+    @Test
     fun aTagChangeLeavesAStaleProblemInPlace() =
         test {
             val note = notes.create("", "base")
