@@ -8,8 +8,10 @@ import kotlin.uuid.Uuid
  * The identity of a note: a UUID that stays the same across edits, devices and backends.
  *
  * New ids come from [generate], which creates a UUIDv7: its leading bits are the creation time, so
- * ids are unique without coordination between devices and sort roughly by creation order. Stored
- * or received ids come back through [parse] or [parseOrNull], which accept any UUID version.
+ * ids are unique without coordination between devices and sort roughly by creation order. An
+ * imported note's id is instead derived from the source note (ADR-0009), so ids in general do not
+ * sort by creation time. Stored or received ids come back through [parse] or [parseOrNull], which
+ * accept any UUID version.
  * Every instance therefore holds a valid UUID in canonical form, and two ids for the same UUID
  * are always equal, whatever letter case or format the input used. [toString] returns that
  * canonical form, which is also the form to store and exchange.

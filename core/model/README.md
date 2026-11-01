@@ -14,7 +14,7 @@ stay small, stable and fully tested.
 
 | Type | What it is |
 |---|---|
-| `NoteId` | A note's identity. New ids are UUIDv7 |
+| `NoteId` | A note's identity. New ids are UUIDv7; an imported note's id is derived from the source note ([ADR-0009](../../docs/adr/0009-import-preserves-source-timestamps.md)) |
 | `DeviceId` | One installation's identity, a random UUID (v4). Ordered as unsigned bytes |
 | `RevisionId` | A revision's identity: UUIDv7 for user revisions, a 32-byte content hash for automatic merges. Text form is lowercase hex without dashes; ordered as unsigned bytes |
 | `TagName` | A normalised tag (rules below) |
