@@ -187,19 +187,33 @@ internal class EditorViewModel(
      * the user then emptied to the trash, as it would never have existed without the autosave. Any
      * older note stays as it is, emptied or not. Returns whether it is safe to leave.
      */
-    suspend fun finish(): Boolean = saveAll() && trashIfEmptied()
+    suspend fun finish(): Boolean {
+        // A running save decides what is stored, and so whether the draft differs from it.
+        saving.withLock {}
+        return saveAll() && trashIfEmptied()
+    }
 
+    // Returns false if the user typed in the meantime: then there is a note to go on editing.
     private suspend fun trashIfEmptied(): Boolean {
         val id =
             base?.id?.takeIf { createdHere && title.isBlank() && body.isBlank() } ?: return true
-        return saving.withLock {
-            guarded(keepsProblem = true) {
-                withContext(io) {
-                    // It is read again, as the CLI may have given it text in the meantime.
-                    if (notes.get(id)?.isEmpty() == true) notes.setState(id, NoteState.TRASHED)
+        val done =
+            saving.withLock {
+                guarded(keepsProblem = true) {
+                    if (!isDirty) {
+                        withContext(io) {
+                            // It is read again, as the CLI may have given it text in the meantime.
+                            if (notes.get(id)?.isEmpty() == true) {
+                                notes.setState(id, NoteState.TRASHED)
+                            }
+                        }
+                    }
+                    if (isDirty) withContext(io) { notes.setState(id, NoteState.ACTIVE) }
                 }
             }
-        }
+        val typed = isDirty
+        if (done && typed) save()
+        return done && !typed
     }
 
     private fun Note.isEmpty() = title.isBlank() && body.isBlank()

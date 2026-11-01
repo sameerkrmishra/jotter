@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.sharedui
 
 import io.github.sameerkrmishra.jotter.core.model.NoteState
+import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -261,5 +262,143 @@ class EditorLeavingTest : EditorTest() {
 
             assertTrue(exited)
             assertEquals("first and more", notes.get(note.id)?.body)
+        }
+
+    private fun Fixture.emptiedNote(
+        io: HeldDispatcher,
+        held: AppViewModel,
+    ): EditorViewModel {
+        held.openEditor(null)
+        val editor = assertNotNull(held.editor)
+        editor.body = "text"
+        scope.launch { editor.save() }
+        io.release()
+        testScheduler.runCurrent()
+        editor.body = ""
+        scope.launch { editor.save() }
+        io.release()
+        testScheduler.runCurrent()
+        return editor
+    }
+
+    @Test
+    fun textTypedDuringTheTrashWriteKeepsTheNoteAndTheEditor() =
+        test {
+            val io = HeldDispatcher()
+            val held = AppViewModel(notes, scope, io)
+            val editor = emptiedNote(io, held)
+            val id = assertNotNull(editor.base).id
+
+            held.leaveEditor()
+            testScheduler.runCurrent()
+            assertTrue(editor.isSaving, "the trash write is running")
+            editor.body = "typed"
+            io.release()
+            testScheduler.runCurrent()
+            io.release()
+            testScheduler.runCurrent()
+            io.release()
+            testScheduler.runCurrent()
+
+            assertEquals(editor, held.editor)
+            assertEquals(NoteState.ACTIVE, notes.get(id)?.state)
+            assertEquals("typed", notes.get(id)?.body)
+            assertFalse(editor.isDirty)
+            editor.close()
+        }
+
+    @Test
+    fun backDuringASaveSavesTextTypedBackToTheBase() =
+        test {
+            val note = notes.create("", "base")
+            val io = HeldDispatcher()
+            val held = AppViewModel(notes, scope, io)
+            held.openEditor(note)
+            val editor = assertNotNull(held.editor)
+            editor.body = "changed"
+            scope.launch { editor.save() }
+            testScheduler.runCurrent()
+
+            editor.body = "base"
+            held.leaveEditor()
+            testScheduler.runCurrent()
+            io.release()
+            testScheduler.runCurrent()
+            io.release()
+            testScheduler.runCurrent()
+
+            assertNull(held.editor)
+            assertEquals("base", notes.get(note.id)?.body)
+        }
+
+    @Test
+    fun aNewNoteEmptiedDuringItsCreationGoesToTheTrash() =
+        test {
+            val io = HeldDispatcher()
+            val held = AppViewModel(notes, scope, io)
+            held.openEditor(null)
+            val editor = assertNotNull(held.editor)
+            editor.body = "text"
+            scope.launch { editor.save() }
+            testScheduler.runCurrent()
+
+            editor.body = ""
+            held.leaveEditor()
+            testScheduler.runCurrent()
+            repeat(3) {
+                io.release()
+                testScheduler.runCurrent()
+            }
+
+            assertNull(held.editor)
+            assertEquals(emptyList(), notes.list())
+            assertEquals(1, notes.list(NoteFilter(NoteState.TRASHED)).size)
+        }
+
+    @Test
+    fun aFailedTrashWriteStaysInTheEditor() =
+        test {
+            val io = HeldDispatcher()
+            val held = AppViewModel(notes, scope, io)
+            val editor = emptiedNote(io, held)
+            database.failWrites()
+
+            held.leaveEditor()
+            testScheduler.runCurrent()
+            io.release()
+            testScheduler.runCurrent()
+
+            assertEquals(editor, held.editor)
+            assertContains(editor.message.orEmpty(), "disk full")
+            editor.close()
+        }
+
+    @Test
+    fun textTypedBeforeTheTrashWriteGetsTheLockKeepsTheNote() =
+        test {
+            val io = HeldDispatcher()
+            val held = AppViewModel(notes, scope, io)
+            val editor = emptiedNote(io, held)
+            val id = assertNotNull(editor.base).id
+            editor.body = " "
+
+            held.leaveEditor()
+            testScheduler.runCurrent()
+            // The tag change waits for the save, and the trash write then waits for the tag change.
+            editor.tagInput = "work"
+            val tagging = scope.launch { editor.addTag() }
+            io.release()
+            testScheduler.runCurrent()
+            editor.body = "typed"
+            repeat(3) {
+                io.release()
+                testScheduler.runCurrent()
+            }
+            tagging.join()
+
+            assertEquals(editor, held.editor)
+            assertEquals("typed", notes.get(id)?.body)
+            assertEquals(NoteState.ACTIVE, notes.get(id)?.state)
+            editor.close()
         }
 }
