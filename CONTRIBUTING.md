@@ -46,8 +46,8 @@ them.
 Run `./gradlew check` before every commit. CI
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same
 `./gradlew check` on every pull request to `main` and every push to `main`.
-Its `check` job is the required status check for merging. The APK and desktop
-builds join CI once those modules exist.
+Its `check` job is the required status check for merging. The desktop module
+exists, but CI does not build its distributable yet. The APK joins CI in M5.
 
 ## Code style
 
