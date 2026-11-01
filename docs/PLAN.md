@@ -219,7 +219,10 @@ greatest of its parents' stamps. The device that computed it is not recorded,
 so all of its fields derive from the parents alone. If two devices auto-merge
 the same heads, they produce the same revision and it deduplicates. Two
 different automatic merges can share a stamp, so the revision id is the final
-tiebreaker.
+tiebreaker. The one exception to a fresh timestamp is an imported note, whose
+revisions carry the source times and whose two imports give two roots that
+merge against an empty base
+([ADR-0009](adr/0009-import-preserves-source-timestamps.md)).
 
 **On conflict:** only `body` and `title` conflict. The device still writes a
 deterministic automatic merge with both heads as parents. Tags and the
@@ -327,9 +330,10 @@ codec. Documented as ADR-0007 in M6.
   tags. `isPinned`, `isArchived` and `isTrashed` map to state. Timestamps are
   preserved: the revisions of an imported note carry the original created and
   edited times as their HLC stamps
-  ([ADR-0003](adr/0003-revision-dag-and-three-way-merge.md), refinements).
-  Colors are dropped. The import is idempotent: re-importing doesn't duplicate
-  notes. Tests run against a synthetic fixture set, never
+  ([ADR-0009](adr/0009-import-preserves-source-timestamps.md)). Colors are
+  dropped. The import is idempotent: the note id is derived from the source
+  note, and a note with any history, including a tombstone, is skipped, so
+  re-importing doesn't duplicate notes. Tests run against a synthetic fixture set, never
   real user data.
 - **Markdown export:** one `.md` file per note with YAML front-matter (tags,
   pinned, state, timestamps). Filter by tag. Available from the UI and the CLI
@@ -355,7 +359,9 @@ codec. Documented as ADR-0007 in M6.
   0001 local-first, 0002 SQLite/SQLDelight, 0003 revision DAG + diff3,
   0004 immutable segment sync, 0005 manual DI (all in M0); 0006
   native-compatible shared modules (M1); 0007 encryption plan and
-  0008 multi-user plan (both deferred features, documented in M6).
+  0008 multi-user plan (both deferred features, documented in M6); 0009
+  [import keeps source timestamps](adr/0009-import-preserves-source-timestamps.md)
+  (M2).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.
