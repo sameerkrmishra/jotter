@@ -7,6 +7,10 @@ import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
 import app.cash.sqldelight.db.use
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -14,6 +18,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 
 class OpenSqliteDriverTest {
     @Test
@@ -187,6 +192,124 @@ class OpenSqliteDriverTest {
             "CREATE TABLE theirs(id INTEGER PRIMARY KEY)",
         )
 
+    @Test
+    fun rebuildingAReferencedTableKeepsTheChildRows() =
+        withTempDir { dir ->
+            openSqliteDriver(dir.path, ParentChildSchema(), TEST_APPLICATION_ID).close()
+
+            val rebuild =
+                ParentChildSchema(
+                    version = 2,
+                    migration =
+                        listOf(
+                            "CREATE TABLE parent_new(id INTEGER PRIMARY KEY, name TEXT)",
+                            "INSERT INTO parent_new(id) SELECT id FROM parent",
+                            "DROP TABLE parent",
+                            "ALTER TABLE parent_new RENAME TO parent",
+                        ),
+                )
+            openSqliteDriver(dir.path, rebuild, TEST_APPLICATION_ID).use { driver ->
+                // Foreign keys are on again, and the child still points at the rebuilt table.
+                assertEquals(1L, driver.queryLong("PRAGMA foreign_keys"))
+                assertFailsWith<SQLiteException> {
+                    driver.execute(null, "INSERT INTO child(parent_id) VALUES (42)", 0)
+                }
+                assertEquals(2L, driver.queryLong("PRAGMA user_version"))
+                assertEquals(1L, driver.queryLong("SELECT count(*) FROM child"))
+                assertEquals(1L, driver.queryLong("SELECT count(*) FROM parent"))
+            }
+        }
+
+    @Test
+    fun aMigrationLeavingADanglingReferenceIsRolledBack() =
+        withTempDir { dir ->
+            openSqliteDriver(dir.path, ParentChildSchema(), TEST_APPLICATION_ID).close()
+
+            val dangling =
+                ParentChildSchema(version = 2, migration = listOf("DELETE FROM parent"))
+            val error =
+                assertFailsWith<IllegalStateException> {
+                    openSqliteDriver(dir.path, dangling, TEST_APPLICATION_ID)
+                }
+
+            assertContains(error.message.orEmpty(), "dangling foreign key: child -> parent")
+            openSqliteDriver(dir.path, ParentChildSchema(), TEST_APPLICATION_ID).use { driver ->
+                assertEquals(1L, driver.queryLong("PRAGMA user_version"))
+                assertEquals(1L, driver.queryLong("SELECT count(*) FROM parent"))
+                assertEquals(1L, driver.queryLong("SELECT count(*) FROM child"))
+            }
+        }
+
+    @Test
+    fun foreignKeysAreOnAgainAfterAFailedMigration() =
+        withTempDir { dir ->
+            openSqliteDriver(dir.path, ParentChildSchema(), TEST_APPLICATION_ID).close()
+
+            val broken = ParentChildSchema(version = 2, migration = listOf("DROP TABLE missing"))
+            openConnectionDriver(dir.path).use { driver ->
+                assertFailsWith<SQLiteException> {
+                    createOrMigrate(driver, broken, TEST_APPLICATION_ID, emptyArray())
+                }
+                assertEquals(1L, driver.queryLong("PRAGMA foreign_keys"))
+                assertEquals(1L, driver.queryLong("PRAGMA user_version"))
+            }
+        }
+
+    @Test
+    fun aCreateRunsWithForeignKeysOn() =
+        withTempDir { dir ->
+            val schema = RecordingSchema(version = 1)
+            openSqliteDriver(dir.path, schema, TEST_APPLICATION_ID).close()
+            assertEquals(listOf<Long?>(1L), schema.foreignKeysSeen)
+        }
+
+    @Test
+    fun aCreateFinishedByAnotherProcessMeanwhileIsNotRepeated() =
+        withTempDir { dir ->
+            val second = RecordingSchema(version = 1)
+            lateinit var secondOpen: Deferred<Unit>
+            val first =
+                RecordingSchema(version = 1, onWrite = {
+                    // Holds the write lock: the other open reads version 0 and then waits for it.
+                    secondOpen = openInBackground(dir, second)
+                    blockFor(HOLD)
+                })
+            openSqliteDriver(dir.path, first, TEST_APPLICATION_ID).close()
+
+            runBlocking { secondOpen.await() }
+            assertEquals(listOf("create"), first.calls)
+            assertEquals(emptyList(), second.calls)
+        }
+
+    @Test
+    fun aMigrationFinishedByAnotherProcessMeanwhileIsNotRepeated() =
+        withTempDir { dir ->
+            openSqliteDriver(dir.path, RecordingSchema(version = 1), TEST_APPLICATION_ID).close()
+
+            val second = RecordingSchema(version = 2)
+            lateinit var secondOpen: Deferred<Unit>
+            val first =
+                RecordingSchema(version = 2, onWrite = {
+                    // Holds the write lock: the other open reads version 1 and then waits for it.
+                    secondOpen = openInBackground(dir, second)
+                    blockFor(HOLD)
+                })
+            openSqliteDriver(dir.path, first, TEST_APPLICATION_ID).use { driver ->
+                runBlocking { secondOpen.await() }
+                assertEquals(listOf("migrate 1 -> 2"), first.calls)
+                assertEquals(emptyList(), second.calls)
+                assertEquals(2L, driver.queryLong("PRAGMA user_version"))
+            }
+        }
+
+    private fun openInBackground(
+        dir: TempDatabaseDir,
+        schema: RecordingSchema,
+    ): Deferred<Unit> =
+        CoroutineScope(testThreads).async {
+            openSqliteDriver(dir.path, schema, TEST_APPLICATION_ID).close()
+        }
+
     /** A file that plain SQLite set up with [setup], so still in its default journal mode. */
     private fun foreignFileIsRejected(vararg setup: String) =
         withTempDir { dir ->
@@ -208,18 +331,25 @@ class OpenSqliteDriverTest {
             assertFalse(dir.exists("-shm"))
         }
 
-    /** Creates `item(id)`, optionally followed by an invalid statement; records every call. */
+    /**
+     * Creates `item(id)`, optionally followed by an invalid statement; records every call and runs
+     * [onWrite] in the create or migrate transaction.
+     */
     private class RecordingSchema(
         override val version: Long,
         private val failCreate: Boolean = false,
+        private val onWrite: () -> Unit = {},
     ) : SqlSchema<QueryResult.Value<Unit>> {
         val calls = mutableListOf<String>()
         val callbacks = mutableListOf<AfterVersion>()
+        val foreignKeysSeen = mutableListOf<Long?>()
 
         override fun create(driver: SqlDriver): QueryResult.Value<Unit> {
             calls += "create"
+            foreignKeysSeen += driver.queryLong("PRAGMA foreign_keys")
             driver.execute(null, "CREATE TABLE item(id INTEGER PRIMARY KEY)", 0)
             if (failCreate) driver.execute(null, "CREATE TABLE broken(", 0)
+            onWrite()
             return QueryResult.Unit
         }
 
@@ -231,7 +361,43 @@ class OpenSqliteDriverTest {
         ): QueryResult.Value<Unit> {
             calls += "migrate $oldVersion -> $newVersion"
             this.callbacks += callbacks
+            onWrite()
             return QueryResult.Unit
         }
+    }
+
+    /**
+     * Creates `parent` and a `child` row that references it, `ON DELETE CASCADE` so that a
+     * `DROP TABLE parent` with foreign keys on would empty `child`. Migrates by [migration].
+     */
+    private class ParentChildSchema(
+        override val version: Long = 1,
+        private val migration: List<String> = emptyList(),
+    ) : SqlSchema<QueryResult.Value<Unit>> {
+        override fun create(driver: SqlDriver): QueryResult.Value<Unit> {
+            driver.execute(null, "CREATE TABLE parent(id INTEGER PRIMARY KEY)", 0)
+            driver.execute(
+                null,
+                "CREATE TABLE child(parent_id INTEGER REFERENCES parent(id) ON DELETE CASCADE)",
+                0,
+            )
+            driver.execute(null, "INSERT INTO parent(id) VALUES (1)", 0)
+            driver.execute(null, "INSERT INTO child(parent_id) VALUES (1)", 0)
+            return QueryResult.Unit
+        }
+
+        override fun migrate(
+            driver: SqlDriver,
+            oldVersion: Long,
+            newVersion: Long,
+            vararg callbacks: AfterVersion,
+        ): QueryResult.Value<Unit> {
+            migration.forEach { sql -> driver.execute(null, sql, 0) }
+            return QueryResult.Unit
+        }
+    }
+
+    private companion object {
+        val HOLD = 300.milliseconds
     }
 }

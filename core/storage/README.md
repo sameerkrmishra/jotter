@@ -236,6 +236,15 @@ change; regenerate `1.db` after editing a `CREATE` statement:
 After adding a migration, run the same task to save the new version as well
 (`2.db`, and so on).
 
+A migration runs in one transaction with `foreign_keys` off (see `core:sqlite`),
+so to change a table the way SQLite documents: create the new table, copy the
+rows, `DROP` the old one and `ALTER TABLE ... RENAME` the new one to its name.
+Do not rename the old table away first: that rewrites the references to it in
+the other tables. Dropping `note` or `revision` does not touch the rows that
+reference them, and `PRAGMA foreign_key_check` then fails the migration if any
+reference dangles. Triggers and indexes of a dropped table go with it and must
+be created again.
+
 ## Tests
 
 Shared tests in `commonTest` run on the JVM (counted by the coverage gate) and

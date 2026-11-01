@@ -31,6 +31,12 @@ atomicfu. No other Jotter module.
 - Creates or migrates the schema inside one `BEGIN IMMEDIATE` transaction,
   using `PRAGMA user_version`; creating also sets `application_id`. A database
   with a newer version than the schema is rejected and left untouched.
+- Runs a migration (not a create) by SQLite's procedure for schema changes:
+  `foreign_keys = OFF` before `BEGIN IMMEDIATE`, since it cannot change inside
+  a transaction, then the migration, then `PRAGMA foreign_key_check`, which
+  fails the migration and rolls it back on any violation, then `COMMIT`, and
+  `foreign_keys = ON` again, also on failure. So a migration can rebuild a
+  table that others reference without `DROP TABLE` cascading into them.
 
 ## Design
 
