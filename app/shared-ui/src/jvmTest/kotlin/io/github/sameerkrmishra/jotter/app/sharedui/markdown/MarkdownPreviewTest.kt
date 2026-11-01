@@ -30,7 +30,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlin.time.measureTime
 
 private const val MEGABYTE = 1 shl 20
 
@@ -193,31 +192,31 @@ class MarkdownPreviewTest {
         }
 
     @Test
-    fun aHundredThousandTasksShowOnlyWhatFitsAndScroll() =
+    fun aHundredThousandTasksShowOnlyWhatFitsAndScroll() {
+        val lines = MEGABYTE / 11
+        val document = parseMarkdown("- [ ] task\n".repeat(lines - 1) + "- [x] last\n")
         runComposeUiTest {
-            val lines = MEGABYTE / 11
-            show("- [ ] task\n".repeat(lines - 1) + "- [x] last\n")
+            setContent { MaterialTheme { MarkdownPreview(document, {}) } }
 
             onAllNodesWithText("last").assertCountEquals(0)
             assertTrue(onAllNodesWithText("task").fetchSemanticsNodes().size < lines / 1_000)
             onNodeWithTag(MARKDOWN_PREVIEW).performScrollToIndex(lines - 1)
             onNodeWithText("last").assertIsDisplayed()
         }
+    }
 
+    // What keeps this cheap is that no row is long, which holds on any machine.
     @Test
-    fun aMegabyteParagraphRenders() =
+    fun aMegabyteParagraphShowsARowAtATime() {
+        val document = parseMarkdown("word ".repeat(MEGABYTE / 5) + "\n\nthe end")
+        assertTrue(document.rows.size > MEGABYTE / MAX_ROW_TEXT)
         runComposeUiTest {
-            val document = parseMarkdown("word ".repeat(MEGABYTE / 5) + "\n\nthe end")
             setContent { MaterialTheme { MarkdownPreview(document, {}) } }
 
-            val elapsed =
-                measureTime {
-                    onNodeWithTag(MARKDOWN_PREVIEW).performScrollToIndex(document.rows.lastIndex)
-                    onNodeWithText("the end").assertIsDisplayed()
-                }
-
-            assertTrue(elapsed.inWholeSeconds < 5, "took $elapsed")
+            onNodeWithTag(MARKDOWN_PREVIEW).performScrollToIndex(document.rows.lastIndex)
+            onNodeWithText("the end").assertIsDisplayed()
         }
+    }
 
     private companion object {
         const val ROW_GAP = 4

@@ -6,7 +6,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlin.time.measureTime
 
 private const val MEGABYTE = 1 shl 20
 
@@ -376,10 +375,14 @@ class MarkdownParserTest {
     }
 
     @Test
-    fun aPathologicalMegabyteStaysPlainTextAndQuick() {
+    fun aPathologicalMegabyteNeverReachesTheParser() {
         for (text in listOf(">".repeat(MEGABYTE), "- ".repeat(MEGABYTE / 2))) {
-            val elapsed = measureTime { assertIs<Paragraph>(single(text)) }
-            assert(elapsed.inWholeSeconds < 2) { "took $elapsed" }
+            var parserChecks = 0
+
+            val document = parseMarkdown(text) { parserChecks++ }
+
+            assertEquals(0, parserChecks)
+            assertIs<Paragraph>(document.blocks.single())
         }
     }
 

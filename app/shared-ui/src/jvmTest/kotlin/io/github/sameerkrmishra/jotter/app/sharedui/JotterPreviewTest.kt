@@ -29,7 +29,10 @@ import io.github.sameerkrmishra.jotter.app.sharedui.markdown.MARKDOWN_PREVIEW
 import io.github.sameerkrmishra.jotter.app.sharedui.markdown.taskTag
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Runnable
+import kotlin.coroutines.CoroutineContext
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -46,16 +49,18 @@ class JotterPreviewTest {
         database.delete()
     }
 
-    private fun app(block: ComposeUiTest.(NoteService) -> Unit) =
-        database.open(Dispatchers.IO).use { store ->
-            runComposeUiTest {
-                setContent {
-                    val scope = rememberCoroutineScope()
-                    JotterApp(remember { AppViewModel(store.notes, scope, Dispatchers.IO) })
-                }
-                block(store.notes)
+    private fun app(
+        io: CoroutineDispatcher = Dispatchers.IO,
+        block: ComposeUiTest.(NoteService) -> Unit,
+    ) = database.open(Dispatchers.IO).use { store ->
+        runComposeUiTest {
+            setContent {
+                val scope = rememberCoroutineScope()
+                JotterApp(remember { AppViewModel(store.notes, scope, io) })
             }
+            block(store.notes)
         }
+    }
 
     private fun ComposeUiTest.awaitTag(tag: String) =
         waitUntil(timeoutMillis = TIMEOUT_MS) {
@@ -68,13 +73,17 @@ class JotterPreviewTest {
         }
 
     private fun ComposeUiTest.openPreview(note: Note) {
+        openNote(note)
+        onNodeWithText("Preview").performClick()
+        awaitTag(MARKDOWN_PREVIEW)
+    }
+
+    private fun ComposeUiTest.openNote(note: Note) {
         waitUntil(timeoutMillis = TIMEOUT_MS) {
             onAllNodesWithTag(cardTag(note.id)).fetchSemanticsNodes().isNotEmpty()
         }
         onNodeWithTag(cardTag(note.id)).performSemanticsAction(SemanticsActions.OnClick)
         waitForIdle()
-        onNodeWithText("Preview").performClick()
-        awaitTag(MARKDOWN_PREVIEW)
     }
 
     private fun ComposeUiTest.awaitStored(
@@ -147,12 +156,64 @@ class JotterPreviewTest {
             awaitStored(notes, note, "more - [x] milk")
         }
 
+    // Only holding the parse makes this independent of how fast the machine is: if it ran on the
+    // UI thread, the dispatcher would never see it, and the preview would be there already.
     @Test
-    fun aHugeBodyOpensInThePreviewWithoutBlockingTheUi() =
-        app { notes ->
-            val note = notes.create("", "- [ ] item\n".repeat(95_000) + "\n# The end\n")
-            openPreview(note)
+    fun theUiStaysUsableWhileTheParseHasNotFinished() {
+        val io = HeldDispatcher(Dispatchers.IO)
+        app(io) { notes ->
+            val note = notes.create("", "- [ ] milk")
+            openNote(note)
+            io.hold()
+
+            onNodeWithText("Preview").performClick()
+
+            waitUntil(timeoutMillis = TIMEOUT_MS) { io.heldBlocks > 0 }
+            waitForIdle()
+            assertEquals(0, onAllNodesWithTag(MARKDOWN_PREVIEW).fetchSemanticsNodes().size)
+            onNodeWithTag(TITLE_FIELD).performTextInput("typed meanwhile")
+            onNodeWithTag(TITLE_FIELD).assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.EditableText,
+                    AnnotatedString("typed meanwhile"),
+                ),
+            )
+
+            io.release()
 
             awaitTag(taskTag(3))
         }
+    }
+
+    /** Runs blocks on [target], except that while held it keeps them until [release]. */
+    private class HeldDispatcher(
+        private val target: CoroutineDispatcher,
+    ) : CoroutineDispatcher() {
+        private val held = ArrayDeque<Pair<CoroutineContext, Runnable>>()
+        private var isHolding = false
+
+        val heldBlocks: Int
+            get() = synchronized(held) { held.size }
+
+        fun hold() {
+            synchronized(held) { isHolding = true }
+        }
+
+        fun release() {
+            synchronized(held) {
+                isHolding = false
+                held.forEach { (context, block) -> target.dispatch(context, block) }
+                held.clear()
+            }
+        }
+
+        override fun dispatch(
+            context: CoroutineContext,
+            block: Runnable,
+        ) {
+            synchronized(held) {
+                if (isHolding) held += context to block else target.dispatch(context, block)
+            }
+        }
+    }
 }
