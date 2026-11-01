@@ -1,6 +1,8 @@
 package io.github.sameerkrmishra.jotter.app.sharedui
 
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,9 +16,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -24,6 +32,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import io.github.sameerkrmishra.jotter.app.sharedui.markdown.MarkdownDocument
+import io.github.sameerkrmishra.jotter.app.sharedui.markdown.MarkdownPreview
 import kotlinx.coroutines.launch
 
 internal const val TITLE_FIELD = "title"
@@ -34,7 +44,7 @@ internal const val STALE_MESSAGE =
 internal const val DELETED_MESSAGE =
     "This note was deleted forever. Your text is kept here and has not been saved."
 
-/** The editor: plain text for now. Back saves, and stays here if the text cannot be saved. */
+/** The editor, with the body as text or as a preview. Back saves, or stays if it cannot. */
 @Composable
 internal fun EditorScreen(
     editor: EditorViewModel,
@@ -54,6 +64,9 @@ internal fun EditorScreen(
             Button(onClick = { scope.launch { editor.save() } }, enabled = editor.isDirty) {
                 Text("Save")
             }
+            TextButton(onClick = { editor.isPreview = !editor.isPreview }) {
+                Text(if (editor.isPreview) "Edit" else "Preview")
+            }
             if (editor.isSaving) {
                 Text("Saving…")
             }
@@ -67,12 +80,35 @@ internal fun EditorScreen(
             singleLine = true,
         )
         TagEditor(editor)
-        OutlinedTextField(
-            value = editor.body,
-            onValueChange = { editor.body = it },
-            modifier = Modifier.fillMaxWidth().weight(1f).testTag(BODY_FIELD),
-            label = { Text("Note") },
-        )
+        val bodyModifier = Modifier.fillMaxWidth().weight(1f)
+        if (editor.isPreview) {
+            BodyPreview(editor, bodyModifier)
+        } else {
+            OutlinedTextField(
+                value = editor.body,
+                onValueChange = { editor.body = it },
+                modifier = bodyModifier.testTag(BODY_FIELD),
+                label = { Text("Note") },
+            )
+        }
+    }
+}
+
+// The text keeps showing while its next form is parsed. It takes the focus that the text field
+// had, as Ctrl+S only works with the focus inside the editor.
+@Composable
+private fun BodyPreview(
+    editor: EditorViewModel,
+    modifier: Modifier,
+) {
+    val body = editor.body
+    val document by produceState<MarkdownDocument?>(null, body) { value = editor.parsed(body) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(focus) { focus.requestFocus() }
+    Box(modifier.focusRequester(focus).focusable()) {
+        document?.let { shown ->
+            MarkdownPreview(shown, onToggle = { editor.toggleTask(shown, it) })
+        }
     }
 }
 

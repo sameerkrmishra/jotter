@@ -4,6 +4,10 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.sameerkrmishra.jotter.app.sharedui.markdown.MarkdownDocument
+import io.github.sameerkrmishra.jotter.app.sharedui.markdown.Task
+import io.github.sameerkrmishra.jotter.app.sharedui.markdown.parseMarkdown
+import io.github.sameerkrmishra.jotter.app.sharedui.markdown.toggled
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
@@ -19,6 +23,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
@@ -29,6 +34,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -127,6 +133,9 @@ internal class EditorViewModel(
     /** A failure that retrying may fix, until the next save succeeds. */
     var message by mutableStateOf<String?>(null)
         private set
+
+    /** Whether the body shows formatted instead of in the text field. */
+    var isPreview by mutableStateOf(false)
 
     /** Whether a save is running, which can take 5 s if another process holds the database. */
     var isSaving by mutableStateOf(false)
@@ -293,6 +302,25 @@ internal class EditorViewModel(
     // Returns whether the autosave is done until the next change to the draft. A failed save tries
     // again by itself, but a problem waits for the user's decision: saving could only fail again.
     private suspend fun autosave(): Boolean = problem != null || (save() && !isDirty)
+
+    /** [source] as Markdown, off the UI thread: a large note takes seconds. */
+    suspend fun parsed(source: String): MarkdownDocument =
+        withContext(io) {
+            val job = coroutineContext.job
+            parseMarkdown(source) { job.ensureActive() }
+        }
+
+    /**
+     * Ticks or clears [task] by changing the draft like typing does, so that the usual saves and
+     * the usual checks for a stale edit apply. It does nothing if [document] is not the draft's
+     * text any more, as its offset could then be anywhere: the new text is about to show instead.
+     */
+    fun toggleTask(
+        document: MarkdownDocument,
+        task: Task,
+    ) {
+        if (document.source == body) body = toggled(body, task)
+    }
 
     /** Stops observing the note. */
     fun close() {
