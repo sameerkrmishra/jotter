@@ -99,8 +99,9 @@ not worth it for six lines.
 - **Odd input cannot hurt.** The parser's time grows with the square of the nesting, and
   a 1 MB line of `>` runs it out of memory. So a line that opens over 32 levels makes the
   whole note plain text before the parser sees it, and text nested deeper over several
-  lines shows as typed. If the parser fails or the tree is too deep to walk, the note is
-  plain text too.
+  lines shows as typed. If the parser fails, the tree is too deep to walk or the parse runs
+  out of memory, the note is plain text too. The last is a net, not a limit: the parse's
+  memory is free again once it has unwound, but until then another thread can run out too.
 - **The preview is one lazy list of rows**, whatever the nesting, so a 1 MB checklist costs
   only what is on screen. Blocks over 4 kB are split over several rows, because laying out
   1 MB in one `Text` stops the UI thread for 0.7 s.

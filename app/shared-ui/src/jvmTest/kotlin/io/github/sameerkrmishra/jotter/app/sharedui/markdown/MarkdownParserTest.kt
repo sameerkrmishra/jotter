@@ -83,6 +83,15 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun entitiesBeyondOneCharKeepTheirWholeCharacter() {
+        assertEquals("😀 😀 😀", plainText("&#128512; &#x1F600; &#X1f600;"))
+        assertEquals("𝔄", plainText("&Afr;"))
+        assertEquals("�", plainText("&#xFFFFFFFF;"))
+        assertEquals("&#128512;", plainText("\\&#128512;"))
+        assertEquals("é", plainText("&#233;"))
+    }
+
+    @Test
     fun aLinkKeepsItsUrlAndShowsIt() {
         assertEquals(
             listOf(
@@ -372,6 +381,38 @@ class MarkdownParserTest {
             val elapsed = measureTime { assertIs<Paragraph>(single(text)) }
             assert(elapsed.inWholeSeconds < 2) { "took $elapsed" }
         }
+    }
+
+    @Test
+    fun theScanSeesALoneCarriageReturnAsTheEndOfALine() {
+        for (deep in listOf(">".repeat(100_000), "- ".repeat(100_000))) {
+            assertEquals(
+                listOf(Paragraph(listOf(Span("a"))), Paragraph(listOf(Span(deep)))),
+                blocks("a\r$deep"),
+            )
+        }
+    }
+
+    @Test
+    fun aTasksBoxDoesNotEndTheScanAsAListCanFollowIt() {
+        val nested = "- [ ] - [x] - [X] a"
+        assertEquals(3, parseMarkdown(nested).rows.count { it.task != null })
+
+        val deep = "- [ ] ".repeat(100_000)
+        assertEquals(listOf(Paragraph(listOf(Span(deep)))), blocks(deep))
+        // Only a real box is skipped: this text is the line's content, so it cannot nest.
+        val text = "- [y] " + "- ".repeat(MAX_NESTING)
+        assertIs<ListBlock>(single(text))
+    }
+
+    @Test
+    fun runningOutOfMemoryLeavesPlainText() {
+        val document = parseMarkdown("# a\nb") { throw OutOfMemoryError("a huge note") }
+
+        assertEquals(
+            listOf(Paragraph(listOf(Span("# a"))), Paragraph(listOf(Span("b")))),
+            document.blocks,
+        )
     }
 
     @Test

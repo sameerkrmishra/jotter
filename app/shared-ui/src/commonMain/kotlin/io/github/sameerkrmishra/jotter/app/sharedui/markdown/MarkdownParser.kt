@@ -9,6 +9,7 @@ import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.flavours.gfm.GFMElementTypes
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes
+import org.intellij.markdown.html.entities.Entities
 import org.intellij.markdown.html.entities.EntityConverter
 import org.intellij.markdown.parser.CancellationToken
 import org.intellij.markdown.parser.LinkMap
@@ -40,6 +41,18 @@ private const val BULLET = "•"
 private const val FENCE_OPENING_LINE = 1
 private const val CODE_INDENT = 4
 private val MARKER_ENDS = setOf('-', '+', '*', '.', ')')
+private val BOX_MARKS = setOf<Char?>(' ', 'x', 'X')
+
+// An escape comes first, as `\&#128512;` is no entity.
+private val ENTITY = Regex("""\\.|&(?:[a-zA-Z0-9]+|#[0-9]{1,8}|#[xX][a-fA-F0-9]{1,8});""")
+private const val HEX_ENTITY_START = 3
+private const val DECIMAL_ENTITY_START = 2
+private const val LAST_BMP_CODE = 0xFFFFL
+private const val LAST_CODE = 0x10FFFFL
+private const val SUPPLEMENTARY_START = 0x10000L
+private const val SURROGATE_BITS = 10
+private const val LOW_SURROGATE_MASK = 0x3FFL
+private const val REPLACEMENT_CHARACTER = "�"
 
 /**
  * Reads [source] as GitHub Flavored Markdown. It never fails on any text: what it cannot read
@@ -52,10 +65,7 @@ internal fun parseMarkdown(
     cancellation: CancellationToken = CancellationToken.NonCancellable,
 ): MarkdownDocument =
     try {
-        MarkdownDocument(
-            source,
-            if (isTooDeep(source)) plainText(source) else read(source, cancellation),
-        )
+        MarkdownDocument(source, read(source, cancellation))
     } catch (e: CancellationException) {
         throw e
     } catch (e: RuntimeException) {
@@ -63,6 +73,10 @@ internal fun parseMarkdown(
         MarkdownDocument(source, plainText(source))
     } catch (_: StackOverflowError) {
         // Thousands of nested emphasis marks, which are harmless but for the tree's depth.
+        MarkdownDocument(source, plainText(source))
+    } catch (e: OutOfMemoryError) {
+        // The parse's own allocations, which are garbage now that it has unwound.
+        reportUnexpected(e)
         MarkdownDocument(source, plainText(source))
     }
 
@@ -72,6 +86,7 @@ private fun read(
 ): List<Block> {
     val lines = LineEnds(source)
     val text: CharSequence = lines.text
+    if (isTooDeep(lines.text)) return plainText(source)
     val root =
         MarkdownParser(
             GFMFlavourDescriptor(),
@@ -84,29 +99,40 @@ private fun read(
 private fun plainText(source: String): List<Block> =
     source.lineSequence().map { Paragraph(listOf(Span(it))) }.toList()
 
-private fun isTooDeep(source: String): Boolean {
+// Takes the text with its line ends replaced, as a line that the parser sees is what counts.
+private fun isTooDeep(text: String): Boolean {
     var markers = 0
-    for (index in source.indices) {
-        val char = source[index]
+    var index = 0
+    while (index < text.length) {
+        val char = text[index]
         when {
             char == '\n' -> markers = 0
             markers < 0 -> Unit
-            isNesting(source, index) -> markers++
+            isNesting(text, index) -> markers++
+            // A task's box can be followed by another list on the same line.
+            isBox(text, index) -> index += 2
             // The line's content starts here: nothing more on it can nest.
             !char.isWhitespace() && !char.isDigit() && char !in MARKER_ENDS -> markers = -1
         }
         if (markers > MAX_NESTING) return true
+        index++
     }
     return false
 }
 
 private fun isNesting(
-    source: String,
+    text: String,
     index: Int,
 ): Boolean =
-    source[index] == '>' ||
-        source[index] in MARKER_ENDS &&
-        source.getOrNull(index + 1).let { it == ' ' || it == '\t' }
+    text[index] == '>' ||
+        text[index] in MARKER_ENDS &&
+        text.getOrNull(index + 1).let { it == ' ' || it == '\t' }
+
+private fun isBox(
+    text: String,
+    index: Int,
+): Boolean =
+    text[index] == '[' && text.getOrNull(index + 1) in BOX_MARKS && text.getOrNull(index + 2) == ']'
 
 /**
  * The text as the parser needs it, as to the parser only `\n` ends a line, and how to get from an
@@ -256,7 +282,7 @@ private class TreeReader(
 
     private fun spans(nodes: List<ASTNode>): List<Span> {
         val out = SpanWriter()
-        inlines(nodes, SpanLook(), out, depth = 0)
+        inlines(nodes, SpanLook(), out)
         return out.spans()
     }
 
@@ -264,16 +290,14 @@ private class TreeReader(
         nodes: List<ASTNode>,
         look: SpanLook,
         out: SpanWriter,
-        depth: Int,
     ) {
-        nodes.forEach { inline(it, look, out, depth) }
+        nodes.forEach { inline(it, look, out) }
     }
 
     private fun inline(
         node: ASTNode,
         look: SpanLook,
         out: SpanWriter,
-        depth: Int,
     ) {
         when (node.type) {
             MarkdownTokenTypes.EOL -> out.lineBreak(look)
@@ -281,11 +305,11 @@ private class TreeReader(
             // A line break's text. The line's end is the next token.
             MarkdownTokenTypes.HARD_LINE_BREAK, MarkdownTokenTypes.BLOCK_QUOTE -> Unit
             MarkdownElementTypes.CODE_SPAN -> out.text(codeSpan(node), look.copy(isCode = true))
-            MarkdownElementTypes.INLINE_LINK -> link(node, look, out, depth)
+            MarkdownElementTypes.INLINE_LINK -> link(node, look, out)
             MarkdownElementTypes.AUTOLINK -> autolink(source(node).trim('<', '>'), look, out)
             GFMTokenTypes.GFM_AUTOLINK -> autolink(source(node), look, out)
-            in REFERENCE_LINKS -> referenceLink(node, look, out, depth)
-            else -> styled(node, look, out, depth)
+            in REFERENCE_LINKS -> referenceLink(node, look, out)
+            else -> styled(node, look, out)
         }
     }
 
@@ -293,16 +317,14 @@ private class TreeReader(
         node: ASTNode,
         look: SpanLook,
         out: SpanWriter,
-        depth: Int,
     ) {
-        val inner = depth + 1
         when (node.type) {
             MarkdownElementTypes.EMPH ->
-                inlines(delimited(node), look.copy(isItalic = true), out, inner)
+                inlines(delimited(node), look.copy(isItalic = true), out)
             MarkdownElementTypes.STRONG ->
-                inlines(delimited(node), look.copy(isBold = true), out, inner)
+                inlines(delimited(node), look.copy(isBold = true), out)
             GFMElementTypes.STRIKETHROUGH ->
-                inlines(delimited(node), look.copy(isStruck = true), out, inner)
+                inlines(delimited(node), look.copy(isStruck = true), out)
             // Images and raw HTML are plain text, which is what keeps the note off the network.
             MarkdownTokenTypes.HTML_TAG -> out.text(source(node), look)
             else -> plain(node, look, out)
@@ -341,7 +363,6 @@ private class TreeReader(
         node: ASTNode,
         look: SpanLook,
         out: SpanWriter,
-        depth: Int,
     ) {
         val text = node.child(MarkdownElementTypes.LINK_TEXT)
         val destination =
@@ -349,24 +370,23 @@ private class TreeReader(
                 it.type ==
                     MarkdownElementTypes.LINK_DESTINATION
             }
-        linked(text.children, destination?.let(::destination).orEmpty(), look, out, depth)
+        linked(text.children, destination?.let(::destination).orEmpty(), look, out)
     }
 
     private fun referenceLink(
         node: ASTNode,
         look: SpanLook,
         out: SpanWriter,
-        depth: Int,
     ) {
         val label = node.child(MarkdownElementTypes.LINK_LABEL)
         val definition = links.getLinkInfo(source(label))?.node
         if (definition == null) {
             // `[like this]` with nothing defined is only text. So is most of a checklist's text.
-            inlines(node.children.flatMap { it.children }, look, out, depth)
+            inlines(node.children.flatMap { it.children }, look, out)
         } else {
             val text = node.children.first().children
             val target = destination(definition.child(MarkdownElementTypes.LINK_DESTINATION))
-            linked(text, target, look, out, depth)
+            linked(text, target, look, out)
         }
     }
 
@@ -375,10 +395,9 @@ private class TreeReader(
         url: String,
         look: SpanLook,
         out: SpanWriter,
-        depth: Int,
     ) {
         val linkLook = look.copy(url = url)
-        inlines(bracketed.drop(1).dropLast(1), linkLook, out, depth + 1)
+        inlines(bracketed.drop(1).dropLast(1), linkLook, out)
         if (url.isNotEmpty()) out.text(" ($url)", linkLook)
     }
 
@@ -398,11 +417,36 @@ private class TreeReader(
     // The converter's result is HTML, so it escapes these, after which every `&` is an escape.
     private fun decoded(text: String): String =
         EntityConverter
-            .replaceEntities(text, true, true)
+            .replaceEntities(withSupplementaryEntities(text), true, true)
             .replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&quot;", "\"")
             .replace("&amp;", "&")
+}
+
+// The converter cuts an entity's code down to one Char, so these never reach it.
+private fun withSupplementaryEntities(text: String): String =
+    ENTITY.replace(text) { match ->
+        val code = entityCode(match.value)
+        if (code == null || code <= LAST_BMP_CODE) match.value else supplementary(code)
+    }
+
+private fun entityCode(entity: String): Long? {
+    val digits = entity.dropLast(1)
+    return when {
+        entity.startsWith("&#x", ignoreCase = true) ->
+            digits.substring(HEX_ENTITY_START).toLong(radix = 16)
+        entity.startsWith("&#") -> digits.substring(DECIMAL_ENTITY_START).toLong()
+        else -> Entities.map[entity]?.toLong()
+    }
+}
+
+private fun supplementary(code: Long): String {
+    if (code > LAST_CODE) return REPLACEMENT_CHARACTER
+    val offset = code - SUPPLEMENTARY_START
+    val high = Char.MIN_HIGH_SURROGATE + (offset shr SURROGATE_BITS).toInt()
+    val low = Char.MIN_LOW_SURROGATE + (offset and LOW_SURROGATE_MASK).toInt()
+    return "$high$low"
 }
 
 /** Collects text into as few [Span]s as its looks allow. */
