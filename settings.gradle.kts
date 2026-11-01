@@ -45,6 +45,7 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 rootProject.name = "jotter"
 
 include(":app:cli")
+include(":app:shared-ui")
 include(":core:model")
 include(":core:sqlite")
 include(":core:storage")

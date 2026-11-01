@@ -1,0 +1,67 @@
+# app:shared-ui
+
+The screens and view models of the Linux desktop app and, from M5, the Android
+app: Compose Multiplatform, for `jvm` and Android. It has no `linuxX64` target
+([ADR-0010](../../docs/adr/0010-compose-ui-outside-linuxx64-rule.md)), so logic
+that the CLI could want does not belong here.
+
+```kotlin
+val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+val app = AppViewModel(store.notes, scope, Dispatchers.IO)
+JotterApp(app) // in a window
+// On exit:
+if (app.saveBeforeExit()) exit() // on false the draft is still in the editor
+scope.coroutineContext.job.cancelAndJoin() // before store.close()
+```
+
+**Dependency rule:** depends on `core:storage`. Only `app/*` may depend on it.
+
+## What is here
+
+| Type | What it is |
+|---|---|
+| `AppViewModel` | The one public class: the list, the open editor, `refresh` and `saveBeforeExit`. Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
+| `JotterApp` | The one public composable, which calls `refresh` whenever its window gains focus |
+| `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
+| `EditorViewModel`, `EditorScreen` | The plain text editor |
+
+Tags cannot be added or removed here yet, and Markdown preview comes later.
+
+## Design
+
+- **Snapshot state, not flows, in the view models' API.** A text field must see
+  its new value in the same frame, or fast typing loses characters, and a value
+  that passes through a coroutine arrives later. So what the screens read is
+  Compose state, written on the UI thread. It also makes the view models `@Stable`.
+  No lifecycle library: `scope` belongs to the app, and an editor's observation
+  is a child of it that ends when the editor closes.
+- **Threads.** Every `NoteService` call is on the injected `io` dispatcher.
+- **Refresh.** `NoteService`'s flows do not see another process's writes, so
+  `refresh` makes the view models subscribe again, which reads the database.
+- **Search** starts at two characters after trimming, because one letter is the
+  slowest query (`core:storage`). It has no flow, so it uses `observeList` for the
+  same filter as its signal, which reads the list once more per keystroke. It runs
+  in the current view and tag filter. Below two characters the list shows.
+- **The draft belongs to the user.** The editor follows the stored note only
+  while the draft has no changes. An edit is based on the revision the draft
+  started from. If the text changed elsewhere, `StaleEditException` leaves the
+  draft in place with a message and two choices: save it as a new note with the
+  same tags, or drop it for the stored text. A note deleted forever works alike.
+  `StorageBusyException` keeps the draft too, and a second save simply retries.
+  Text typed while a save runs stays in the draft.
+- **Saving** is the Save button, Back, and `saveBeforeExit`. Nothing saves on a
+  timer yet, so a crash loses what was typed since the last save. If saving fails,
+  Back and closing the window stay where they are, with the message showing.
+  A blank new note is never created.
+- **Failures in the grid** show as a message: a locked database, a note deleted
+  elsewhere, and a read that failed. Each is kept until the next successful write
+  or until dismissed. A failed read keeps what the list showed.
+
+## Tests
+
+All tests are in `jvmTest`, on a real store in a temporary directory.
+`NotesViewModelTest` and `EditorViewModelTest` run everything on one test
+dispatcher; `JotterAppTest` runs the real screens with `runComposeUiTest`, which
+needs no display, and real IO threads, including the stale edit. The tests for a
+locked database hold a real lock, so each waits out the 5 s busy timeout. Android
+host tests are disabled, as in `core:storage`.
