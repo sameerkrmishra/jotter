@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.core.storage
 
+import app.cash.sqldelight.db.SqlDriver
 import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
@@ -131,6 +132,23 @@ class ClockTest {
         }
 
     @Test
+    fun aFailedWriteLeavesTheStoredClockAsItWas() =
+        withStore(FakeClock(millis = 1_000)) { store ->
+            val driver = store.driver
+            val note = store.notes.create("", "body")
+            // Fails at COMMIT, the last step: the write has stored the clock by then.
+            FAIL_AT_COMMIT.forEach { sql -> driver.execute(null, sql, 0) }
+            val clock = driver.storedClock()
+
+            val error = assertFails { store.notes.edit(note.id, note.revisionId, "", "edit") }
+
+            assertContains(error.message.orEmpty(), "FOREIGN KEY constraint failed")
+            assertEquals(clock, driver.storedClock())
+            assertEquals(note, store.notes.get(note.id))
+            assertEquals(1, store.notes.history(note.id).size)
+        }
+
+    @Test
     fun everyWriteReportsADatabaseThatStaysLocked() =
         withTempDir { dir ->
             openStore(dir.path).use { holder ->
@@ -187,11 +205,25 @@ class ClockTest {
             Operation.ARCHIVE -> notes.setState(note.id, NoteState.ARCHIVED)
         }
 
+    private fun SqlDriver.storedClock() =
+        queryLong("SELECT hlc_physical FROM device") to queryLong("SELECT hlc_counter FROM device")
+
     private fun NoteStore.currentRevision(note: Note) = checkNotNull(notes.get(note.id)).revisionId
 
     private companion object {
         const val INTERLEAVED_WRITES = 6
         const val CONCURRENT_WRITES = 50
+
+        /** Every new revision adds a row whose deferred foreign key is never satisfied. */
+        val FAIL_AT_COMMIT =
+            listOf(
+                "CREATE TABLE parent(id INTEGER PRIMARY KEY)",
+                "CREATE TABLE child(parent_id INTEGER REFERENCES parent(id) " +
+                    "DEFERRABLE INITIALLY DEFERRED)",
+                "CREATE TRIGGER orphan AFTER INSERT ON revision " +
+                    "BEGIN INSERT INTO child(parent_id) VALUES (1); END",
+            )
+
         const val BLOCK_REVISIONS =
             "CREATE TRIGGER block BEFORE INSERT ON revision " +
                 "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
