@@ -207,9 +207,10 @@ internal class ConnectionSqlDriver(
      * `-shm` files, so the database is one self-contained file again. Waits for transactions on
      * other threads to end. Calling it again does nothing.
      *
-     * If another connection is reading, the checkpoint waits for it up to `busy_timeout` and then
-     * gives up without an error; [walCheckpointedOnClose] tells which happened. The file is only
-     * self-contained once the last connection to it has closed.
+     * If another connection is reading or writing, the checkpoint gives up at once and without an
+     * error, leaving the WAL for that connection; [walCheckpointedOnClose] tells which happened.
+     * It does not wait, because a short-lived process such as the CLI would stall on an app that is
+     * merely busy. The file is only self-contained once the last connection to it has closed.
      *
      * @throws IllegalStateException if called inside a transaction or a query's mapper.
      */
@@ -334,11 +335,14 @@ internal class ConnectionSqlDriver(
 }
 
 /**
- * Runs `wal_checkpoint(TRUNCATE)` and returns whether it finished. Its first column, `busy`, is 1
- * if another connection's read kept it from copying and truncating the whole WAL.
+ * Runs `wal_checkpoint(TRUNCATE)` without waiting for locks, and returns whether it finished. Its
+ * first column, `busy`, is 1 if another connection kept it from copying and truncating the whole
+ * WAL. Only for closing: the busy timeout stays 0 afterwards.
  */
-private fun SQLiteConnection.checkpointWal(): Boolean =
-    prepare("PRAGMA wal_checkpoint(TRUNCATE)").use { statement ->
+private fun SQLiteConnection.checkpointWal(): Boolean {
+    execSQL("PRAGMA busy_timeout = 0")
+    return prepare("PRAGMA wal_checkpoint(TRUNCATE)").use { statement ->
         statement.step()
         statement.getLong(0) == 0L
     }
+}

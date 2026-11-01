@@ -9,6 +9,8 @@ import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import java.io.IOException
+import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
@@ -39,8 +41,9 @@ class CliTest {
         vararg args: String,
         stdin: String = "",
         file: Path = database,
+        input: InputStream = stdin.byteInputStream(),
     ): Result {
-        val command = JotterCommand(stdin.byteInputStream())
+        val command = JotterCommand(input)
         val stdout = StringBuilder()
         val stderr = StringBuilder()
         val result =
@@ -314,6 +317,31 @@ class CliTest {
         assertFails("cannot open $database: file is not a database", jotter("add", "x"))
 
         assertEquals(before, database.readText())
+    }
+
+    @Test
+    fun aPathSqliteCannotOpenIsNamedInTheError() {
+        assertFails(
+            "cannot open $directory: unable to open database file",
+            jotter("list", file = directory),
+        )
+    }
+
+    @Test
+    fun theRootDirectoryIsAnOrdinaryFailure() {
+        val result = jotter("--db", "/", "list")
+
+        assertFails("cannot open /: unable to open database file", result)
+    }
+
+    @Test
+    fun aStdinThatCannotBeReadIsAnError() {
+        val failing =
+            object : InputStream() {
+                override fun read(): Int = throw IOException("Is a directory")
+            }
+
+        assertFails("cannot read stdin: Is a directory", jotter("add", "-", input = failing))
     }
 
     @Test

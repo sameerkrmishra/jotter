@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.core.storage
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class DatabaseLocationTest {
     private fun path(
@@ -42,5 +43,16 @@ class DatabaseLocationTest {
     @Test
     fun withoutHomeTheUsersHomeDirectoryIsUsed() {
         assertEquals("/fallback/.local/share/jotter/jotter.db", path())
+    }
+
+    @Test
+    fun anEmptyHomeCountsAsNotSet() {
+        assertEquals("/fallback/.local/share/jotter/jotter.db", path(null, "HOME" to ""))
+    }
+
+    @Test
+    fun aRelativeHomeIsNoUsableLocation() {
+        assertNull(path(null, "HOME" to "relative"))
+        assertNull(linuxDatabasePath(null, { null }, "?"))
     }
 }

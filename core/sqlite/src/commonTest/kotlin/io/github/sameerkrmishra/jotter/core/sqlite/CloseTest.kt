@@ -13,6 +13,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.measureTime
 
 /** Assumes SQLITE_FCNTL_PERSIST_WAL is unset, the default of the androidx bundled build. */
 class CloseTest {
@@ -41,15 +43,14 @@ class CloseTest {
             val driver = openConnectionDriver(dir.path)
             NotesSchema.create(driver)
             driver.execute(null, "INSERT INTO note(title) VALUES ('a')", 0)
-            // So that the checkpoint gives up quickly instead of after 5 s.
-            driver.execute(null, "PRAGMA busy_timeout = 50", 0)
             val reader = openRawConnection(dir.path)
             try {
                 reader.execSQL("BEGIN")
                 reader.prepare("SELECT count(*) FROM note").use { it.step() }
 
-                driver.close()
+                val elapsed = measureTime { driver.close() }
 
+                assertTrue(elapsed < NO_WAIT, "close waited for the reader for $elapsed")
                 assertEquals(false, driver.walCheckpointedOnClose)
                 assertTrue(dir.exists("-wal"))
                 reader.execSQL("COMMIT")
@@ -58,6 +59,31 @@ class CloseTest {
             }
             // The last connection to close checkpoints and removes the WAL.
             assertFalse(dir.exists("-wal"))
+        }
+
+    @Test
+    fun closeDoesNotWaitForAWriter() =
+        withTempDir { dir ->
+            val driver = openConnectionDriver(dir.path)
+            NotesSchema.create(driver)
+            driver.execute(null, "INSERT INTO note(title) VALUES ('a')", 0)
+            val writer = openRawConnection(dir.path)
+            try {
+                writer.execSQL("BEGIN IMMEDIATE")
+                writer.execSQL("INSERT INTO note(title) VALUES ('b')")
+
+                val elapsed = measureTime { driver.close() }
+
+                assertTrue(elapsed < NO_WAIT, "close waited for the writer for $elapsed")
+                assertEquals(false, driver.walCheckpointedOnClose)
+                writer.execSQL("COMMIT")
+            } finally {
+                writer.close()
+            }
+            assertFalse(dir.exists("-wal"))
+            openConnectionDriver(dir.path).use { reopened ->
+                assertEquals(2, NotesDatabase(reopened).count())
+            }
         }
 
     @Test
@@ -143,5 +169,10 @@ class CloseTest {
     private fun assertClosed(block: () -> Unit) {
         val error = assertFailsWith<IllegalStateException> { block() }
         assertEquals("The database is closed", error.message)
+    }
+
+    private companion object {
+        /** Well under the 5 s busy timeout, and generous for a loaded machine. */
+        val NO_WAIT = 2.seconds
     }
 }

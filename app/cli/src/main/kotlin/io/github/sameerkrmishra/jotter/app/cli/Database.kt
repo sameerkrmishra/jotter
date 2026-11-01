@@ -2,17 +2,45 @@ package io.github.sameerkrmishra.jotter.app.cli
 
 import androidx.sqlite.SQLiteException
 import com.github.ajalt.clikt.core.CliktError
-import io.github.sameerkrmishra.jotter.core.sqlite.isSqliteBusy
+import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
+import io.github.sameerkrmishra.jotter.core.storage.linuxDatabasePath
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
 
 /** Used only when the database is created. The file may be shared with the desktop app. */
 private const val DEVICE_NAME = "Linux"
+
+private const val UNABLE_TO_OPEN = "unable to open database file"
+
+/**
+ * Returns the database file, by [linuxDatabasePath].
+ *
+ * @param option `--db` or `JOTTER_DB`.
+ * @param readEnvvar Reads an environment variable.
+ * @param userHome The home directory if `HOME` is not set.
+ * @throws CliktError if there is no usable location, or the result is not a valid path, which
+ *   happens to non-ASCII text under a locale that cannot represent it.
+ */
+internal fun databasePath(
+    option: String?,
+    readEnvvar: (String) -> String?,
+    userHome: String,
+): Path {
+    val path =
+        linuxDatabasePath(option, readEnvvar, userHome)
+            ?: throw CliktError("jotter: no database location: set HOME, --db or $DATABASE_ENVVAR")
+    return try {
+        Path.of(path)
+    } catch (e: InvalidPathException) {
+        throw CliktError("jotter: not a valid path: ${e.input}", e)
+    }
+}
 
 /** The database file, which is known once the root command's options are parsed. */
 internal class DatabaseLocation {
@@ -37,23 +65,29 @@ internal fun <T> withNotes(
     } catch (_: StorageBusyException) {
         throw locked(path)
     } catch (e: SQLiteException) {
-        // NoteService translates a locked database only for a write, NoteStore.open not at all.
-        val reason = e.message.orEmpty().substringAfter("message: ")
-        throw if (isSqliteBusy(e)) locked(path) else cannotOpen(path, reason, e)
+        // Without a message, SQLite could not even open the file: a directory, or no permission.
+        val reason = e.message.orEmpty().substringAfter("message: ", UNABLE_TO_OPEN)
+        throw cannotOpen(path, reason, e)
     }
 
 private fun open(path: Path): NoteStore {
-    val file = path.toAbsolutePath()
-    try {
-        Files.createDirectories(file.parent)
-    } catch (e: IOException) {
-        throw cannotOpen(path, "cannot create its directory", e)
-    }
+    createDirectory(path)
     return try {
-        NoteStore.open(file.toString(), DEVICE_NAME, EmptyCoroutineContext)
+        NoteStore.open(path.toAbsolutePath().toString(), DEVICE_NAME, EmptyCoroutineContext)
+    } catch (e: StorageBusyException) {
+        throw e
     } catch (e: IllegalStateException) {
         // Another application's database, or one written by a newer version of Jotter.
         throw cannotOpen(path, e.message.orEmpty(), e)
+    }
+}
+
+private fun createDirectory(path: Path) {
+    try {
+        // The root directory has no parent.
+        path.toAbsolutePath().parent?.let(Files::createDirectories)
+    } catch (e: IOException) {
+        throw cannotOpen(path, "cannot create its directory", e)
     }
 }
 

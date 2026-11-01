@@ -14,6 +14,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
+import java.io.IOException
 import java.io.InputStream
 
 /** A subcommand that works on the notes in the database at [location]. */
@@ -41,10 +42,17 @@ internal class AddCommand(
     override fun help(context: Context): String = "Add a note and print its id."
 
     override fun execute(notes: NoteService) {
-        val body = if (text == STDIN) stdin.readBytes().decodeToString().trimEnd('\n') else text
+        val body = if (text == STDIN) readStdin() else text
         if (title.isBlank() && body.isBlank()) throw CliktError("jotter: the note is empty")
         echo(notes.create(title, body, tags.toSet()).id)
     }
+
+    private fun readStdin(): String =
+        try {
+            stdin.readBytes().decodeToString().trimEnd('\n')
+        } catch (e: IOException) {
+            throw CliktError("jotter: cannot read stdin: ${e.message}", e)
+        }
 
     private companion object {
         const val STDIN = "-"

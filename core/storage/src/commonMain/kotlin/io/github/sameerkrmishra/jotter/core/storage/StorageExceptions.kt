@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.core.storage
 
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.RevisionId
+import io.github.sameerkrmishra.jotter.core.sqlite.isSqliteBusy
 
 /**
  * Thrown when a note does not exist: it never did, or it was deleted forever.
@@ -35,12 +36,21 @@ public class StaleEditException(
     )
 
 /**
- * Thrown when a write found the database locked by another process, such as the CLI during a long
- * write, for the whole 5 s it waits for the lock. Nothing was written; the write may be tried
- * again.
+ * Thrown when a write, or opening the database, found it locked by another process, such as the
+ * CLI during a long write, for the whole 5 s it waits for the lock. Nothing was written; the call
+ * may be tried again.
  *
  * @param cause The SQLite driver's error.
  */
 public class StorageBusyException(
     cause: Throwable,
 ) : IllegalStateException("The database stayed locked by another process", cause)
+
+/** Returns the result of [block], with a locked database reported as [StorageBusyException]. */
+@Suppress("TooGenericExceptionCaught") // Everything but a busy error is rethrown as it is.
+internal inline fun <T> reportingBusy(block: () -> T): T =
+    try {
+        block()
+    } catch (e: RuntimeException) {
+        throw if (isSqliteBusy(e)) StorageBusyException(e) else e
+    }

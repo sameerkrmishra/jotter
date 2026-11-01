@@ -2,9 +2,9 @@
 # Starts jotter. This replaces Gradle's start script, and every flag is here, for startup time
 # (ADR-0006). The measurements behind them are in app/cli/README.md.
 #
-# Starts no process except for a symlink or the first run. -XX:+AutoCreateSharedArchive keeps a
-# class data archive in the user's cache: the first run writes it on exit, and the JVM replaces it
-# if the JDK changes. -Xlog:disable stops the JVM logging archive warnings on stdout.
+# The command itself only ever reads the class data archive, so its exit status and output cannot
+# depend on the cache: an archive that is missing, stale or unwritable just makes it slower. If the
+# archive is not usable, a detached process makes a new one.
 
 self=\$0
 if [ -L "\$self" ]; then self=\$(readlink -f -- "\$self"); fi
@@ -12,14 +12,64 @@ case "\$self" in
     */*) ;;
     *) self=./\$self ;;
 esac
-# A canonical path, because the archive is valid only for the classpath it was made with.
-APP_HOME=\$(cd -- "\${self%/*}/.." && pwd -P) || exit 1
+# A canonical path, because an archive is valid only for the classpath it was made with.
+APP_HOME=\$(CDPATH= cd -- "\${self%/*}/.." && pwd -P) || exit 1
+classpath="$classpath"
 
-cache=\${XDG_CACHE_HOME:-\$HOME/.cache}/jotter
-[ -d "\$cache" ] || mkdir -p -- "\$cache" 2>/dev/null
+if [ -n "\$JAVA_HOME" ]; then
+    java=\$JAVA_HOME/bin/java
+else
+    java=\$(command -v java) || { echo "jotter: java not found; set JAVA_HOME" >&2; exit 127; }
+fi
+real_java=\$java
+if [ -L "\$real_java" ]; then real_java=\$(readlink -f -- "\$real_java"); fi
+jdk=\${real_java%/bin/java}
 
-jvm_flags="-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:-UsePerfData -XX:+AutoCreateSharedArchive -Xlog:disable"
-text_flags="-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8"
+# -Xlog:disable and -PrintWarnings: a bad archive must not write on stdout or stderr.
+jvm_flags="-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:-UsePerfData -Xshare:auto -Xlog:disable -XX:-PrintWarnings -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 --enable-native-access=ALL-UNNAMED"
+
+# Empty, or relative as the XDG specification forbids, means no cache: no archive.
+cache=\${XDG_CACHE_HOME:-\${HOME:+\$HOME/.cache}}
+case "\$cache" in
+    /*) archive=\$cache/jotter/\${jdk##*/}.jsa ;;
+    *) archive= ;;
+esac
+
+# a8 ab 0b f0 is the magic number of a dynamic archive, on JDK 21 and 27. The JVM silently ignores
+# a file without it, or an archive of other jars or another JDK build: it would stay slow for good.
+archive_is_current() {
+    [ -s "\$archive" ] || return 1
+    if command -v od >/dev/null 2>&1; then
+        [ "\$(od -An -tx1 -N4 -- "\$archive" 2>/dev/null)" = " a8 ab 0b f0" ] || return 1
+    fi
+    for file in "\$APP_HOME"/lib/* "\$jdk/lib/modules"; do
+        if [ "\$file" -nt "\$archive" ]; then return 1; fi
+    done
+}
+
+# Runs detached. The lock directory also holds the work, so that the archive appears whole, with
+# mv, and parallel first runs start only one of these. A lock left by a killed run expires.
+make_archive() {
+    trap '' HUP
+    lock=\$archive.lock
+    mkdir -p -- "\${archive%/*}" || return
+    find "\$lock" -maxdepth 0 -mmin +5 -exec rm -rf -- {} +
+    mkdir -- "\$lock" || return
+    rm -f -- "\$archive"
+    "\$java" \$jvm_flags "-XX:ArchiveClassesAtExit=\$lock/new.jsa" -cp "\$classpath" ${mainClassName} --db "\$lock/training.db" add training
+    if [ -s "\$lock/new.jsa" ]; then mv -f -- "\$lock/new.jsa" "\$archive"; fi
+    rm -rf -- "\$lock"
+}
+
+set -- -cp "\$classpath" ${mainClassName} "\$@"
+if [ -n "\$archive" ]; then
+    if archive_is_current; then
+        set -- "-XX:SharedArchiveFile=\$archive" "\$@"
+    else
+        make_archive </dev/null >/dev/null 2>&1 &
+    fi
+fi
 
 # \$JAVA_OPTS and the flags split at spaces on purpose.
-exec "\${JAVA_HOME:+\$JAVA_HOME/bin/}java" \$jvm_flags "-XX:SharedArchiveFile=\$cache/jotter.jsa" \$text_flags --enable-native-access=ALL-UNNAMED \$JAVA_OPTS -cp "$classpath" ${mainClassName} "\$@"
+exec "\$java" \$jvm_flags \$JAVA_OPTS "\$@"
+

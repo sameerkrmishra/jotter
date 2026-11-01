@@ -16,7 +16,6 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamp
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
-import io.github.sameerkrmishra.jotter.core.sqlite.isSqliteBusy
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -346,9 +345,8 @@ public class NoteService internal constructor(
      * Runs [block] in a write transaction with the device's hybrid logical clock, and stores the
      * clock's new [HybridLogicalClock.last] before committing.
      */
-    @Suppress("TooGenericExceptionCaught") // Everything but a busy error is rethrown as it is.
     private fun <T> write(block: (HybridLogicalClock) -> T): T =
-        try {
+        reportingBusy {
             database.transactionWithResult {
                 val stored = database.deviceQueries.selectDevice().executeAsOne()
                 val last = hybridTimestamp(stored.hlc_physical, stored.hlc_counter)
@@ -362,8 +360,6 @@ public class NoteService internal constructor(
                 }
                 result
             }
-        } catch (e: RuntimeException) {
-            throw if (isSqliteBusy(e)) StorageBusyException(e) else e
         }
 
     /** Whether [basedOn] is a revision of the note [id] with the title and body of [current]. */

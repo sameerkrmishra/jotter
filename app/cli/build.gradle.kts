@@ -18,10 +18,17 @@ tasks.startScripts {
         resources.text.fromFile(template)
 }
 
+// StartScriptTest runs the real start script from the installed distribution.
+tasks.test {
+    dependsOn(tasks.installDist)
+    val installation = layout.buildDirectory.dir("install/jotter")
+    inputs.dir(installation).withPathSensitivity(PathSensitivity.RELATIVE)
+    jvmArgumentProviders.add { listOf("-Djotter.installation=${installation.get().asFile}") }
+}
+
 dependencies {
     implementation(projects.core.storage)
-    // isSqliteBusy, and the exception NoteStore.open lets through, to report them without a trace.
-    implementation(projects.core.sqlite)
+    // The exception NoteStore.open lets through, to report it without a stack trace.
     implementation(libs.androidx.sqlite)
     implementation(libs.clikt.core)
 

@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.desktop
 
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import io.github.sameerkrmishra.jotter.core.storage.linuxDatabasePath
 import java.io.IOException
 import java.nio.file.Files
@@ -14,7 +15,7 @@ private const val DEVICE_NAME = "Linux"
 /** The notes could not be opened. The message says why, for the user. */
 internal class DatabaseUnavailableException(
     message: String,
-    cause: Exception,
+    cause: Exception? = null,
 ) : Exception(message, cause)
 
 /**
@@ -31,11 +32,15 @@ internal fun openNoteStore(
     userHome: String,
     queryContext: CoroutineContext,
 ): NoteStore {
-    val path = linuxDatabasePath(readEnvvar(DATABASE_ENVVAR), readEnvvar, userHome)
-    val file = Path.of(path).toAbsolutePath()
+    val path =
+        linuxDatabasePath(readEnvvar(DATABASE_ENVVAR), readEnvvar, userHome)
+            ?: throw DatabaseUnavailableException("no database location: set HOME or JOTTER_DB")
     return try {
+        val file = Path.of(path).toAbsolutePath()
         Files.createDirectories(file.parent)
         NoteStore.open(file.toString(), DEVICE_NAME, queryContext)
+    } catch (e: StorageBusyException) {
+        throw DatabaseUnavailableException("$path is locked by another process, try again", e)
     } catch (e: IOException) {
         throw DatabaseUnavailableException("cannot create the directory of $path", e)
     } catch (e: RuntimeException) {
