@@ -350,6 +350,8 @@ internal class EditorViewModel(
             message = BUSY_MESSAGE
         } catch (e: RuntimeException) {
             val failure = "$SAVE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
+            // Once per failure, as the autosave retries for as long as it lasts.
+            if (failure != message) reportUnexpected(e)
             message = failure
         } finally {
             isSaving = false

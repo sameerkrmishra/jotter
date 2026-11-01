@@ -37,6 +37,15 @@ internal const val READ_FAILED_MESSAGE = "The notes could not be read."
 internal const val WRITE_FAILED_MESSAGE = "The note could not be changed."
 
 /**
+ * Keeps the stack trace of a failure the UI has no specific message for, which may be a bug. The
+ * user sees only its message. Goes to stderr until there is logging (PLAN.md §3.2, core/logging).
+ */
+@Suppress("PrintStackTrace")
+internal fun reportUnexpected(failure: Throwable) {
+    failure.printStackTrace()
+}
+
+/**
  * What the note list shows.
  *
  * @property view Active notes, the archive or the trash.
@@ -165,6 +174,7 @@ internal class NotesViewModel(
                     refreshes.update { it + 1 }
                     MOVED_MESSAGE
                 } catch (e: RuntimeException) {
+                    reportUnexpected(e)
                     "$WRITE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
                 }
         }
