@@ -114,7 +114,7 @@ must be on a local file system
 ## Startup time
 
 [ADR-0006](../../docs/adr/0006-native-compatible-shared-modules.md) sets a target:
-`jotter add` in about 200 ms. **Met: the median is 159 to 165 ms on JDK 21.**
+`jotter add` in about 200 ms. **Met: the median is 152 to 168 ms on JDK 21.**
 
 The start script is `src/main/scripts/start-script.template`, not Gradle's, and
 holds all the JVM flags. The saving comes from an application class data archive
@@ -154,9 +154,9 @@ The final build, in three rounds:
 
 | Start script | JDK | Round 1 | Round 2 | Round 3 |
 |---|---|---:|---:|---:|
-| **As shipped** | **21** | **163 ms** | **165 ms** | **159 ms** |
-| **As shipped** | **27** | **167 ms** | **171 ms** | **168 ms** |
-| As shipped, read-only cache, so no archive | 21 | 254 ms | 257 ms | 265 ms |
+| **As shipped** | **21** | **152 ms** | **168 ms** | **159 ms** |
+| **As shipped** | **27** | **176 ms** | **175 ms** | **160 ms** |
+| As shipped, read-only cache, so no archive | 21 | 277 ms | 258 ms | 253 ms |
 
 An earlier build, the same day, shows what each flag contributes. It differs from
 the final one in that its script made the archive during the command itself, so
