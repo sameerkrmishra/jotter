@@ -22,7 +22,8 @@ the export is a pure function that is tested without a database.
 | `exportMarkdown(notes, filter)` | Returns an `ExportedFile` per matching note, sorted by file name. Does no I/O |
 | `ExportFilter` | Which of the given notes to export: a set of states and optionally a tag |
 | `ExportedFile` | A file name and the file's content. Only `exportMarkdown` creates one |
-| `writeExport(files, directory, fileSystem)` | Writes the files into a directory, creating it if needed |
+| `writeExport(files, directory, fileSystem)` | Writes the files into a directory, creating it if needed. Returns a `RenamedFile` for each file that took another name |
+| `RenamedFile` | The planned and the written name of such a file, for the UI or CLI to show |
 
 ## Which notes
 
@@ -103,16 +104,36 @@ target directory.
 
 ## Writing files
 
-`writeExport` replaces a file of the same name and deletes nothing, so
-exporting again updates a directory but leaves the files of notes that were
-renamed or no longer match. A symbolic link already in the target directory is
-followed, as any program writing to that path would.
+`writeExport` never overwrites one note with another, and it deletes nothing.
+Exporting again updates a directory but leaves the files of notes that were
+renamed or no longer match.
 
-Common code has no Unicode normalisation tables, so rule 6 does not see that
-`é` as one character and as `e` plus an accent are the same file on Android's
-storage. `writeExport` notices that a file appeared during this run and fails
-with an `IOException` instead of overwriting a note it has just written. Files
-written until then stay.
+**Staging.** Each run creates an empty directory `.jotter-export-<random>` inside
+the target, on the same file system, writes every file there, and then moves
+each one into place atomically. The directory is removed at the end, even after
+a failure. A full disk during writing changes nothing in the target. A failure
+during the moves leaves every file whole, either new or as it was, and throws an
+`IOException`. Only a crash of the process can leave the staging directory
+behind; it is harmless and can be deleted.
+
+**Clashes.** Common code has no Unicode normalisation tables, so rule 6 does not
+see that `é` as one character and as `e` plus an accent are the same file on
+Android's storage. The staging directory shows it: it starts empty, so a name
+that `exists` there is a clash within this run, whatever rule the file system
+compares names by. The note then takes its name with the id, and `writeExport`
+reports that in a `RenamedFile`. Notes claim names in the order of rule 6, so
+the same notes get the same names on every run. A clash never aborts an export.
+
+**Files already in the target.** Each exported file starts with `---` and
+`id: <note id>`, which is how a later export knows whose file it finds. A file
+that starts with this note's id is replaced. Anything else under the name stays
+as it is: another note's file, the user's own file, a directory. The note takes
+its name with the id, or if that is taken as well, `<note id> 1.md` and so on.
+This also holds for a note that was exported earlier and is not part of this
+export, so a filter or a deleted note cannot lose a file. The price is that a
+note can keep a name with an id after the note that held the plain name is gone,
+until the old file is removed. A file that a user edited keeps its id, so it is
+replaced like any other export of that note.
 
 ## Tests
 
@@ -121,4 +142,7 @@ linuxX64 and on the Android host. Kotest property tests feed arbitrary titles
 and tags, mixed with fragments that are known troublemakers: names stay safe
 (checked by rules restated in the test), unique ignoring case and independent
 of input order, and titles, tags and bodies read back equal through a strict
-test-only front-matter parser. All data is synthetic.
+test-only front-matter parser. The writer's tests use a real directory, through
+okio's `ForwardingFileSystem` to act like storage that normalises names and to
+fail like a full disk, and cover a retry, a re-export, a later twin and a failure
+partway. All data is synthetic.

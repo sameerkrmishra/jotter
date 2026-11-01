@@ -11,7 +11,7 @@ import okio.utf8Size
  */
 internal const val MAX_FILE_NAME_BYTES: Int = 143
 
-private const val EXTENSION = ".md"
+internal const val EXTENSION: String = ".md"
 private const val MAX_STEM_BYTES = MAX_FILE_NAME_BYTES - EXTENSION.length
 private const val RESERVED_PREFIX = "_"
 private const val UNTITLED = "untitled"
@@ -52,19 +52,33 @@ private val whitespaceRun = Regex(" +")
 private val namingOrder: Comparator<Note> = compareBy({ it.state }, { it.id.toString() })
 
 /**
+ * The name chosen for [note].
+ *
+ * @property fileName The name to use.
+ * @property fallbackName The name with the note's id, for when the file system disagrees with
+ *   [fileName] at write time. It may equal [fileName].
+ */
+internal data class AssignedName(
+    val note: Note,
+    val fileName: String,
+    val fallbackName: String,
+)
+
+/**
  * Gives each of [notes] a file name, and returns them in [namingOrder]. The names are safe on
  * Linux, FAT and Android storage, unique ignoring letter case, and depend only on the set of
  * notes, not on their order. See README.md for the rules.
  */
-internal fun assignFileNames(notes: Collection<Note>): List<Pair<Note, String>> {
+internal fun assignFileNames(notes: Collection<Note>): List<AssignedName> {
     val sorted = notes.sortedWith(namingOrder)
     val taken = HashSet<String>()
     // Every plain name is claimed before any disambiguated one, so a note whose title happens to
     // look like a disambiguated name keeps it.
     val plainStems = sorted.map { note -> stemOf(note.title).takeIf { taken.add(foldCase(it)) } }
     return sorted.zip(plainStems) { note, plain ->
-        val stem = plain ?: disambiguate(stemOf(note.title), note.id, taken)
-        note to stem + EXTENSION
+        val stem = stemOf(note.title)
+        val name = plain ?: disambiguate(stem, note.id, taken)
+        AssignedName(note, name + EXTENSION, withId(stem, note.id, attempt = 0) + EXTENSION)
     }
 }
 
@@ -125,8 +139,15 @@ private fun disambiguate(
     taken: MutableSet<String>,
 ): String =
     generateSequence(0) { it + 1 }
-        .map { attempt ->
-            val suffix = if (attempt == 0) " $id" else " $id $attempt"
-            val room = MAX_STEM_BYTES - suffix.utf8Size().toInt()
-            stem.truncateUtf8(room).trimEnd { it in TRIMMED } + suffix
-        }.first { taken.add(foldCase(it)) }
+        .map { attempt -> withId(stem, id, attempt) }
+        .first { taken.add(foldCase(it)) }
+
+private fun withId(
+    stem: String,
+    id: NoteId,
+    attempt: Int,
+): String {
+    val suffix = if (attempt == 0) " $id" else " $id $attempt"
+    val room = MAX_STEM_BYTES - suffix.utf8Size().toInt()
+    return stem.truncateUtf8(room).trimEnd { it in TRIMMED } + suffix
+}

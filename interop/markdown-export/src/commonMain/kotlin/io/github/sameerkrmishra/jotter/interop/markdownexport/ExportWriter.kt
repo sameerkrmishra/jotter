@@ -1,34 +1,72 @@
 package io.github.sameerkrmishra.jotter.interop.markdownexport
 
+import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
 import okio.IOException
 import okio.Path
+import kotlin.random.Random
+import kotlin.random.nextULong
+
+private const val STAGING_PREFIX = ".jotter-export-"
 
 /**
- * Writes [files] into [directory], creating it if needed. A file from an earlier export with the
- * same name is replaced. Files of notes that no longer match are left alone, and nothing is
+ * Writes [files] into [directory], creating it if needed, and returns the files that had to take
+ * another name, sorted by planned name. No note is ever overwritten by another one, and nothing is
  * deleted.
  *
- * [exportMarkdown]'s names differ even ignoring case, but a file system can treat more names as
- * equal than that: Android's storage also ignores Unicode normalisation, so `é` written as one
- * character and as `e` plus an accent are one file there. Common code has no normalisation tables
- * to foresee this, so the writer notices instead of overwriting a note it has just written.
+ * A file already in [directory] is replaced only if it is this same note's, going by the id in its
+ * front-matter. Any other file keeps its content, and the note takes its name with the id instead.
  *
- * @throws IOException if the file system fails, or if it treats two of [files] as the same file.
- *   Files written before the failure stay.
+ * That also covers names that only the file system considers equal: Android's storage ignores
+ * Unicode normalisation, so `é` written as one character and as `e` plus an accent are one file
+ * there, and common code has no tables to foresee it. Every file is first written to an empty
+ * temporary directory inside [directory], where such a clash shows, and then moved into place
+ * atomically. So a full disk or a crash leaves each file either complete and new, or as it was.
+ *
+ * @throws IOException if the file system fails. Files not moved yet keep their previous content.
  */
 public fun writeExport(
     files: List<ExportedFile>,
     directory: Path,
     fileSystem: FileSystem,
-) {
+): List<RenamedFile> {
     fileSystem.createDirectories(directory)
-    val replaceable = files.filterTo(HashSet()) { fileSystem.exists(directory / it.fileName) }
-    for (file in files) {
-        val path = directory / file.fileName
-        if (file !in replaceable && fileSystem.exists(path)) {
-            throw IOException("This file system cannot tell apart another file from $path")
-        }
-        fileSystem.write(path) { writeUtf8(file.content) }
+    val staging = directory / "$STAGING_PREFIX${Random.nextULong()}"
+    fileSystem.createDirectory(staging, mustCreate = true)
+    try {
+        val placed =
+            files.sortedBy { it.rank }.map { file ->
+                val name = freeNames(file).first { fileSystem.isFree(it, file, staging, directory) }
+                fileSystem.write(staging / name) { writeUtf8(file.content) }
+                file.fileName to name
+            }
+        placed.forEach { (_, name) -> fileSystem.atomicMove(staging / name, directory / name) }
+        return placed
+            .filter { (planned, written) -> planned != written }
+            .map { (planned, written) -> RenamedFile(planned, written) }
+            .sortedBy { it.plannedName }
+    } finally {
+        fileSystem.deleteRecursively(staging)
     }
+}
+
+// The counter only matters if a file with the id in its name belongs to something else already.
+private fun freeNames(file: ExportedFile): Sequence<String> =
+    sequenceOf(file.fileName, file.fallbackName) +
+        generateSequence(1) { it + 1 }.map { "${file.noteId} $it$EXTENSION" }
+
+private fun FileSystem.isFree(
+    name: String,
+    file: ExportedFile,
+    staging: Path,
+    directory: Path,
+): Boolean = !exists(staging / name) && canReplace(directory / name, file)
+
+private fun FileSystem.canReplace(
+    path: Path,
+    file: ExportedFile,
+): Boolean {
+    val metadata = metadataOrNull(path) ?: return true
+    val mark = ownerMark(file.noteId).encodeUtf8()
+    return metadata.isRegularFile && read(path) { rangeEquals(0, mark) }
 }

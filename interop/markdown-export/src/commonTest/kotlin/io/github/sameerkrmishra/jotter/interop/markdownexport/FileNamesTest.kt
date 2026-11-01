@@ -17,13 +17,13 @@ class FileNamesTest {
     private fun nameOf(title: String): String =
         assignFileNames(listOf(noteOf(title)))
             .single()
-            .second
+            .fileName
 
     private fun notesOf(titles: List<String>): List<Note> =
         titles.mapIndexed { index, title -> noteOf(title, index) }
 
     private fun namesOf(titles: List<String>): List<String> =
-        assignFileNames(notesOf(titles)).map { it.second }
+        assignFileNames(notesOf(titles)).map { it.fileName }
 
     @Test
     fun aPlainTitleBecomesTheName() {
@@ -134,7 +134,7 @@ class FileNamesTest {
                 archived to "Soup ${noteIdOf(2)}.md",
                 trashed to "Soup ${noteIdOf(1)}.md",
             ),
-            assignFileNames(listOf(trashed, archived, active)),
+            assignFileNames(listOf(trashed, archived, active)).map { it.note to it.fileName },
         )
     }
 
@@ -185,8 +185,10 @@ class FileNamesTest {
     fun arbitraryTitlesGiveSafeUniqueNames() =
         runTest {
             checkAll(Arb.list(texts(allowLoneSurrogates = true), 1..20)) { titles ->
-                val names = namesOf(titles)
+                val assigned = assignFileNames(notesOf(titles))
+                val names = assigned.map { it.fileName }
                 names.forEach(::assertSafe)
+                assigned.forEach { assertSafe(it.fallbackName) }
                 val folded = names.map { it.uppercase().lowercase() }
                 assertEquals(folded.size, folded.toSet().size, "names: $names")
             }

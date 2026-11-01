@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.interop.markdownexport
 
 import io.github.sameerkrmishra.jotter.core.model.Note
+import io.github.sameerkrmishra.jotter.core.model.NoteId
 import kotlin.time.Instant
 
 private const val FENCE = "---\n"
@@ -9,6 +10,9 @@ private const val ESCAPE_DIGITS = 4
 private const val ESCAPED = "\u2028\u2029\uFEFF\uFFFE\uFFFF"
 private const val REPLACEMENT_CHARACTER = '\uFFFD'
 
+/** How every exported file of the note [id] starts, so a later export can recognise it. */
+internal fun ownerMark(id: NoteId): String = "${FENCE}id: $id\n"
+
 /**
  * Renders [note] as a Markdown file: YAML front-matter, then the body exactly as stored. No line
  * of the front-matter except its fences is `---`, so the first `---` line after the opening fence
@@ -16,8 +20,7 @@ private const val REPLACEMENT_CHARACTER = '\uFFFD'
  */
 internal fun renderMarkdown(note: Note): String =
     buildString {
-        append(FENCE)
-        append("id: ").append(note.id).append('\n')
+        append(ownerMark(note.id))
         append("title: ").append(yamlQuoted(note.title)).append('\n')
         appendTags(note)
         append("pinned: ").append(note.isPinned).append('\n')
