@@ -25,9 +25,12 @@ scope.coroutineContext.job.cancelAndJoin() // before store.close()
 | `JotterApp` | The one public composable, which calls `refresh` whenever its window gains focus |
 | `CannotOpenNotes` | What an app shows instead if the database could not be opened |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
-| `EditorViewModel`, `EditorScreen` | The plain text editor, and adding and removing tags |
+| `EditorViewModel`, `EditorScreen` | The text editor with its Markdown preview, and adding and removing tags |
+| `parseMarkdown`, `MarkdownDocument` | The `markdown` package: a note's text as plain blocks and spans, with no Compose in it |
+| `MarkdownPreview` | Those blocks on screen, with tappable task checkboxes |
 
-Markdown preview comes later.
+Grid cards still show a note's text as it was typed: parsing every card on scroll is
+not worth it for six lines.
 
 ## Design
 
@@ -78,6 +81,38 @@ Markdown preview comes later.
   still notice. A new note keeps its tags in the editor until its first save, and
   they alone do not create it.
   Invalid input shows a message and stays in the field.
+- **Markdown** is JetBrains' `markdown` parser with its GFM flavour, on the injected
+  `io` dispatcher, cancelled when the text changes. It supports headings, paragraphs,
+  bold, italic, strikethrough, inline code, code blocks, links, lists, quotes, rules and
+  task lists. A single line break stays a line break, unlike most Markdown, as notes
+  from Keep are written in lines. Tables show as typed in a fixed font.
+- **Nothing touches the network or opens by itself.** A link shows its URL after its
+  text and does nothing when tapped. Raw HTML and images are plain text.
+- **Tasks are changed by source offset.** The parser says where each box is, so
+  lookalikes in code and duplicate items cannot be confused. A tap changes the one
+  character between the brackets through `EditorViewModel.body`, which is typing as far as
+  saves, autosaves and stale edits go. `[X]` counts as ticked, and clearing it and ticking it
+  again leaves `[x]`. The offsets belong to the text that was parsed, so a tap on a document
+  that is no longer the draft does nothing, and the new text shows a moment later. As the
+  parser only knows `\n`, it reads a copy with other line ends replaced, and the offsets
+  map back, so a note keeps its `\r\n`.
+- **Odd input cannot hurt.** The parser's time grows with the square of the nesting, and
+  a 1 MB line of `>` runs it out of memory. So a line that opens over 32 levels makes the
+  whole note plain text before the parser sees it, and text nested deeper over several
+  lines shows as typed. If the parser fails or the tree is too deep to walk, the note is
+  plain text too.
+- **The preview is one lazy list of rows**, whatever the nesting, so a 1 MB checklist costs
+  only what is on screen. Blocks over 4 kB are split over several rows, because laying out
+  1 MB in one `Text` stops the UI thread for 0.7 s.
+
+  | Text | Characters | Parsing (median of 5, warmed up, JVM 21, Linux desktop) |
+  |---|---|---|
+  | A note of 100 lines | 5 k | 2 ms |
+  | 1 MB, one paragraph | 1 M | 39 ms |
+  | 1 MB of short paragraphs | 1 M | 460 ms |
+  | 1 MB checklist | 1 M | 936 ms |
+  | 1 MB table | 1 M | 1.6 s |
+
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
   or until dismissed. A failed read keeps what the list showed.
@@ -87,6 +122,9 @@ Markdown preview comes later.
 All tests are in `jvmTest`, on a real store in a temporary directory.
 `NotesViewModelTest` and the `Editor*Test` classes run everything on one test
 dispatcher, on virtual time; `JotterAppTest` runs the real screens with `runComposeUiTest`, which
-needs no display, and real IO threads, including the stale edit. The tests for a
+needs no display, and real IO threads, including the stale edit. `MarkdownParserTest` and
+`TaskToggleTest` need no Compose, and the latter has the property test of the toggle;
+`MarkdownPreviewTest` and `JotterPreviewTest` run the renderer and the editor's preview
+with `runComposeUiTest`. The tests for a
 locked database hold a real lock, so each waits out the 5 s busy timeout. Android
 host tests are disabled, as in `core:storage`.
