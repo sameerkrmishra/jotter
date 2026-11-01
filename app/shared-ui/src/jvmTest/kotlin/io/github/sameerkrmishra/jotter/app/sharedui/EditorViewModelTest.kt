@@ -461,6 +461,23 @@ class EditorViewModelTest : ViewModelTest() {
         }
 
     @Test
+    fun textRestoredDuringASaveIsNotOverwrittenByTheSavedNote() =
+        test {
+            val note = notes.create("", "base")
+            val slowIo = StandardTestDispatcher(testScheduler)
+            val editor = EditorViewModel(notes, scope, slowIo, MutableStateFlow(0), note)
+            editor.body = "changed"
+            val saving = scope.launch { editor.save() }
+
+            editor.body = "base"
+            saving.join()
+
+            assertEquals("base", editor.body)
+            assertTrue(editor.isDirty, "the store has the text that was saved")
+            editor.close()
+        }
+
+    @Test
     fun theDraftSavesItselfOnceTypingStops() =
         test {
             val note = notes.create("", "base")

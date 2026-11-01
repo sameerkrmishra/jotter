@@ -271,7 +271,8 @@ internal class EditorViewModel(
             stored == null -> problem = EditorProblem.DELETED
             // An older result that a save overtook: following it would undo the save.
             stored.updatedAt <= current.updatedAt -> Unit
-            !isDirty -> load(stored)
+            // During a save the draft only looks clean if the user just typed the base text back.
+            !isDirty && !saving.isLocked -> load(stored)
         }
     }
 
