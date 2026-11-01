@@ -12,11 +12,13 @@ private const val MAX_COUNTED_NAMES = 1000
 
 /**
  * Writes [files] into [directory], creating it if needed, and returns the files that had to take
- * another name, sorted by planned name. No note is ever overwritten by another one, and nothing is
+ * another name, sorted by planned name. No note is overwritten by another one, and nothing is
  * deleted.
  *
  * A file already in [directory] is replaced only if it is this same note's, going by the id in its
  * front-matter. Any other file keeps its content, and the note takes its name with the id instead.
+ * The exception to both: on the JVM and Android, okio's [FileSystem.metadataOrNull] returns `null`
+ * when a lookup fails, so the name reads as free and the move replaces what is under it, or fails.
  *
  * That also covers names that only the file system considers equal: Android's storage ignores
  * Unicode normalisation, so `é` written as one character and as `e` plus an accent are one file
@@ -89,7 +91,8 @@ private fun FileSystem.canReplace(
     file: ExportedFile,
 ): Boolean {
     // A failure here is not caught: it says nothing about this name, so it must end the export
-    // instead of sending it on to the next name.
+    // instead of sending it on to the next name. Only a thrown failure does, though: on the JVM
+    // and Android okio returns null for one, and the name then counts as free.
     val metadata = metadataOrNull(path)
     return metadata == null || (metadata.isRegularFile && startsWithOwnerMark(path, file))
 }

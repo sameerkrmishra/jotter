@@ -104,8 +104,9 @@ target directory.
 
 ## Writing files
 
-`writeExport` never overwrites one note with another, and it deletes nothing.
-Exporting again updates a directory but leaves the files of notes that were
+`writeExport` does not overwrite one note with another, and it deletes nothing.
+The one exception is a failed lookup on the JVM or Android, described under
+"Files already in the target". Exporting again updates a directory but leaves the files of notes that were
 renamed or no longer match.
 
 **Staging.** Each run creates an empty directory `.jotter-export-<random>` inside
@@ -127,10 +128,9 @@ the same notes get the same names on every run. A clash never aborts an export.
 
 **Files already in the target.** Each exported file starts with `---` and
 `id: <note id>`, which is how a later export knows whose file it finds. A file
-that starts with this note's id is replaced. Anything else under the name stays
-as it is: another note's file, the user's own file, a directory, a file that
-cannot be read. The note takes
-its name with the id, or if that is taken as well, `<note id> 1.md` and so on.
+that starts with this note's id is replaced. Anything else that a lookup finds
+under the name stays as it is: another note's file, the user's own file, a
+directory, a file that cannot be read. The note takes its name with the id, or if that is taken as well, `<note id> 1.md` and so on.
 This also holds for a note that was exported earlier and is not part of this
 export, so a filter or a deleted note cannot lose a file. The price is that a
 note can keep a name with an id after the note that held the plain name is gone,
