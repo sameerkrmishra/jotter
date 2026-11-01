@@ -47,6 +47,7 @@ rootProject.name = "jotter"
 include(":app:cli")
 include(":app:desktop")
 include(":app:shared-ui")
+include(":core:merge")
 include(":core:model")
 include(":core:sqlite")
 include(":core:storage")
