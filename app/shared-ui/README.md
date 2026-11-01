@@ -24,9 +24,9 @@ scope.coroutineContext.job.cancelAndJoin() // before store.close()
 | `AppViewModel` | The one public class: the list, the open editor, `refresh` and `requestExit`. Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
 | `JotterApp` | The one public composable, which calls `refresh` whenever its window gains focus |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
-| `EditorViewModel`, `EditorScreen` | The plain text editor |
+| `EditorViewModel`, `EditorScreen` | The plain text editor, and adding and removing tags |
 
-Tags cannot be added or removed here yet, and Markdown preview comes later.
+Markdown preview comes later.
 
 ## Design
 
@@ -64,6 +64,11 @@ Tags cannot be added or removed here yet, and Markdown preview comes later.
   saving fails, Back stays in the editor with the message showing, and closing asks
   whether to keep editing or close without saving. A new note that never had text
   is not created.
+- **Tags** are stored at once, not with the text: `addTag` and `removeTag` apply to
+  the current revision and cannot lose text. The note they return does not become
+  the editor's base, as it may hold someone else's text, which the next edit must
+  still notice. A new note keeps its tags in the editor until its first save.
+  Invalid input shows a message and stays in the field.
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
   or until dismissed. A failed read keeps what the list showed.

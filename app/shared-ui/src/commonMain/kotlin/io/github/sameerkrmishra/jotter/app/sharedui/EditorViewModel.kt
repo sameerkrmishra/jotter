@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
+import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.NoSuchNoteException
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.StaleEditException
@@ -34,6 +35,7 @@ import kotlinx.coroutines.withContext
 /** How long typing must pause before the draft saves itself. */
 internal const val AUTOSAVE_DELAY_MS = 1_000L
 
+internal const val INVALID_TAG_MESSAGE = "That is not a valid tag."
 internal const val SAVE_FAILED_MESSAGE = "Your text is kept here but could not be saved."
 
 /** Why the draft cannot simply be saved. Either way the draft stays until the user decides. */
@@ -91,6 +93,16 @@ internal class EditorViewModel(
             typing.update { it + 1 }
         }
 
+    /** The text in the field for a new tag. */
+    var tagInput by mutableStateOf("")
+
+    /**
+     * The note's tags. They are stored at once, unlike the text, because a tag change cannot lose
+     * anyone's text. A new note has none stored yet, so it keeps them here until its first save.
+     */
+    var tags by mutableStateOf(note?.tags.orEmpty())
+        private set
+
     /** The stored note that the draft started from, which an edit is based on. */
     var base by mutableStateOf(note)
         private set
@@ -110,7 +122,7 @@ internal class EditorViewModel(
     val isDirty: Boolean
         get() =
             base?.let { title != it.title || body != it.body }
-                ?: (title.isNotBlank() || body.isNotBlank())
+                ?: (title.isNotBlank() || body.isNotBlank() || tags.isNotEmpty())
 
     init {
         observation.launch {
@@ -139,7 +151,7 @@ internal class EditorViewModel(
                 val saved =
                     withContext(io) {
                         if (current == null) {
-                            notes.create(draftTitle, draftBody)
+                            notes.create(draftTitle, draftBody, tags)
                         } else {
                             notes.edit(current.id, current.revisionId, draftTitle, draftBody)
                         }
@@ -164,12 +176,47 @@ internal class EditorViewModel(
         saving.withLock {
             val draftTitle = title
             val draftBody = body
-            val tags = base?.tags.orEmpty()
+            val draftTags = tags
             guarded {
-                val saved = withContext(io) { notes.create(draftTitle, draftBody, tags) }
+                val saved = withContext(io) { notes.create(draftTitle, draftBody, draftTags) }
                 stored(saved, draftTitle, draftBody)
             }
         }
+
+    /** Adds the tag in [tagInput], or says why it is not a valid tag and leaves it there. */
+    suspend fun addTag() {
+        val tag = TagName.parseOrNull(tagInput)
+        if (tag == null) {
+            message = INVALID_TAG_MESSAGE
+            return
+        }
+        changeTags(
+            inMemory = { it + tag },
+            inStore = { id -> notes.addTag(id, tag) },
+        )
+        if (tag in tags) tagInput = ""
+    }
+
+    suspend fun removeTag(tag: TagName) {
+        changeTags(
+            inMemory = { it - tag },
+            inStore = { id -> notes.removeTag(id, tag) },
+        )
+    }
+
+    // The note that a tag change returns may have someone else's text, so it does not become the
+    // base: that would hide their change from the next edit.
+    private suspend fun changeTags(
+        inMemory: (Set<TagName>) -> Set<TagName>,
+        inStore: (NoteId) -> Note,
+    ) {
+        saving.withLock {
+            val id = base?.id
+            guarded(clearsProblem = false) {
+                tags = if (id == null) inMemory(tags) else withContext(io) { inStore(id) }.tags
+            }
+        }
+    }
 
     /** Drops the draft and loads the stored note. If that fails, the draft stays. */
     suspend fun reload() {
@@ -201,6 +248,7 @@ internal class EditorViewModel(
 
     private fun follow(stored: Note?) {
         val current = base ?: return
+        stored?.let { tags = it.tags }
         when {
             stored == null -> problem = EditorProblem.DELETED
             // An older result that a save overtook: following it would undo the save.
@@ -213,6 +261,7 @@ internal class EditorViewModel(
         base = note
         titleText = note.title
         bodyText = note.body
+        tags = note.tags
         problem = null
         message = null
     }
@@ -225,6 +274,7 @@ internal class EditorViewModel(
         draftBody: String,
     ) {
         base = saved
+        tags = saved.tags
         if (titleText == draftTitle) titleText = saved.title
         if (bodyText == draftBody) bodyText = saved.body
         noteIds.value = saved.id
@@ -233,11 +283,14 @@ internal class EditorViewModel(
     // Whatever goes wrong, the draft stays: this runs in scopes where an exception would end the
     // app, and a disk that is full or read-only must not cost the user their text.
     @Suppress("TooGenericExceptionCaught") // The driver's exception is not in NoteService's API.
-    private suspend fun guarded(block: suspend () -> Unit): Boolean {
+    private suspend fun guarded(
+        clearsProblem: Boolean = true,
+        block: suspend () -> Unit,
+    ): Boolean {
         isSaving = true
         try {
             block()
-            problem = null
+            if (clearsProblem) problem = null
             message = null
             return true
         } catch (e: CancellationException) {

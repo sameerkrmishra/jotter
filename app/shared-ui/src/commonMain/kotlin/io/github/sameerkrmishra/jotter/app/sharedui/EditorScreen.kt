@@ -6,12 +6,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -24,6 +28,7 @@ import kotlinx.coroutines.launch
 
 internal const val TITLE_FIELD = "title"
 internal const val BODY_FIELD = "body"
+internal const val TAG_FIELD = "tag"
 internal const val STALE_MESSAGE =
     "This note was changed elsewhere. Your text is kept here and has not been saved."
 internal const val DELETED_MESSAGE =
@@ -61,12 +66,40 @@ internal fun EditorScreen(
             label = { Text("Title") },
             singleLine = true,
         )
+        TagEditor(editor)
         OutlinedTextField(
             value = editor.body,
             onValueChange = { editor.body = it },
             modifier = Modifier.fillMaxWidth().weight(1f).testTag(BODY_FIELD),
             label = { Text("Note") },
         )
+    }
+}
+
+@Composable
+private fun TagEditor(editor: EditorViewModel) {
+    val scope = rememberCoroutineScope()
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = editor.tagInput,
+            onValueChange = { editor.tagInput = it },
+            modifier = Modifier.testTag(TAG_FIELD),
+            label = { Text("New tag") },
+            singleLine = true,
+        )
+        TextButton(onClick = { scope.launch { editor.addTag() } }) { Text("Add tag") }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            items(editor.tags.toList(), key = { it.toString() }) { tag ->
+                InputChip(
+                    selected = false,
+                    onClick = { scope.launch { editor.removeTag(tag) } },
+                    label = { Text("$tag ×") },
+                )
+            }
+        }
     }
 }
 

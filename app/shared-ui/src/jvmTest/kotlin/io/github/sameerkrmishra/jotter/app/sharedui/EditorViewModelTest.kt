@@ -315,6 +315,122 @@ class EditorViewModelTest : ViewModelTest() {
         }
 
     @Test
+    fun aTagIsStoredAtOnceAndKeepsTheDraft() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editor.body = "my text"
+            editor.tagInput = "  Shopping   list "
+
+            editor.addTag()
+
+            assertEquals(setOf(TagName.parse("Shopping list")), notes.get(note.id)?.tags)
+            assertEquals(notes.get(note.id)?.tags, editor.tags)
+            assertEquals("", editor.tagInput)
+            assertEquals("my text", editor.body)
+            assertEquals("base", notes.get(note.id)?.body, "the text is saved separately")
+            assertTrue(editor.save(), "a tag change does not make the draft stale")
+        }
+
+    @Test
+    fun aTagCanBeRemoved() =
+        test {
+            val work = TagName.parse("work")
+            val note = notes.create("", "base", setOf(work))
+            val editor = open(note)
+
+            editor.removeTag(work)
+
+            assertEquals(emptySet(), notes.get(note.id)?.tags)
+            assertEquals(emptySet(), editor.tags)
+        }
+
+    @Test
+    fun anInvalidTagShowsAMessageAndStaysInTheField() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            listOf("", "   ", "a\u0001b", "x".repeat(TagName.MAX_LENGTH + 1)).forEach { input ->
+                editor.tagInput = input
+
+                editor.addTag()
+
+                assertEquals(INVALID_TAG_MESSAGE, editor.message)
+                assertEquals(input, editor.tagInput)
+            }
+            assertEquals(emptySet(), notes.get(note.id)?.tags)
+
+            editor.tagInput = "fine"
+            editor.addTag()
+            assertNull(editor.message)
+        }
+
+    @Test
+    fun aNewNoteKeepsItsTagsUntilItsFirstSave() =
+        test {
+            val editor = open(null)
+            editor.tagInput = "work"
+            editor.addTag()
+            editor.tagInput = "home"
+            editor.addTag()
+            editor.removeTag(TagName.parse("home"))
+            assertEquals(emptyList(), notes.list())
+
+            editor.body = "text"
+            assertTrue(editor.save())
+
+            assertEquals(setOf(TagName.parse("work")), notes.list().single().tags)
+        }
+
+    @Test
+    fun aTagChangeLeavesAStaleProblemInPlace() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editFromOutside(note, "their text")
+            editor.body = "mine"
+            editor.save()
+            editor.tagInput = "work"
+
+            editor.addTag()
+
+            assertEquals(EditorProblem.STALE, editor.problem)
+            assertEquals("mine", editor.body)
+            assertFalse(editor.save(), "their text is still protected")
+        }
+
+    @Test
+    fun aFailedTagChangeKeepsTheInput() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            database.failWrites()
+            editor.tagInput = "work"
+
+            editor.addTag()
+
+            assertEquals("work", editor.tagInput)
+            assertContains(editor.message.orEmpty(), "disk full")
+        }
+
+    @Test
+    fun anOpenEditorShowsATagAddedElsewhere() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editor.body = "my text"
+            settle()
+            editor.body = "more text"
+            database.fromOutside { it.notes.addTag(note.id, TagName.parse("work")) }
+
+            app.refresh()
+            testScheduler.runCurrent()
+
+            assertEquals(setOf(TagName.parse("work")), editor.tags)
+            assertEquals("more text", editor.body)
+        }
+
+    @Test
     fun aFailedReadLeavesTheDraftAlone() =
         test {
             val editor = open(notes.create("", "base"))

@@ -332,6 +332,47 @@ class JotterAppTest {
         }
 
     @Test
+    fun aTagAddedInTheEditorReachesTheFilter() =
+        app { notes ->
+            val note = notes.create("note", "text")
+            notes.create("other", "")
+            awaitText("note")
+            openNote(note)
+
+            onNodeWithTag(TAG_FIELD).performTextInput("work")
+            click("Add tag")
+            awaitText("work ×")
+            click("Back")
+
+            awaitText("work (1)")
+            click("work (1)")
+            awaitNoText("other")
+
+            openNote(note)
+            click("work ×")
+            awaitNoText("work ×")
+            click("Back")
+
+            awaitText("work (0)")
+            awaitText("Nothing here.")
+            click("work (0)")
+            awaitText("other")
+        }
+
+    @Test
+    fun anInvalidTagShowsAMessage() =
+        app { notes ->
+            val note = notes.create("note", "text")
+            awaitText("note")
+            openNote(note)
+
+            click("Add tag")
+
+            awaitText(INVALID_TAG_MESSAGE)
+            assertEquals(emptySet(), notes.get(note.id)?.tags)
+        }
+
+    @Test
     fun aTagChipFiltersTheGrid() =
         app { notes ->
             notes.create("tagged", "", setOf(TagName.parse("work")))
