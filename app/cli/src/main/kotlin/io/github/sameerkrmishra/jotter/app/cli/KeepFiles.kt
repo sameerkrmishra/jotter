@@ -15,6 +15,7 @@ import kotlin.io.path.name
 import kotlin.io.path.readAttributes
 
 private const val JSON_EXTENSION = ".json"
+private const val KEEP_DIRECTORY = "Keep"
 
 /** Far above any Keep note, whose text is limited to some 20,000 characters. */
 private const val MAX_FILE_MIB = 64
@@ -42,7 +43,8 @@ internal data class UnreadableFile(
  * Finds the note files at [path], a `Keep` directory or one `.json` file. This is separate from
  * reading them, and comes before opening the database, so that a mistyped path creates nothing.
  *
- * @throws CliktError if [path] is missing, cannot be read, or is neither of the two.
+ * @throws CliktError if [path] is missing, cannot be read, is neither of the two, or is a
+ *   directory without any `.json` file.
  */
 internal fun findKeepFiles(path: Path): KeepFiles =
     try {
@@ -71,7 +73,15 @@ private fun filesInDirectory(directory: Path): KeepFiles {
     // keep those bytes too, so a name that the locale cannot show still opens.
     val (notes, others) =
         directory.listDirectoryEntries().sorted().partition { it.isJson() && !it.isDirectory() }
+    if (notes.isEmpty()) throw noNotes(directory)
     return KeepFiles(notes, others.size)
+}
+
+/** The likely mistake is the Takeout's top directory: `imported 0` would pass for a success. */
+private fun noNotes(directory: Path): CliktError {
+    val keep = directory.resolve(KEEP_DIRECTORY)
+    val hint = if (keep.isDirectory()) ", try $keep" else ""
+    return CliktError("jotter: no .json files in $directory$hint")
 }
 
 private fun Path.isJson(): Boolean = name.endsWith(JSON_EXTENSION, ignoreCase = true)

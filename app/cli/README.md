@@ -104,8 +104,9 @@ Clikt's usage errors also exit with status 1, and print the usage line first.
 `import` is the exception, because part of a run can succeed: after a bad file or
 a lock it still prints its summary and its lines, then a last `jotter: ` line that
 says repeating it is safe, and exits with status 1. A path that is missing, not
-readable or neither a directory nor a `.json` file fails as above, before the
-database is opened or created. `export` fails as above if the target cannot be
+readable, neither a directory nor a `.json` file, or a directory without `.json`
+files fails as above, before the database is opened or created; for the top
+directory of a Takeout the message names its `Keep` directory. `export` fails as above if the target cannot be
 written. As `writeExport` stages its files, a failure while writing changes nothing
 there, and one during the final moves leaves every file whole.
 

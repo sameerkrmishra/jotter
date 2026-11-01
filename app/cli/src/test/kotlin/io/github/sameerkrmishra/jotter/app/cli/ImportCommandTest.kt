@@ -229,6 +229,22 @@ class ImportCommandTest {
     }
 
     @Test
+    fun theTakeoutDirectoryPointsToItsKeepDirectory() {
+        val result = jotter("import", directory.toString())
+
+        assertFailsCleanly("no .json files in $directory, try $keep\n", result)
+        assertFalse(database.exists())
+    }
+
+    @Test
+    fun aDirectoryWithoutJsonFilesFails() {
+        keep.resolve("a.html").writeText("<html>")
+
+        assertFailsCleanly("no .json files in $keep\n", importKeep())
+        assertFalse(database.exists())
+    }
+
+    @Test
     fun aFileThatIsNotJsonIsRefused() {
         val file = keep.resolve("a.html").apply { writeText("<html>") }
 
