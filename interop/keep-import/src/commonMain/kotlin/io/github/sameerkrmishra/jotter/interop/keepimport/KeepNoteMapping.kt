@@ -4,6 +4,8 @@ import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.ImportedNote
+import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepListItem
+import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepNote
 import okio.Buffer
 import okio.ByteString.Companion.decodeHex
 import okio.ByteString.Companion.encodeUtf8

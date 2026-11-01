@@ -2,6 +2,8 @@ package io.github.sameerkrmishra.jotter.interop.keepimport
 
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
+import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepListItem
+import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepNote
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals

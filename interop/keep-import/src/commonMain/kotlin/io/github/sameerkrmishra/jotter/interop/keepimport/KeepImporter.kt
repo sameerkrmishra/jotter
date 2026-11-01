@@ -6,6 +6,19 @@ import io.github.sameerkrmishra.jotter.core.storage.ImportResult
 import io.github.sameerkrmishra.jotter.core.storage.ImportedNote
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
+import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepLabel
+import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepNote
+import kotlinx.serialization.json.Json
+
+/**
+ * Decodes a Takeout note. Takeout has many more fields, such as `color`, and adds new ones, so
+ * unknown keys are ignored. A `null` counts as a missing field.
+ */
+private val keepJson: Json =
+    Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+    }
 
 /**
  * One JSON file of the `Keep` folder of a Takeout.

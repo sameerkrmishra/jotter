@@ -1,17 +1,6 @@
-package io.github.sameerkrmishra.jotter.interop.keepimport
+package io.github.sameerkrmishra.jotter.interop.keepimport.dto
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-
-/**
- * Decodes a Takeout note. Takeout has many more fields, such as `color`, and adds new ones, so
- * unknown keys are ignored. A `null` counts as a missing field.
- */
-internal val keepJson: Json =
-    Json {
-        ignoreUnknownKeys = true
-        coerceInputValues = true
-    }
 
 /**
  * The fields of a Takeout Keep document that the import uses. Everything has a default, so a

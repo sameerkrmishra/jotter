@@ -19,10 +19,10 @@ kover {
                 // SQLDelight to generate into a package matching this pattern
                 // (e.g. ...core.storage.db), and hand-written code must stay out of `db` packages.
                 classes("*.db.*")
-                // The serialization plugin adds a constructor and write$Self to these classes,
-                // with one branch per field and per default. @Serializable classes must therefore
-                // stay plain data, with any logic outside them.
-                annotatedBy("kotlinx.serialization.Serializable")
+                // The serialization plugin adds a constructor and write$Self to @Serializable
+                // classes, with one branch per field and per default. Such classes go in a `dto`
+                // package of their module, named here, and stay plain data (CONTRIBUTING.md).
+                classes("*.keepimport.dto.*")
                 // Thin platform entry points (Activity, `main()`) are covered by manual and UI
                 // testing instead. Name them here as they are added, e.g. "*.MainKt".
             }

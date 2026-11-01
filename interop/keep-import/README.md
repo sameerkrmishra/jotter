@@ -80,6 +80,12 @@ A failed `DUPLICATE_ID` depends on order: pass documents in a stable order so
 that a repeated run fails the same one. Two Keep notes created in the same
 microsecond should not occur outside hand-edited files.
 
+## DTOs
+
+The `dto` package holds the `@Serializable` classes of the Takeout format, and
+plain data only: the coverage gate leaves it out for the code the serialization
+plugin generates, so any logic belongs outside it.
+
 ## Tests
 
 `commonTest` runs on the JVM (counted by the coverage gate) and on linuxX64,
