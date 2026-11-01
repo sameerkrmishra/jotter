@@ -17,7 +17,7 @@ import kotlin.system.exitProcess as exitJvm
 public fun main(args: Array<String>) {
     // The JVM ignores SIGPIPE. A reader that left, as in `jotter list | head -1`, is not a failure.
     Signal.handle(Signal("PIPE"), SignalHandler.SIG_DFL)
-    JotterCommand(System.`in`)
+    JotterCommand(System.`in`, args.asList())
         .context {
             readEnvvar = System::getenv
             exitProcess = { exitJvm(it) }
