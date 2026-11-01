@@ -32,7 +32,7 @@ of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
 | `SearchHit`, `Highlighted` | A search result: the note and a snippet with its match ranges |
 | `NoSuchNoteException` | The note does not exist, or was deleted forever |
 | `StaleEditException` | An edit based on a revision that is no longer the current one |
-| `StorageBusyException` | A write found the database locked by another process for the whole busy timeout |
+| `StorageBusyException` | A write, or `NoteStore.open`, found the database locked by another process for the whole busy timeout |
 
 ## Schema (version 1)
 
@@ -100,7 +100,9 @@ Encoding:
   Reads use no transaction (see `core:sqlite`).
 - **A locked database.** A write waits for another process's write up to the
   5 s busy timeout, then fails with `StorageBusyException`, keeping the driver's
-  error as its cause. Only this case is translated. androidx `SQLiteException`
+  error as its cause. `NoteStore.open` does the same, for a file another process
+  is creating or holds exclusively. Only this case is translated. androidx
+  `SQLiteException`
   has no property for the result code, so `core:sqlite` reads the number from
   its message (the same format on the JVM, linuxX64 and Android, pinned by a
   test), not SQLite's text.

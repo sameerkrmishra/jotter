@@ -20,8 +20,7 @@ tasks.startScripts {
 
 dependencies {
     implementation(projects.core.storage)
-    // isSqliteBusy, and the exception NoteStore.open lets through, to report them without a trace.
-    implementation(projects.core.sqlite)
+    // The exception NoteStore.open lets through, to report it without a stack trace.
     implementation(libs.androidx.sqlite)
     implementation(libs.clikt.core)
 

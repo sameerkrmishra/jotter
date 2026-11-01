@@ -1,5 +1,7 @@
 package io.github.sameerkrmishra.jotter.core.storage
 
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.sqlite.execSQL
 import app.cash.sqldelight.db.AfterVersion
 import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
@@ -13,6 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Clock
 
@@ -51,6 +54,25 @@ class NoteStoreTest {
     fun eachNewDatabaseGetsItsOwnDevice() =
         withStore { first ->
             withStore { second -> assertNotEquals(first.deviceId, second.deviceId) }
+        }
+
+    @Test
+    fun aDatabaseLockedDuringOpenIsReportedAsBusy() =
+        withTempDir { dir ->
+            // In rollback mode, unlike WAL, a connection holding the file blocks even readers.
+            val holder = BundledSQLiteDriver().open(dir.path)
+            try {
+                holder.execSQL("BEGIN EXCLUSIVE")
+                holder.execSQL("CREATE TABLE being_created (x)")
+
+                val error = assertFailsWith<StorageBusyException> { openStore(dir.path) }
+
+                assertNotNull(error.cause)
+                holder.execSQL("ROLLBACK")
+            } finally {
+                holder.close()
+            }
+            openStore(dir.path).use { }
         }
 
     @Test

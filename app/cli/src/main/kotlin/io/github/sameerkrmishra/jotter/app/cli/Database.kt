@@ -2,7 +2,6 @@ package io.github.sameerkrmishra.jotter.app.cli
 
 import androidx.sqlite.SQLiteException
 import com.github.ajalt.clikt.core.CliktError
-import io.github.sameerkrmishra.jotter.core.sqlite.isSqliteBusy
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
@@ -16,6 +15,8 @@ internal const val DATABASE_ENVVAR = "JOTTER_DB"
 
 /** Used only when the database is created. The file may be shared with the desktop app. */
 private const val DEVICE_NAME = "Linux"
+
+private const val UNABLE_TO_OPEN = "unable to open database file"
 
 /**
  * Returns the database file: [option] (`--db` or `JOTTER_DB`), then `jotter/jotter.db` in
@@ -60,9 +61,9 @@ internal fun <T> withNotes(
     } catch (_: StorageBusyException) {
         throw locked(path)
     } catch (e: SQLiteException) {
-        // NoteService translates a locked database only for a write, NoteStore.open not at all.
-        val reason = e.message.orEmpty().substringAfter("message: ")
-        throw if (isSqliteBusy(e)) locked(path) else cannotOpen(path, reason, e)
+        // Without a message, SQLite could not even open the file: a directory, or no permission.
+        val reason = e.message.orEmpty().substringAfter("message: ", UNABLE_TO_OPEN)
+        throw cannotOpen(path, reason, e)
     }
 
 private fun open(path: Path): NoteStore {
@@ -74,6 +75,8 @@ private fun open(path: Path): NoteStore {
     }
     return try {
         NoteStore.open(file.toString(), DEVICE_NAME, EmptyCoroutineContext)
+    } catch (e: StorageBusyException) {
+        throw e
     } catch (e: IllegalStateException) {
         // Another application's database, or one written by a newer version of Jotter.
         throw cannotOpen(path, e.message.orEmpty(), e)
