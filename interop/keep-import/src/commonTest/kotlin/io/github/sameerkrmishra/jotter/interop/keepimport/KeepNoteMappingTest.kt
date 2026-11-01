@@ -128,7 +128,8 @@ class KeepNoteMappingTest {
 
     @Test
     fun aUrlEndsAtACharacterNoUrlCanContain() {
-        listOf(" ", "\n", "\t", "\"", "<", ">", "\\", "^", "`", "{", "|", "}").forEach { end ->
+        val ends = listOf(" ", "\n", "\t", "\"", "<", ">", "\\", "^", "`", "{", "|", "}", "\u007F")
+        ends.forEach { end ->
             val text = "$URL${end}x"
 
             assertEquals(text, linkNote("").copy(textContent = text).markdownBody())

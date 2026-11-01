@@ -489,6 +489,17 @@ class KeepImporterTest {
     }
 
     @Test
+    fun aStorageErrorReportsNoneOfItsMessage() {
+        val sentinel = "my bank pin 1234"
+        val importer = KeepImporter { throw IllegalArgumentException("Bad tag: $sentinel") }
+
+        val report = importer.import(documents(takeout()))
+
+        assertEquals(KeepImportFailure.Kind.STORAGE_ERROR, report.failures.single().kind)
+        assertFalse(sentinel in report.toString())
+    }
+
+    @Test
     fun aRunThatFinishesIsNotStopped() =
         withStore { store ->
             assertFalse(KeepImporter(store.notes).import(documents(takeout())).stopped)

@@ -72,7 +72,7 @@ new one.
 | A title or body with characters SQLite cannot store, such as a lone surrogate | Imported with U+FFFD in their place, warning `TEXT_REPLACED` naming `title` or `body` |
 | Sharees | Imported as a private note, warning `SHARING_DROPPED` with their number |
 | The note has a history here, even a tombstone | Skipped, with no warnings: nothing was imported |
-| The database cannot store the note, such as tens of thousands of labels | Failure `STORAGE_ERROR`; its transaction rolls back and the run goes on |
+| The database cannot store the note, such as tens of thousands of labels | Failure `STORAGE_ERROR` with a fixed detail, as storage messages can quote a note; its transaction rolls back and the run goes on |
 | The database stays locked | Failure `STORAGE_BUSY`, and the run stops |
 
 Each note is its own transaction. Only a database that stays locked ends a run

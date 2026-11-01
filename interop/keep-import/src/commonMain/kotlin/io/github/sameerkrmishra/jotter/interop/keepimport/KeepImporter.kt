@@ -24,6 +24,9 @@ private val keepJson: Json =
 /** The fixed detail of a [KeepImportFailure.Kind.MALFORMED_JSON] failure. */
 private const val MALFORMED_DETAIL = "Not a valid Keep note"
 
+/** The fixed detail of a [KeepImportFailure.Kind.STORAGE_ERROR] failure. */
+private const val STORAGE_ERROR_DETAIL = "The database could not store this note"
+
 /**
  * One JSON file of the `Keep` folder of a Takeout.
  *
@@ -157,8 +160,9 @@ public class KeepImporter internal constructor(
                 fail(source, KeepImportFailure.Kind.STORAGE_BUSY, e.message.orEmpty())
                 stopped = true
                 null
-            } catch (e: RuntimeException) {
-                fail(source, KeepImportFailure.Kind.STORAGE_ERROR, e.message.orEmpty())
+            } catch (_: RuntimeException) {
+                // Not its message: storage errors can quote a note's text or tags.
+                fail(source, KeepImportFailure.Kind.STORAGE_ERROR, STORAGE_ERROR_DETAIL)
                 null
             }
 
