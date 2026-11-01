@@ -27,7 +27,10 @@ atomicfu. No other Jotter module.
   a foreign file in WAL mode with an unfinished `-wal` is checkpointed when the
   last connection closes, as by any SQLite client.
 - Sets `journal_mode = WAL` (fails if WAL cannot be enabled, e.g. `:memory:`)
-  and `foreign_keys = ON`.
+  and `foreign_keys = ON`. The switch can fail with `SQLITE_BUSY` at once when
+  two connections open a new file together, without running the busy handler,
+  so it is retried for as long as `busy_timeout`, then fails with the last
+  error.
 - Creates or migrates the schema inside one `BEGIN IMMEDIATE` transaction,
   using `PRAGMA user_version`; creating also sets `application_id`. A database
   with a newer version than the schema is rejected and left untouched.

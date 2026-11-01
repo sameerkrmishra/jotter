@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.core.sqlite
 
 import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.SQLiteException
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import app.cash.sqldelight.TransacterImpl
@@ -9,6 +10,8 @@ import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlCursor
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
 /**
  * How long a connection waits for a lock held by another connection, usually in another process,
@@ -125,15 +128,33 @@ private const val READ_OWNERSHIP =
 private fun applyPragmas(connection: SQLiteConnection) {
     // journal_mode reports the mode it ended up in rather than failing, e.g. "memory" for an
     // in-memory database.
-    val journalMode =
-        connection.prepare("PRAGMA journal_mode = WAL").use { statement ->
-            statement.step()
-            statement.getText(0)
-        }
+    val journalMode = enableWal(connection)
     check(journalMode == "wal") {
         "Could not enable WAL for the database, journal_mode is $journalMode"
     }
     connection.execSQL("PRAGMA foreign_keys = ON")
+}
+
+/**
+ * Switches to WAL and returns the journal mode that took effect. Another connection's open can
+ * make this fail with `SQLITE_BUSY` at once: the switch needs an exclusive lock, and SQLite does
+ * not run its busy handler for that when two connections would wait for each other. So this
+ * retries for as long as `busy_timeout`, then throws the last error. There is no pause between
+ * tries: such a failure only happens while the other open is switching, and a lock held for long
+ * makes each try wait in the busy handler.
+ */
+private fun enableWal(connection: SQLiteConnection): String {
+    val deadline = TimeSource.Monotonic.markNow() + BUSY_TIMEOUT_MILLIS.milliseconds
+    while (true) {
+        try {
+            return connection.prepare("PRAGMA journal_mode = WAL").use { statement ->
+                statement.step()
+                statement.getText(0)
+            }
+        } catch (e: SQLiteException) {
+            if (!isSqliteBusy(e) || deadline.hasPassedNow()) throw e
+        }
+    }
 }
 
 /**

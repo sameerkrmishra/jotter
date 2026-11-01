@@ -7,9 +7,11 @@ import app.cash.sqldelight.db.QueryResult
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
 import app.cash.sqldelight.db.use
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -19,6 +21,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
 class OpenSqliteDriverTest {
     @Test
@@ -302,6 +305,54 @@ class OpenSqliteDriverTest {
             }
         }
 
+    @Test
+    fun concurrentOpensOfANewFileAllSucceed() {
+        repeat(CONCURRENT_OPEN_ROUNDS) {
+            withTempDir { dir ->
+                runBlocking {
+                    val start = CompletableDeferred<Unit>()
+                    val opens =
+                        List(2) {
+                            async(testThreads) {
+                                start.await()
+                                openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID).close()
+                            }
+                        }
+                    start.complete(Unit)
+                    opens.awaitAll()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun aSwitchToWalThatStaysBusyFailsAfterTheTimeoutAndChangesNothing() =
+        withTempDir { dir ->
+            val reader = openRawConnection(dir.path)
+            try {
+                reader.execSQL("PRAGMA application_id = $TEST_APPLICATION_ID")
+                reader.execSQL("PRAGMA user_version = 1")
+                reader.execSQL("CREATE TABLE note(id INTEGER PRIMARY KEY)")
+                val before = dir.bytes()
+                // An open read transaction: its shared lock keeps WAL's exclusive lock out.
+                reader.execSQL("BEGIN")
+                reader.prepare("SELECT count(*) FROM note").use { it.step() }
+
+                val start = TimeSource.Monotonic.markNow()
+                val error =
+                    assertFailsWith<SQLiteException> {
+                        openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID)
+                    }
+
+                assertTrue(isSqliteBusy(error), "Not busy: ${error.message}")
+                val waited = start.elapsedNow()
+                assertTrue(waited >= BUSY_TIMEOUT_MILLIS.milliseconds, "Gave up after $waited")
+                assertEquals(before, dir.bytes())
+            } finally {
+                reader.close()
+            }
+        }
+
     private fun openInBackground(
         dir: TempDatabaseDir,
         schema: RecordingSchema,
@@ -399,5 +450,6 @@ class OpenSqliteDriverTest {
 
     private companion object {
         val HOLD = 300.milliseconds
+        const val CONCURRENT_OPEN_ROUNDS = 100
     }
 }
