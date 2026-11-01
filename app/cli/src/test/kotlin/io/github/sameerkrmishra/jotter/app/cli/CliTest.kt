@@ -2,11 +2,8 @@ package io.github.sameerkrmishra.jotter.app.cli
 
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
-import com.github.ajalt.clikt.core.parse
-import com.github.ajalt.clikt.testing.test
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
-import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import java.io.IOException
@@ -42,30 +39,7 @@ class CliTest {
         stdin: String = "",
         file: Path = database,
         input: InputStream = stdin.byteInputStream(),
-    ): Result {
-        val command = JotterCommand(input)
-        val stdout = StringBuilder()
-        val stderr = StringBuilder()
-        val result =
-            command.test(args.toList(), envvars = mapOf(DATABASE_ENVVAR to file.toString())) {
-                // Clikt's test support records through Mordant, which main() does not use and which
-                // turns tabs into spaces. Keep the text exactly as main() would print it.
-                command.configureContext {
-                    echoMessage = { _, message, newline, err ->
-                        val output = if (err) stderr else stdout
-                        output.append(message).append(if (newline) "\n" else "")
-                    }
-                }
-                command.parse(it)
-            }
-        return Result(stdout.toString(), stderr.toString(), result.statusCode)
-    }
-
-    private data class Result(
-        val stdout: String,
-        val stderr: String,
-        val statusCode: Int,
-    )
+    ): CliResult = runJotter(args.toList(), file, input)
 
     /** Runs the command, checks that it worked, and returns its output lines. */
     private fun lines(vararg args: String): List<String> {
@@ -84,7 +58,7 @@ class CliTest {
 
     private fun assertFails(
         expected: String,
-        result: Result,
+        result: CliResult,
     ) {
         assertNotEquals(0, result.statusCode)
         assertEquals("", result.stdout)

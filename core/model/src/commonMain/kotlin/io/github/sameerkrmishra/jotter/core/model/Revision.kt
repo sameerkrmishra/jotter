@@ -20,8 +20,9 @@ package io.github.sameerkrmishra.jotter.core.model
  * @property id The revision's id.
  * @property noteId The note this revision belongs to.
  * @property parents The revisions this one builds on. Empty only for the first revision.
- * @property timestamp For a user revision, the device's fresh clock reading. For an automatic
- *   merge, the timestamp of the parent with the greater [stamp].
+ * @property timestamp For a user revision, the device's fresh clock reading, or the source's time
+ *   for an imported one (ADR-0009). For an automatic merge, the timestamp of the parent with the
+ *   greater [stamp].
  * @property deviceId For a user revision, the device that made it. For an automatic merge, the
  *   device of the parent with the greater [stamp]; the device that computed the merge is not
  *   recorded, so every device computes the same revision.

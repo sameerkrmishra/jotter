@@ -1,10 +1,10 @@
 # app:cli
 
-The `jotter` command: add, list, show and search notes from a terminal or a
-script, in the same database as the desktop app. It is a
+The `jotter` command: add, list, show, search, import and export notes from a
+terminal or a script, in the same database as the desktop app. It is a
 [Clikt](https://ajalt.github.io/clikt/) application on the JVM. The notes
-themselves are `core:storage`'s job; this module only parses arguments and
-prints.
+themselves are `core:storage`'s job, and the file formats `interop/*`'s; this
+module only parses arguments, finds files and prints.
 
 ```
 ./gradlew :app:cli:installDist
@@ -23,12 +23,37 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 | `jotter show ID` | Prints one note in any state |
 | `jotter search QUERY` | Searches the active notes, at most the best 100. QUERY is plain words, see `core:storage` |
 | `jotter tags` | Lists the tags of the notes outside the trash |
+| `jotter import PATH` | Imports Google Keep notes from a Takeout `Keep` directory or one `.json` file, see below |
+| `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
 
 An `ID` is a whole id or a start of one that only one note, in any state, has.
 Letter case and dashes do not matter. A prefix reads every note, because
 `NoteService` has no lookup by prefix; a whole id reads just the one.
 
-`import` and `export` come with `interop/*`.
+### Import
+
+Each `.json` directly in the directory is read in turn, sorted by name, so only
+one is in memory at a time and a repeated run fails the same one of two
+duplicates. Everything else there, such as Keep's `.html`, attachments and
+subdirectories, is left alone and counted as `ignored`. A bad file does not stop
+the rest. A file must be UTF-8 and at most 64 MiB; otherwise it is a `READ_ERROR`
+failure. What maps to what and what can go wrong is in
+[`interop:keep-import`](../../interop/keep-import/README.md).
+
+Importing again is always safe: a note that is already here, even one deleted
+forever, is skipped and stays as it is, so newer Keep edits do not come in
+([ADR-0009](../../docs/adr/0009-import-preserves-source-timestamps.md)). A run
+that stopped or partly failed can simply be repeated.
+
+Import 1,000 synthetic notes: median 1.1 s from process start to exit, as one transaction per note (5 runs; 0.36 s to skip them all again), on the hardware under "Startup time", with sibling builds running.
+
+### Export
+
+The format and the file names are in
+[`interop:markdown-export`](../../interop/markdown-export/README.md). The trash
+stays out by default, unlike in that module, because everywhere else in the CLI
+it is a place to be asked for. Exporting again replaces a note's own file and
+never another file; a note that has to take another name for that is reported.
 
 ## Output
 
@@ -43,12 +68,28 @@ and `search` print nothing when nothing matches.
 | `list` | `ID`, tab, `UPDATED`, tab, `pinned` or `-`, tab, tags joined by `,` or `-`, tab, summary |
 | `search` | `ID`, tab, summary, tab, snippet |
 | `tags` | `TAG`, tab, count |
+| `import` | Five lines of `NAME`, tab, count: `imported`, `skipped`, `ignored`, `warnings`, `failures` |
+| `export` | `exported`, tab, count |
 | `show` | The headers `id:`, `title:`, `tags:`, `state:` (`active`, `archived`, `trash`), `pinned:` (`yes`, `no`), `created:`, `updated:`, a blank line, and the body as it is |
 
 The summary is the title, or else the first line of the body with text in it.
 Control characters in a summary, snippet or `show`'s title become spaces, so
 there is always exactly one line per note and tabs only between columns. A tag
 may itself contain a comma.
+
+On stderr, after the summary, `import` prints a line per warning and per failure,
+and `export` one per file that took another name. These are tab-separated too:
+
+```
+warning<TAB>FILE<TAB>KIND<TAB>DETAIL
+failure<TAB>FILE<TAB>KIND<TAB>DETAIL
+renamed<TAB>PLANNED NAME<TAB>WRITTEN NAME
+```
+
+`KIND` is a name from `interop:keep-import`, or `READ_ERROR` for a file that could
+not be read. `DETAIL` is `-` if there is none. No line quotes a note's title or
+text from inside a file, but Keep names its files after the titles, so `FILE`
+usually shows one, and an `INVALID_TAG` detail shows the label.
 
 ## Errors
 
@@ -60,8 +101,18 @@ not valid in the locale, an unreadable stdin, no usable database location, or a
 database that stayed locked.
 Clikt's usage errors also exit with status 1, and print the usage line first.
 
+`import` is the exception, because part of a run can succeed: after a bad file or
+a lock it still prints its summary and its lines, then a last `jotter: ` line that
+says repeating it is safe, and exits with status 1. A path that is missing, not
+readable, neither a directory nor a `.json` file, or a directory without `.json`
+files fails as above, before the database is opened or created; for the top
+directory of a Takeout the message names its `Keep` directory. `export` fails as above if the target cannot be
+written. As `writeExport` stages its files, a failure while writing changes nothing
+there, and one during the final moves leaves every file whole.
+
 A locked database means another process kept it for the whole 5 s busy timeout.
-Nothing was written, and the command may be tried again.
+Nothing was written, and the command may be tried again. `import` stops at the
+first note that meets the lock, and keeps the notes before it.
 
 A failure to write to stdout also exits with status 1, so `jotter list > /dev/full`
 does not pass for a success. A reader that leaves, as in `jotter list | head -1`,
@@ -104,6 +155,9 @@ the same file: steps 2 to 4 are `linuxDatabasePath` in `core:storage`.
   so `CliTest` captures the text itself. The tests for a locked database wait out
   the real timeout, 10 s together. `MainTest` and `StartScriptTest` run real
   processes with a temporary `HOME`; `test` depends on `installDist` for the latter.
+  `InteropEndToEndTest` takes 1,000 synthetic notes through `import`, again `import`
+  and `export` in real processes. `core:storage` has no limit on `list`, and that
+  test would show one: the only page size is `search`'s 100.
 - **SQLite's exception.** `NoteStore.open` reports a lock as `StorageBusyException`
   but lets every other driver failure through, such as a file that is not a
   database, so this module still depends on `androidx.sqlite` for that one type.

@@ -6,7 +6,6 @@ import java.nio.file.Path
 import java.nio.file.attribute.FileTime
 import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
@@ -19,7 +18,6 @@ import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.listDirectoryEntries
-import kotlin.io.path.readText
 import kotlin.io.path.setLastModifiedTime
 import kotlin.io.path.setPosixFilePermissions
 import kotlin.io.path.writeText
@@ -53,17 +51,10 @@ class StartScriptTest {
         directory.deleteRecursively()
     }
 
-    private class Exit(
-        val status: Int,
-        val stdout: String,
-        val stderr: String,
-    )
-
     private fun start(
         vararg args: String,
         environment: Map<String, String> = mapOf("HOME" to home.toString()),
-        stderr: Path = directory.resolve("stderr-${System.nanoTime()}"),
-    ): Pair<Process, Path> {
+    ): JotterProcess {
         val command = listOf(installation.resolve("bin/jotter").toString()) + args
         val builder = ProcessBuilder(command)
         builder.environment().apply {
@@ -73,25 +64,13 @@ class StartScriptTest {
             put(DATABASE_ENVVAR, database.toString())
             putAll(environment)
         }
-        return builder.redirectError(stderr.toFile()).start() to stderr
-    }
-
-    private fun finish(
-        process: Process,
-        stderr: Path,
-    ): Exit {
-        val stdout = process.inputStream.bufferedReader().readText()
-        assertTrue(process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS), "jotter did not exit")
-        return Exit(process.exitValue(), stdout, stderr.readText())
+        return JotterProcess(builder, directory)
     }
 
     private fun jotter(
         vararg args: String,
         environment: Map<String, String> = mapOf("HOME" to home.toString()),
-    ): Exit {
-        val (process, stderr) = start(*args, environment = environment)
-        return finish(process, stderr)
-    }
+    ): Exit = start(*args, environment = environment).finish(TIMEOUT_SECONDS)
 
     private fun assertAdded(exit: Exit) {
         assertEquals(0, exit.status, exit.stdout + exit.stderr)
@@ -181,7 +160,7 @@ class StartScriptTest {
     fun parallelFirstRunsAllSucceedAndMakeOneArchive() {
         val runs = List(PARALLEL_RUNS) { start("add", "note $it") }
 
-        runs.forEach { (process, stderr) -> assertAdded(finish(process, stderr)) }
+        runs.forEach { assertAdded(it.finish(TIMEOUT_SECONDS)) }
 
         awaitArchive()
         assertEquals(PARALLEL_RUNS, noteCount())

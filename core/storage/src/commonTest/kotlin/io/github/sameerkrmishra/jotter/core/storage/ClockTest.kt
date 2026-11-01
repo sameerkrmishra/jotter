@@ -14,7 +14,6 @@ import io.kotest.property.checkAll
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -30,7 +29,7 @@ class ClockTest {
 
     @Test
     fun timestampsIncreaseWhateverTheWallClockDoes() =
-        runTest {
+        runDatabaseTest {
             val clock = FakeClock(millis = 1_000_000)
             withStore(clock) { store ->
                 val written = mutableListOf<HybridTimestamp>()

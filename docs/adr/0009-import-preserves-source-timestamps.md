@@ -65,6 +65,9 @@ for different content, which `RevisionStore.insert` rejects.
 - Roots with different values, for example from two Takeouts taken apart with
   an edit in Keep in between, merge against an empty base and may conflict on
   the whole `body` or `title`.
+- The several-roots base covers only `body` and `title`. Tags have no such
+  base, so in M3 a tag removed on one device comes back from the other root,
+  because tags merge as an OR-set and an add wins.
 - `merge` code has a case that only imports create: several roots of one note.
   Two devices importing one note also keep two extra revisions in its history
   for good.
