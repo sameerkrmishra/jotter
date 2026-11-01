@@ -55,7 +55,8 @@ public sealed interface MergeChunk {
  * Lines compare exactly, line break included, and are never rewritten. Two changes conflict if
  * they share a base line, one inserts inside the other's lines, or both insert different lines at
  * one position. Changes that merely touch merge, unless joining them would alter a line: then the
- * whole merge is redone with touching changes as conflicts. The README gives the reasons.
+ * whole merge is redone with touching changes as conflicts. An insertion that repeats the touching
+ * end of the other side's change is written once. ADR-0011 gives the reasons.
  */
 public fun merge(
     base: String,
@@ -108,6 +109,12 @@ private class Cursor(
 
     val hunk: Hunk?
         get() = side.hunks.getOrNull(next)
+
+    /** The hunk taken last. */
+    val taken: Hunk?
+        get() = side.hunks.getOrNull(next - 1)
+
+    fun newLines(hunk: Hunk): List<String> = side.lines.subList(hunk.sideStart, hunk.sideEnd)
 
     fun take(hunk: Hunk) {
         next += 1
@@ -173,8 +180,12 @@ private class Sweep(
         var unchangedFrom = 0
         var hunk = nextHunk()
         while (hunk != null) {
-            writer.resolved(base.subList(unchangedFrom, hunk.baseStart))
-            unchangedFrom = writeRegion(hunk)
+            if (repeatsOtherSide(hunk)) {
+                take(hunk)
+            } else {
+                writer.resolved(base.subList(unchangedFrom, hunk.baseStart))
+                unchangedFrom = writeRegion(hunk)
+            }
             hunk = nextHunk()
         }
         writer.resolved(base.subList(unchangedFrom, base.size))
@@ -185,6 +196,25 @@ private class Sweep(
         listOfNotNull(ours.hunk, theirs.hunk).minWithOrNull(
             compareBy<Hunk> { it.baseStart }.thenBy { it.baseEnd },
         )
+
+    /**
+     * Whether [hunk] only inserts lines that the other side's change, touching it, already has at
+     * that end. Then both sides added those lines, and they are written once, with that change.
+     * With [touchingConflicts] the two simply form one region.
+     */
+    private fun repeatsOtherSide(hunk: Hunk): Boolean {
+        if (touchingConflicts || hunk.baseStart != hunk.baseEnd) return false
+        val (own, other) = if (hunk === ours.hunk) ours to theirs else theirs to ours
+        val inserted = own.newLines(hunk)
+        val before =
+            other.hunk?.takeIf {
+                it.baseStart == hunk.baseStart &&
+                    it.baseEnd > it.baseStart
+            }
+        val after = other.taken?.takeIf { it.baseEnd == hunk.baseStart }
+        return (before != null && other.newLines(before).take(inserted.size) == inserted) ||
+            (after != null && other.newLines(after).takeLast(inserted.size) == inserted)
+    }
 
     /** Writes the region of hunks that starts with [first], and returns the base line after it. */
     private fun writeRegion(first: Hunk): Int {

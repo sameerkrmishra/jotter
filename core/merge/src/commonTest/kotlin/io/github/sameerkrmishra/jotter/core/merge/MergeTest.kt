@@ -125,6 +125,53 @@ class MergeTest {
     }
 
     @Test
+    fun aLineAddedOnBothSidesNextToAnEditIsAddedOnce() {
+        val base = "- [ ] a\n- [ ] b\n"
+        val ticked = "- [ ] a\n- [x] b\n- [ ] milk\n"
+        val added = "- [ ] a\n- [ ] b\n- [ ] milk\n"
+
+        assertClean(ticked, base, ticked, added)
+    }
+
+    @Test
+    fun aLineAddedOnBothSidesBeforeAnEditIsAddedOnce() {
+        assertClean("a\nnew\nB\nc\n", "a\nb\nc\n", "a\nnew\nB\nc\n", "a\nnew\nb\nc\n")
+    }
+
+    @Test
+    fun severalLinesAddedOnBothSidesNextToAnEditAreAddedOnce() {
+        assertClean("A\nx\ny\nb\n", "a\nb\n", "A\nx\ny\nb\n", "a\nx\ny\nb\n")
+    }
+
+    @Test
+    fun theOrderOfATickAndTwoEqualAdditionsDoesNotDuplicateTheLine() {
+        val base = "- [ ] a\n- [ ] b\n"
+        val tickedAndAdded = "- [ ] a\n- [x] b\n- [ ] milk\n"
+        val added = "- [ ] a\n- [ ] b\n- [ ] milk\n"
+
+        val additionsFirst = assertIs<Clean>(merge(base, added, added)).text
+        val tickFirst = assertIs<Clean>(merge(base, tickedAndAdded, added)).text
+
+        assertEquals(Clean(tickedAndAdded), merge(base, additionsFirst, tickedAndAdded))
+        assertEquals(Clean(tickedAndAdded), merge(base, tickFirst, added))
+    }
+
+    @Test
+    fun anInsertionMatchingTheFarEndOfTheChangeIsKept() {
+        assertClean("new\nA\nnew\nb\n", "a\nb\n", "new\nA\nb\n", "a\nnew\nb\n")
+    }
+
+    @Test
+    fun anInsertionThatOnlyPartlyRepeatsTheChangeIsKeptWhole() {
+        assertClean("A\nx\nx\ny\nb\n", "a\nb\n", "A\nx\nb\n", "a\nx\ny\nb\n")
+    }
+
+    @Test
+    fun aLastLineWithoutABreakAddedOnBothSidesIsAddedOnce() {
+        assertClean("a\nB\nx", "a\nb\n", "a\nB\nx", "a\nb\nx")
+    }
+
+    @Test
     fun aDeletionNextToAnInsertionMerges() {
         assertClean("new\nb\n", "a\nb\n", "b\n", "a\nnew\nb\n")
     }

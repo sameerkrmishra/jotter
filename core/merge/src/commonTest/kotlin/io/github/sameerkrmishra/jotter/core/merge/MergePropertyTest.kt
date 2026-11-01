@@ -83,6 +83,51 @@ class MergePropertyTest {
         }
 
     @Test
+    fun touchingEditsNeverAlterALine() =
+        runTest {
+            checkAll(ITERATIONS, touchingEdits) { (base, ours, theirs) ->
+                val merged = merge(base, ours, theirs)
+                if (merged is Clean) {
+                    val known = splitLines(base) + splitLines(ours) + splitLines(theirs)
+                    assertTrue(known.containsAll(splitLines(merged.text)), "$merged")
+                }
+            }
+        }
+
+    @Test
+    fun touchingEditsMirrorWhenTheSidesSwap() =
+        runTest {
+            checkAll(ITERATIONS, touchingEdits) { (base, ours, theirs) ->
+                assertEquals(mirrored(merge(base, ours, theirs)), merge(base, theirs, ours))
+            }
+        }
+
+    @Test
+    fun touchingEditsKeepTheLaws() =
+        runTest {
+            checkAll(ITERATIONS, touchingEdits) { (base, ours, _) ->
+                assertEquals(Clean(ours), merge(base, base, ours))
+                assertEquals(Clean(ours), merge(base, ours, base))
+                assertEquals(Clean(ours), merge(base, ours, ours))
+            }
+        }
+
+    @Test
+    fun linesBothSidesAddedNextToAnEditAreAddedOnce() =
+        runTest {
+            checkAll(ITERATIONS, repeatedInsertions) { edits ->
+                assertEquals(
+                    Clean(edits.expected),
+                    merge(edits.base, edits.edited, edits.inserted),
+                )
+                assertEquals(
+                    Clean(edits.expected),
+                    merge(edits.base, edits.inserted, edits.edited),
+                )
+            }
+        }
+
+    @Test
     fun nonOverlappingEditsAlwaysMergeToBothEdits() =
         runTest {
             checkAll(ITERATIONS, disjointEdits) { edits ->

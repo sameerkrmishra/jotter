@@ -13,6 +13,8 @@ import kotlin.random.Random
 private const val EDITS_PER_TEXT = 6
 private const val NEW_LINE_VARIETY = 4
 private const val MAX_LINES = 24
+private const val CHANGED_LINES = 3
+private const val CHOICES = 3
 private const val HASH_FACTOR = 1_000_003L
 private const val LCG_FACTOR = 6_364_136_223_846_793_005L
 private const val LCG_INCREMENT = 1_442_695_040_888_963_407L
@@ -152,6 +154,72 @@ val disjointEdits: Arb<DisjointEdits> =
         }
         insertInto(size)
         edits.build()
+    }
+
+/** Lines that are unsafe to join: a lone CR, a lone LF, and a line without a break. */
+private val joinLines: List<String> =
+    listOf("p\n", "q\r", "\n", "\r\n", "y\n", "tail", "\uD83D\uDE00")
+
+/**
+ * Three texts where the sides' changes touch at one position, which is where lines are joined.
+ * One side replaces lines next to the position, and the other changes the line on the other side
+ * of it or inserts, often lines that repeat the first side's change.
+ */
+val touchingEdits: Arb<Triple<String, String, String>> =
+    Arb.bind(Arb.list(Arb.element(joinLines), 0..6), Arb.long()) { base, seed ->
+        val random = Random(seed)
+        val at = random.nextInt(base.size + 1)
+        val changed = List(random.nextInt(CHANGED_LINES)) { joinLines.random(random) }
+        val other =
+            when (random.nextInt(CHOICES)) {
+                0 -> changed.takeLast(1)
+                1 -> changed.take(1)
+                else -> List(random.nextInt(CHANGED_LINES)) { joinLines.random(random) }
+            }
+        val before = (at - random.nextInt(2)).coerceAtLeast(0)
+        val after = (at + random.nextInt(2)).coerceAtMost(base.size)
+        Triple(
+            base.joinToString(""),
+            (base.subList(0, before) + changed + base.subList(at, base.size)).joinToString(""),
+            (base.subList(0, at) + other + base.subList(after, base.size)).joinToString(""),
+        )
+    }
+
+/** One side of [base] edits a line and adds lines, the other only adds them; see [expected]. */
+class RepeatedInsertion(
+    val base: String,
+    val edited: String,
+    val inserted: String,
+    val expected: String,
+)
+
+/** All lines differ, so the diff finds the intended edit, and the addition is at either end. */
+val repeatedInsertions: Arb<RepeatedInsertion> =
+    Arb.bind(Arb.int(1..MAX_LINES), Arb.long()) { size, seed ->
+        val random = Random(seed)
+        val lines = List(size) { "line $it\n" }
+        val at = random.nextInt(size)
+        val added = List(random.nextInt(1, CHANGED_LINES + 1)) { "added $it\n" }
+        val head = lines.subList(0, at).joinToString("")
+        val tail = lines.subList(at + 1, size).joinToString("")
+        val line = lines[at]
+        val edit = "edit\n"
+        val addedText = added.joinToString("")
+        if (random.nextBoolean()) {
+            RepeatedInsertion(
+                lines.joinToString(""),
+                head + edit + addedText + tail,
+                head + line + addedText + tail,
+                head + edit + addedText + tail,
+            )
+        } else {
+            RepeatedInsertion(
+                lines.joinToString(""),
+                head + addedText + edit + tail,
+                head + addedText + line + tail,
+                head + addedText + edit + tail,
+            )
+        }
     }
 
 /** A checksum that nearly any change in a large text changes. */
