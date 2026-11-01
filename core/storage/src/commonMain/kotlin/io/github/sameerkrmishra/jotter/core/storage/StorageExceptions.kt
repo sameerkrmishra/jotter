@@ -33,3 +33,14 @@ public class StaleEditException(
 ) : IllegalStateException(
         "The text of note $noteId changed since revision $basedOn; the current one is $current",
     )
+
+/**
+ * Thrown when a write found the database locked by another process, such as the CLI during a long
+ * write, for the whole 5 s it waits for the lock. Nothing was written; the write may be tried
+ * again.
+ *
+ * @param cause The SQLite driver's error.
+ */
+public class StorageBusyException(
+    cause: Throwable,
+) : IllegalStateException("The database stayed locked by another process", cause)

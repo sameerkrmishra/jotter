@@ -53,6 +53,9 @@ atomicfu. No other Jotter module.
   SQLDelight, and also rolls back the whole outer transaction: SQLDelight
   leaves an unfinished nested transaction behind, after which its record of
   failures and hooks cannot be trusted.
+- **Busy errors.** After `busy_timeout` a statement fails with androidx's
+  `SQLiteException`. It is not part of this module's API, so `isSqliteBusy`
+  tells that case apart, by the result code androidx writes into the message.
 - **Reads.** Every transaction uses `BEGIN IMMEDIATE`, read-only ones too, and
   so takes the write lock across processes. `core/storage` should therefore
   not wrap pure reads in transactions; a single query needs none.

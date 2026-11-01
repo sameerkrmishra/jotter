@@ -15,7 +15,12 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /** The device's hybrid logical clock, which every write reads from and stores in the database. */
@@ -125,6 +130,50 @@ class ClockTest {
             }
         }
 
+    @Test
+    fun everyWriteReportsADatabaseThatStaysLocked() =
+        withTempDir { dir ->
+            openStore(dir.path).use { holder ->
+                openStore(dir.path).use { waiter ->
+                    // Keeps the test short. The 5 s default gives the same error, only later.
+                    waiter.driver.execute(null, "PRAGMA busy_timeout = 50", 0)
+                    val notes = waiter.notes
+                    val note = notes.create("", "body")
+                    val writes =
+                        listOf<() -> Unit>(
+                            { notes.create("", "") },
+                            { notes.edit(note.id, note.revisionId, "", "edit") },
+                            { notes.addTag(note.id, TagName.parse("tag")) },
+                            { notes.removeTag(note.id, TagName.parse("tag")) },
+                            { notes.setPinned(note.id, true) },
+                            { notes.setState(note.id, NoteState.TRASHED) },
+                            { notes.deleteForever(note.id) },
+                        )
+
+                    holder.database.transaction {
+                        writes.forEach { write ->
+                            val error = assertFailsWith<StorageBusyException> { write() }
+                            assertNotNull(error.cause)
+                        }
+                    }
+
+                    // It was only the lock: the same store writes again once it is released.
+                    assertEquals("edit", notes.edit(note.id, note.revisionId, "", "edit").body)
+                }
+            }
+        }
+
+    @Test
+    fun otherFailuresOfAWriteAreNotBusyErrors() =
+        withStore { store ->
+            store.driver.execute(null, BLOCK_REVISIONS, 0)
+
+            val error = assertFails { store.notes.create("", "") }
+
+            assertFalse(error is StorageBusyException)
+            assertContains(error.message.orEmpty(), "blocked")
+        }
+
     private fun apply(
         notes: NoteService,
         note: Note,
@@ -143,5 +192,8 @@ class ClockTest {
     private companion object {
         const val INTERLEAVED_WRITES = 6
         const val CONCURRENT_WRITES = 50
+        const val BLOCK_REVISIONS =
+            "CREATE TRIGGER block BEFORE INSERT ON revision " +
+                "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
     }
 }

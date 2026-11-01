@@ -16,6 +16,7 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamp
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.sqlite.isSqliteBusy
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -43,6 +44,9 @@ import kotlin.time.Instant
  * All functions block on database I/O: call them off the UI thread. They may be called from any
  * thread. The observation flows re-run their query after every change made through this
  * [NoteStore], but not after changes made by another process, such as the CLI.
+ *
+ * A write waits up to 5 s for another process's write to finish, then fails with
+ * [StorageBusyException].
  */
 @Suppress("TooManyFunctions") // The note operations of PLAN.md §3.3, kept together on purpose.
 public class NoteService internal constructor(
@@ -54,7 +58,11 @@ public class NoteService internal constructor(
     private val revisions = RevisionStore(database.revisionQueries)
     private val materialiser = NoteMaterialiser(database.noteQueries)
 
-    /** Creates an active note and returns it. */
+    /**
+     * Creates an active note and returns it.
+     *
+     * @throws StorageBusyException if another process kept the database locked.
+     */
     public fun create(
         title: String,
         body: String,
@@ -126,6 +134,7 @@ public class NoteService internal constructor(
      * @throws StaleEditException if [basedOn] is not a revision of this note, or its title or body
      *   differ from the current ones.
      * @throws NoSuchNoteException if there is no note [id].
+     * @throws StorageBusyException if another process kept the database locked.
      */
     public fun edit(
         id: NoteId,
@@ -150,6 +159,7 @@ public class NoteService internal constructor(
      * they touch one item each and cannot lose someone else's change.
      *
      * @throws NoSuchNoteException if there is no note [id].
+     * @throws StorageBusyException if another process kept the database locked.
      */
     public fun addTag(
         id: NoteId,
@@ -163,6 +173,7 @@ public class NoteService internal constructor(
      * Removes [tag] from the note [id], if it has it.
      *
      * @throws NoSuchNoteException if there is no note [id].
+     * @throws StorageBusyException if another process kept the database locked.
      */
     public fun removeTag(
         id: NoteId,
@@ -176,6 +187,7 @@ public class NoteService internal constructor(
      * Pins or unpins the note [id].
      *
      * @throws NoSuchNoteException if there is no note [id].
+     * @throws StorageBusyException if another process kept the database locked.
      */
     public fun setPinned(
         id: NoteId,
@@ -193,6 +205,7 @@ public class NoteService internal constructor(
      * Moves the note [id] to [state]: archives it, trashes it or restores it.
      *
      * @throws NoSuchNoteException if there is no note [id].
+     * @throws StorageBusyException if another process kept the database locked.
      */
     public fun setState(
         id: NoteId,
@@ -212,6 +225,7 @@ public class NoteService internal constructor(
      *
      * @throws NoSuchNoteException if there is no note [id].
      * @throws IllegalStateException if the note is not in the trash.
+     * @throws StorageBusyException if another process kept the database locked.
      */
     public fun deleteForever(id: NoteId) {
         write { hlc ->
@@ -330,19 +344,24 @@ public class NoteService internal constructor(
      * Runs [block] in a write transaction with the device's hybrid logical clock, and stores the
      * clock's new [HybridLogicalClock.last] before committing.
      */
+    @Suppress("TooGenericExceptionCaught") // Everything but a busy error is rethrown as it is.
     private fun <T> write(block: (HybridLogicalClock) -> T): T =
-        database.transactionWithResult {
-            val stored = database.deviceQueries.selectDevice().executeAsOne()
-            val last = hybridTimestamp(stored.hlc_physical, stored.hlc_counter)
-            val hlc = HybridLogicalClock(clock, last)
-            val result = block(hlc)
-            if (hlc.last != last) {
-                database.deviceQueries.updateClock(
-                    hlc.last.physicalMillis,
-                    hlc.last.counter.toLong(),
-                )
+        try {
+            database.transactionWithResult {
+                val stored = database.deviceQueries.selectDevice().executeAsOne()
+                val last = hybridTimestamp(stored.hlc_physical, stored.hlc_counter)
+                val hlc = HybridLogicalClock(clock, last)
+                val result = block(hlc)
+                if (hlc.last != last) {
+                    database.deviceQueries.updateClock(
+                        hlc.last.physicalMillis,
+                        hlc.last.counter.toLong(),
+                    )
+                }
+                result
             }
-            result
+        } catch (e: RuntimeException) {
+            throw if (isSqliteBusy(e)) StorageBusyException(e) else e
         }
 
     /** Whether [basedOn] is a revision of the note [id] with the title and body of [current]. */
