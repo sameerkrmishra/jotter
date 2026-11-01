@@ -137,8 +137,12 @@ note can keep a name with an id after the note that held the plain name is gone,
 until the old file is removed. A file that a user edited keeps its id, so it is
 replaced like any other export of that note. A read error on the note's own
 file can therefore leave an id-named duplicate of it, reported as a rename. A
-failure to look up a name is not a clash: it ends the export with an
-`IOException`, as does a file system on which 1000 counted names are all taken.
+failure to look up a name is not a clash: where the platform reports it, it ends
+the export with an `IOException`. On the JVM and Android, okio's `metadataOrNull`
+returns null on a `FileSystemException`, so a failed lookup there can read as a
+free name, and the move into place then replaces whatever is under it or fails
+with the `IOException`. A file system on which 1000 counted names are all taken
+ends the export with an `IOException` too.
 
 ## Tests
 

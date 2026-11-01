@@ -2,9 +2,6 @@ package io.github.sameerkrmishra.jotter.interop.markdownexport
 
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.withContext
 import okio.FileMetadata
 import okio.FileSystem
 import okio.ForwardingFileSystem
@@ -19,10 +16,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.time.Duration.Companion.seconds
 
 private const val NO_SPACE = "No space left on device"
 private const val STAT_FAILED = "Input/output error"
+
+// More than the writer's 1000 counted names plus the two before them.
+private const val MAX_LOOKUPS = 2000
+
 private const val COMPOSED = "é"
 private const val DECOMPOSED = "e\u0301"
 
@@ -305,32 +305,23 @@ class ExportWriterTest {
     }
 
     @Test
-    fun aFailingStatOnTargetPathsFailsTheExportInsteadOfHanging() =
-        withHangGuard {
-            val failing = BrokenLookupFileSystem(system, out, statFails = true)
+    fun aFailingStatOnTargetPathsFailsTheExportInsteadOfHanging() {
+        val failing = BrokenLookupFileSystem(system, out, statFails = true)
 
-            val thrown =
-                assertFailsWith<IOException> { export(noteOf("One", 1), fileSystem = failing) }
+        val thrown = assertFailsWith<IOException> { export(noteOf("One", 1), fileSystem = failing) }
 
-            assertEquals(STAT_FAILED, thrown.message)
-        }
+        assertEquals(STAT_FAILED, thrown.message)
+    }
 
     @Test
-    fun aFileSystemWithNoFreeNameFailsTheExportInsteadOfHanging() =
-        withHangGuard {
-            val failing = BrokenLookupFileSystem(system, out, statFails = false)
+    fun aFileSystemWithNoFreeNameFailsTheExportInsteadOfHanging() {
+        val failing = BrokenLookupFileSystem(system, out, statFails = false)
 
-            val thrown =
-                assertFailsWith<IOException> { export(noteOf("One", 1), fileSystem = failing) }
+        val thrown = assertFailsWith<IOException> { export(noteOf("One", 1), fileSystem = failing) }
 
-            assertEquals("No free file name for note ${noteIdOf(1)}", thrown.message)
-            assertEquals(emptyList(), names())
-        }
-
-    // A hang spins on a thread, so the body must not run on the one that watches the timeout.
-    @Suppress("InjectDispatcher") // Tests choose their threads directly.
-    private fun withHangGuard(body: () -> Unit) =
-        runTest(timeout = 30.seconds) { withContext(Dispatchers.Default) { body() } }
+        assertEquals("No free file name for note ${noteIdOf(1)}", thrown.message)
+        assertEquals(emptyList(), names())
+    }
 
     // Stores names in composed form, as Android's case-folding storage treats them.
     private class NormalisingFileSystem(
@@ -344,25 +335,24 @@ class ExportWriterTest {
     }
 
     // In [directory], looking up a note's name fails, or every name seems taken and unreadable.
+    // An export that keeps looking would never end, so too many lookups fail the test instead:
+    // an AssertionError is not an IOException, so nothing on the way out can swallow it.
     private class BrokenLookupFileSystem(
         delegate: FileSystem,
         private val directory: Path,
         private val statFails: Boolean,
     ) : ForwardingFileSystem(delegate) {
+        private var lookups = 0
+
         // The temporary directory sits in the same parent, but is not named like a note.
         private fun isNote(path: Path): Boolean =
             path.parent == directory && path.name.endsWith(".md")
 
         override fun metadataOrNull(path: Path): FileMetadata? {
-            if (isNote(path) && statFails) throw IOException(STAT_FAILED)
-            return if (isNote(
-                    path,
-                )
-            ) {
-                FileMetadata(isRegularFile = true)
-            } else {
-                super.metadataOrNull(path)
-            }
+            if (!isNote(path)) return super.metadataOrNull(path)
+            if (++lookups > MAX_LOOKUPS) throw AssertionError("Still looking after $lookups names")
+            if (statFails) throw IOException(STAT_FAILED)
+            return FileMetadata(isRegularFile = true)
         }
 
         override fun source(file: Path): Source {
