@@ -101,3 +101,50 @@ An empty value counts as not set. The file must be on a local file system
 - **Arguments outside UTF-8 locales.** The JVM decodes arguments with the locale's
   charset, which the start script cannot change, so under `LANG=C` non-ASCII text
   in an argument is lost. Stdin and output are always UTF-8.
+
+## Startup time
+
+[ADR-0006](../../docs/adr/0006-native-compatible-shared-modules.md) sets a target:
+`jotter add` in about 200 ms. **Met: the median is 155 to 158 ms.**
+
+The start script is `src/main/scripts/start-script.template`, not Gradle's, and
+holds all the JVM flags. Two things made the difference:
+
+- **Application class data sharing.** `-XX:+AutoCreateSharedArchive` keeps an
+  archive of the loaded classes in `$XDG_CACHE_HOME/jotter/jotter.jsa`
+  (`~/.cache/jotter/` by default, 5.7 MB). There is no build step, and the JVM
+  makes a new one if the JDK changes. The first run takes about 500 ms, as it writes
+  the archive on exit. Deleting the file is safe.
+- **The flags go together.** `-XX:TieredStopAtLevel=1` and `-XX:+UseSerialGC` alone
+  gain little, as the table shows. They stay because the archive is made with them.
+  `-XX:-UsePerfData` skips a memory-mapped file in `/tmp`.
+
+`clikt-core` instead of `clikt` keeps Mordant's classes out of startup as well.
+
+Method: the median wall-clock time of 10 runs of the installed distribution,
+`jotter add "buy milk"`, from starting the process to its exit with stdout to
+`/dev/null`, timed from Python with `perf_counter`. Each row used a database of
+its own, on the local disk: one run to create it (and the archive, if needed), one
+discarded run, then the 10. So the database held 2 to 11 short notes. Each row
+waited until under 0.6 of 12 cores were busy. "Gradle script" is the default
+script with the flags in `JAVA_OPTS`, and the same jars.
+
+Hardware: Intel Xeon W-2135 @ 3.70 GHz (6 cores, 12 threads), 64 GB RAM, NVMe SSD
+with btrfs, EndeavourOS, Linux 6.18. JDK 21 is Temurin 21.0.12.1, the build's
+toolchain; JDK 27 is OpenJDK 27.0.1, this machine's `java`. Measured 2026-11-01.
+
+| Start script and flags | JDK | Median, round 1 | Median, round 2 |
+|---|---|---:|---:|
+| Gradle script, no flags | 21 | 274 ms | 270 ms |
+| Gradle script, no flags | 27 | 271 ms | 298 ms |
+| Gradle script, `-Xshare:off` (no CDS at all) | 21 | 314 ms | 316 ms |
+| Gradle script, `-XX:TieredStopAtLevel=1` | 21 | 262 ms | 262 ms |
+| Gradle script, `-XX:+UseSerialGC` | 21 | 263 ms | 263 ms |
+| Gradle script, both | 21 | 270 ms | 257 ms |
+| Tuned script, `-Xshare:off` (all flags but no CDS) | 21 | 301 ms | 295 ms |
+| **Tuned script, as shipped** | **21** | **155 ms** | **158 ms** |
+| **Tuned script, as shipped** | **27** | **162 ms** | **157 ms** |
+
+The JVM is therefore fast enough, and ADR-0006's native CLI is not needed for now.
+Under load the numbers are far worse: one run with sibling builds on the machine
+took about 1200 ms, without tuning. Measure on a quiet machine.

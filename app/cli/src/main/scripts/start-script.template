@@ -1,0 +1,25 @@
+#!/bin/sh
+# Starts jotter. This replaces Gradle's start script, and every flag is here, for startup time
+# (ADR-0006). The measurements behind them are in app/cli/README.md.
+#
+# Starts no process except for a symlink or the first run. -XX:+AutoCreateSharedArchive keeps a
+# class data archive in the user's cache: the first run writes it on exit, and the JVM replaces it
+# if the JDK changes. -Xlog:disable stops the JVM logging archive warnings on stdout.
+
+self=\$0
+if [ -L "\$self" ]; then self=\$(readlink -f -- "\$self"); fi
+case "\$self" in
+    */*) ;;
+    *) self=./\$self ;;
+esac
+# A canonical path, because the archive is valid only for the classpath it was made with.
+APP_HOME=\$(cd -- "\${self%/*}/.." && pwd -P) || exit 1
+
+cache=\${XDG_CACHE_HOME:-\$HOME/.cache}/jotter
+[ -d "\$cache" ] || mkdir -p -- "\$cache" 2>/dev/null
+
+jvm_flags="-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:-UsePerfData -XX:+AutoCreateSharedArchive -Xlog:disable"
+text_flags="-Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8"
+
+# \$JAVA_OPTS and the flags split at spaces on purpose.
+exec "\${JAVA_HOME:+\$JAVA_HOME/bin/}java" \$jvm_flags "-XX:SharedArchiveFile=\$cache/jotter.jsa" \$text_flags --enable-native-access=ALL-UNNAMED \$JAVA_OPTS -cp "$classpath" ${mainClassName} "\$@"

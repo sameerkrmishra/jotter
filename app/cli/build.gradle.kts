@@ -1,3 +1,5 @@
+import org.gradle.jvm.application.scripts.TemplateBasedScriptGenerator
+
 plugins {
     id("jotter.jvm-app")
     id("jotter.quality")
@@ -6,6 +8,14 @@ plugins {
 application {
     applicationName = "jotter"
     mainClass = "io.github.sameerkrmishra.jotter.app.cli.MainKt"
+}
+
+// A smaller, faster script than Gradle's, with the JVM flags for startup. See README.md.
+tasks.startScripts {
+    val template = file("src/main/scripts/start-script.template")
+    inputs.file(template)
+    (unixStartScriptGenerator as TemplateBasedScriptGenerator).template =
+        resources.text.fromFile(template)
 }
 
 dependencies {
