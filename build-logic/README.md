@@ -49,13 +49,18 @@ composable, such as its skip checks, that no test can reach. JaCoCo filters them
 Kover's default engine does not, and counted `app/shared-ui` at 73% branch
 coverage with 99% of its lines covered.
 
-Two things follow from that:
+Some things follow from that:
 
 - JaCoCo matches a class to the test data by its bytes. The Android build of a
   shared class has the same name, and other bytes where it inlines the Android
   variant of a library. So the gate reads the `coverage` variant, the JVM classes
   only, with `koverVerifyCoverage` and `koverXmlReportCoverage`. The plain
   `koverXmlReport` reports such classes as untested.
+- The plain `koverVerify` tasks have no rule and always pass. The gate is the root
+  project's `koverVerifyCoverage`, which `check` runs. Use that, not `koverVerify`.
+- The `coverage` variant does not contain code that exists only in `androidMain`,
+  so such code counts for nothing. There is none yet. M5 must cover it some other
+  way, such as its own variant of the Android classes with their test data.
 - A view model passed to a composable should be `@Stable`, as ours are. For an
   unstable parameter the compiler generates more checks in each lambda that
   captures it, which JaCoCo does not filter and no test can reach.
