@@ -143,8 +143,9 @@ private fun applyPragmas(connection: SQLiteConnection) {
  * make this fail with `SQLITE_BUSY` at once: the switch needs an exclusive lock, and SQLite does
  * not run its busy handler for that when two connections would wait for each other. So this
  * retries for as long as `busy_timeout`, then throws the last error. There is no pause between
- * tries: such a failure only happens while the other open is switching, and a lock held for long
- * makes each try wait in the busy handler.
+ * tries, so against an uncommitted writer on a file in rollback mode this spins until the timeout.
+ * That takes a foreign writer on such a file, as Jotter itself only writes in WAL mode, so it was
+ * left without a pause; two opens collide only for as long as one of them is switching.
  */
 private fun enableWal(connection: SQLiteConnection): String {
     val deadline = TimeSource.Monotonic.markNow() + BUSY_TIMEOUT_MILLIS.milliseconds

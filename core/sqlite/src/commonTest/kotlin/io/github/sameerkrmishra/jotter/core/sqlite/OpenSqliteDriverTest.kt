@@ -377,6 +377,21 @@ class OpenSqliteDriverTest {
             }
         }
 
+    @Test
+    fun aSwitchToWalThatFailsForAnotherReasonFailsAtOnce() =
+        withTempDir { dir ->
+            val start = TimeSource.Monotonic.markNow()
+            val error =
+                assertFailsWith<SQLiteException> {
+                    // SQLite refuses to change the journal mode inside a transaction.
+                    openConnectionDriver(dir.path) { connection -> connection.execSQL("BEGIN") }
+                }
+
+            assertContains(error.message.orEmpty(), "from within a transaction")
+            val waited = start.elapsedNow()
+            assertTrue(waited < BUSY_TIMEOUT_MILLIS.milliseconds, "Took $waited")
+        }
+
     private fun openInBackground(
         dir: TempDatabaseDir,
         schema: RecordingSchema,
