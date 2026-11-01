@@ -2,6 +2,10 @@ package io.github.sameerkrmishra.jotter.interop.markdownexport
 
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import okio.FileMetadata
 import okio.FileSystem
 import okio.ForwardingFileSystem
 import okio.IOException
@@ -15,8 +19,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.time.Duration.Companion.seconds
 
 private const val NO_SPACE = "No space left on device"
+private const val STAT_FAILED = "Input/output error"
 private const val COMPOSED = "é"
 private const val DECOMPOSED = "e\u0301"
 
@@ -298,6 +304,34 @@ class ExportWriterTest {
         assertEquals(NO_SPACE, thrown.message)
     }
 
+    @Test
+    fun aFailingStatOnTargetPathsFailsTheExportInsteadOfHanging() =
+        withHangGuard {
+            val failing = BrokenLookupFileSystem(system, out, statFails = true)
+
+            val thrown =
+                assertFailsWith<IOException> { export(noteOf("One", 1), fileSystem = failing) }
+
+            assertEquals(STAT_FAILED, thrown.message)
+        }
+
+    @Test
+    fun aFileSystemWithNoFreeNameFailsTheExportInsteadOfHanging() =
+        withHangGuard {
+            val failing = BrokenLookupFileSystem(system, out, statFails = false)
+
+            val thrown =
+                assertFailsWith<IOException> { export(noteOf("One", 1), fileSystem = failing) }
+
+            assertEquals("No free file name for note ${noteIdOf(1)}", thrown.message)
+            assertEquals(emptyList(), names())
+        }
+
+    // A hang spins on a thread, so the body must not run on the one that watches the timeout.
+    @Suppress("InjectDispatcher") // Tests choose their threads directly.
+    private fun withHangGuard(body: () -> Unit) =
+        runTest(timeout = 30.seconds) { withContext(Dispatchers.Default) { body() } }
+
     // Stores names in composed form, as Android's case-folding storage treats them.
     private class NormalisingFileSystem(
         delegate: FileSystem,
@@ -307,6 +341,34 @@ class ExportWriterTest {
             functionName: String,
             parameterName: String,
         ): Path = path.toString().replace(DECOMPOSED, COMPOSED).toPath()
+    }
+
+    // In [directory], looking up a note's name fails, or every name seems taken and unreadable.
+    private class BrokenLookupFileSystem(
+        delegate: FileSystem,
+        private val directory: Path,
+        private val statFails: Boolean,
+    ) : ForwardingFileSystem(delegate) {
+        // The temporary directory sits in the same parent, but is not named like a note.
+        private fun isNote(path: Path): Boolean =
+            path.parent == directory && path.name.endsWith(".md")
+
+        override fun metadataOrNull(path: Path): FileMetadata? {
+            if (isNote(path) && statFails) throw IOException(STAT_FAILED)
+            return if (isNote(
+                    path,
+                )
+            ) {
+                FileMetadata(isRegularFile = true)
+            } else {
+                super.metadataOrNull(path)
+            }
+        }
+
+        override fun source(file: Path): Source {
+            if (isNote(file)) throw IOException("Permission denied")
+            return super.source(file)
+        }
     }
 
     // Fails like a full disk once its allowance is used up.

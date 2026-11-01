@@ -8,6 +8,7 @@ import kotlin.random.Random
 import kotlin.random.nextULong
 
 private const val STAGING_PREFIX = ".jotter-export-"
+private const val MAX_COUNTED_NAMES = 1000
 
 /**
  * Writes [files] into [directory], creating it if needed, and returns the files that had to take
@@ -26,7 +27,8 @@ private const val STAGING_PREFIX = ".jotter-export-"
  * A file that cannot be read counts as someone else's. Removing the temporary directory is best
  * effort, so a failure there is neither reported nor hides another failure.
  *
- * @throws IOException if the file system fails. Files not moved yet keep their previous content.
+ * @throws IOException if the file system fails, or if a note finds no free name at all. Files not
+ *   moved yet keep their previous content.
  */
 public fun writeExport(
     files: List<ExportedFile>,
@@ -39,7 +41,10 @@ public fun writeExport(
     try {
         val placed =
             files.sortedBy { it.rank }.map { file ->
-                val name = freeNames(file).first { fileSystem.isFree(it, file, staging, directory) }
+                val name =
+                    freeNames(file).firstOrNull {
+                        fileSystem.isFree(it, file, staging, directory)
+                    } ?: throw IOException("No free file name for note ${file.noteId}")
                 fileSystem.write(staging / name) { writeUtf8(file.content) }
                 file.fileName to name
             }
@@ -64,9 +69,13 @@ private fun FileSystem.deleteBestEffort(directory: Path) {
 }
 
 // The counter only matters if a file with the id in its name belongs to something else already.
+// It is bounded because a file system may map every candidate to one taken name, for example by
+// cutting names short, and then no number of attempts would find a free one.
 private fun freeNames(file: ExportedFile): Sequence<String> =
     sequenceOf(file.fileName, file.fallbackName) +
-        generateSequence(1) { it + 1 }.map { "${file.noteId} $it$EXTENSION" }
+        generateSequence(1) { it + 1 }
+            .take(MAX_COUNTED_NAMES)
+            .map { "${file.noteId} $it$EXTENSION" }
 
 private fun FileSystem.isFree(
     name: String,
@@ -78,11 +87,19 @@ private fun FileSystem.isFree(
 private fun FileSystem.canReplace(
     path: Path,
     file: ExportedFile,
+): Boolean {
+    // A failure here is not caught: it says nothing about this name, so it must end the export
+    // instead of sending it on to the next name.
+    val metadata = metadataOrNull(path)
+    return metadata == null || (metadata.isRegularFile && startsWithOwnerMark(path, file))
+}
+
+private fun FileSystem.startsWithOwnerMark(
+    path: Path,
+    file: ExportedFile,
 ): Boolean =
     try {
-        val metadata = metadataOrNull(path)
-        val mark = ownerMark(file.noteId).encodeUtf8()
-        metadata == null || (metadata.isRegularFile && read(path) { rangeEquals(0, mark) })
+        read(path) { rangeEquals(0, ownerMark(file.noteId).encodeUtf8()) }
     } catch (_: IOException) {
         // A file that cannot be read cannot be shown to be this note's.
         false

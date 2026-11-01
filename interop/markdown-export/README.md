@@ -135,7 +135,10 @@ This also holds for a note that was exported earlier and is not part of this
 export, so a filter or a deleted note cannot lose a file. The price is that a
 note can keep a name with an id after the note that held the plain name is gone,
 until the old file is removed. A file that a user edited keeps its id, so it is
-replaced like any other export of that note.
+replaced like any other export of that note. A read error on the note's own
+file can therefore leave an id-named duplicate of it, reported as a rename. A
+failure to look up a name is not a clash: it ends the export with an
+`IOException`, as does a file system on which 1000 counted names are all taken.
 
 ## Tests
 
