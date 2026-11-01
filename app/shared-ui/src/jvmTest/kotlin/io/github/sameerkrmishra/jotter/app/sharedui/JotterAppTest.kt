@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
@@ -22,10 +23,13 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.text.AnnotatedString
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
@@ -128,6 +132,36 @@ class JotterAppTest {
             waitUntil(timeoutMillis = TIMEOUT_MS) { notes.get(note.id)?.body == "more body" }
             waitForIdle()
             onNodeWithText("Save").assertIsNotEnabled()
+        }
+
+    @Test
+    fun theDraftSavesItselfAfterTypingStops() =
+        app { notes ->
+            val note = notes.create("", "base")
+            awaitText("base")
+            openNote(note)
+
+            onNodeWithTag(BODY_FIELD).performTextInput("mine ")
+
+            waitUntil(timeoutMillis = TIMEOUT_MS) { notes.get(note.id)?.body == "mine base" }
+        }
+
+    @Test
+    fun controlSSavesNow() =
+        app { notes ->
+            val note = notes.create("", "base")
+            awaitText("base")
+            openNote(note)
+            val typedAt = mainClock.currentTime
+            onNodeWithTag(BODY_FIELD).performTextInput("mine ")
+
+            onNodeWithTag(BODY_FIELD).performKeyInput {
+                withKeyDown(Key.CtrlLeft) { pressKey(Key.S) }
+            }
+
+            waitUntil(timeoutMillis = TIMEOUT_MS) { notes.get(note.id)?.body == "mine base" }
+            val elapsed = mainClock.currentTime - typedAt
+            assertTrue(elapsed < AUTOSAVE_DELAY_MS, "the key saved, not the autosave: $elapsed")
         }
 
     @Test

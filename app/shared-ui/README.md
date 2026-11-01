@@ -52,13 +52,18 @@ Tags cannot be added or removed here yet, and Markdown preview comes later.
   Any other failure, such as a full or read-only disk, also keeps it and shows
   SQLite's reason; nothing may escape into a scope where it would end the app.
   Text typed while a save runs stays in the draft.
-- **Saving** is the Save button, Back, and `requestExit`. Nothing saves on a timer
-  yet, so a crash loses what was typed since the last save. Back and closing save
+- **Saving** is the Save button, Ctrl+S, Back, `requestExit`, and an autosave 1 s
+  after typing stops, all on the same path, so a crash loses about that second. A
+  failed autosave keeps the draft and shows the message like any other save, and
+  the next pause in typing tries again. It waits while a stale or deleted note
+  needs the user's decision, because only that can resolve it. Each autosave is a
+  revision, so a note gets one per pause. A note emptied after its first
+  autosave stays, empty. Back and closing save
   until the draft is clean, so that text typed during the save is not lost with the
   editor, and "Saving…" shows meanwhile, up to 5 s if the database is locked. If
   saving fails, Back stays in the editor with the message showing, and closing asks
-  whether to keep editing or close without saving. A blank new note is never
-  created.
+  whether to keep editing or close without saving. A new note that never had text
+  is not created.
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
   or until dismissed. A failed read keeps what the list showed.

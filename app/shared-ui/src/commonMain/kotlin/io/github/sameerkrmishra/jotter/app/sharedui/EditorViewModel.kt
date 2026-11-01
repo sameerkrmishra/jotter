@@ -14,18 +14,25 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+/** How long typing must pause before the draft saves itself. */
+internal const val AUTOSAVE_DELAY_MS = 1_000L
 
 internal const val SAVE_FAILED_MESSAGE = "Your text is kept here but could not be saved."
 
@@ -47,7 +54,7 @@ internal enum class EditorProblem {
  * @param note The note to edit, or null for a new note, created by the first save with text.
  */
 @Stable
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 internal class EditorViewModel(
     private val notes: NoteService,
     scope: CoroutineScope,
@@ -64,8 +71,25 @@ internal class EditorViewModel(
     // One save at a time: a second one must see the revision that the first one wrote.
     private val saving = Mutex()
 
-    var title by mutableStateOf(note?.title.orEmpty())
-    var body by mutableStateOf(note?.body.orEmpty())
+    // Counts changes to the draft, for the autosave to wait for a pause.
+    private val typing = MutableStateFlow(0)
+
+    private var titleText by mutableStateOf(note?.title.orEmpty())
+    private var bodyText by mutableStateOf(note?.body.orEmpty())
+
+    var title: String
+        get() = titleText
+        set(value) {
+            titleText = value
+            typing.update { it + 1 }
+        }
+
+    var body: String
+        get() = bodyText
+        set(value) {
+            bodyText = value
+            typing.update { it + 1 }
+        }
 
     /** The stored note that the draft started from, which an edit is based on. */
     var base by mutableStateOf(note)
@@ -93,6 +117,11 @@ internal class EditorViewModel(
             combine(noteIds, refreshes) { id, _ -> id }
                 .flatMapLatest(::observed)
                 .collect(::follow)
+        }
+        // Not collectLatest: typing must not cancel a save whose write may already have happened,
+        // or the next edit would be based on the revision before it, and be refused as stale.
+        observation.launch {
+            typing.drop(1).debounce(AUTOSAVE_DELAY_MS).collect { autosave() }
         }
     }
 
@@ -152,6 +181,11 @@ internal class EditorViewModel(
         }
     }
 
+    // While a problem waits for the user's decision, saving again could only fail again.
+    private suspend fun autosave() {
+        if (problem == null) save()
+    }
+
     /** Stops observing the note. */
     fun close() {
         observation.cancel()
@@ -177,8 +211,8 @@ internal class EditorViewModel(
 
     private fun load(note: Note) {
         base = note
-        title = note.title
-        body = note.body
+        titleText = note.title
+        bodyText = note.body
         problem = null
         message = null
     }
@@ -191,8 +225,8 @@ internal class EditorViewModel(
         draftBody: String,
     ) {
         base = saved
-        if (title == draftTitle) title = saved.title
-        if (body == draftBody) body = saved.body
+        if (titleText == draftTitle) titleText = saved.title
+        if (bodyText == draftBody) bodyText = saved.body
         noteIds.value = saved.id
     }
 

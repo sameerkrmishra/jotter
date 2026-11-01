@@ -13,6 +13,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.launch
 
@@ -31,7 +37,11 @@ internal fun EditorScreen(
 ) {
     val scope = rememberCoroutineScope()
     Column(
-        Modifier.fillMaxSize().padding(spacing),
+        Modifier.fillMaxSize().padding(spacing).onPreviewKeyEvent { event ->
+            val saveKeys = event.key == Key.S && event.isCtrlPressed
+            if (saveKeys && event.type == KeyEventType.KeyDown) scope.launch { editor.save() }
+            saveKeys
+        },
         verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {

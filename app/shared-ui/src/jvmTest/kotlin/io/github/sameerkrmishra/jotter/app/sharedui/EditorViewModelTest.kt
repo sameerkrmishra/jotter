@@ -16,6 +16,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class EditorViewModelTest : ViewModelTest() {
     private fun Fixture.open(note: Note?): EditorViewModel {
         app.openEditor(note)
@@ -91,7 +92,6 @@ class EditorViewModelTest : ViewModelTest() {
             assertFalse(editor.isDirty)
         }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun textTypedDuringASaveStaysInTheDraft() =
         test {
@@ -318,14 +318,83 @@ class EditorViewModelTest : ViewModelTest() {
     fun aFailedReadLeavesTheDraftAlone() =
         test {
             val editor = open(notes.create("", "base"))
-            editor.body = "my text"
             store.close()
 
             app.refresh()
             settle()
 
             assertEquals(READ_FAILED_MESSAGE, editor.message)
-            assertEquals("my text", editor.body)
+            assertEquals("base", editor.body)
+        }
+
+    @Test
+    fun theDraftSavesItselfOnceTypingStops() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+
+            editor.body = "first"
+            testScheduler.advanceTimeBy(AUTOSAVE_DELAY_MS - 1)
+            editor.body = "second"
+            testScheduler.advanceTimeBy(AUTOSAVE_DELAY_MS - 1)
+            assertEquals("base", notes.get(note.id)?.body, "typing goes on")
+
+            testScheduler.advanceTimeBy(2)
+
+            assertEquals("second", notes.get(note.id)?.body)
+            assertFalse(editor.isDirty)
+        }
+
+    @Test
+    fun aNewNoteIsCreatedOnceByTheAutosave() =
+        test {
+            val editor = open(null)
+            editor.body = "first"
+            settle()
+            editor.body = "second"
+            settle()
+
+            assertEquals("second", notes.list().single().body)
+        }
+
+    @Test
+    fun aFailedAutosaveKeepsTheDraftAndTheNextOneWorks() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            database.failWrites()
+
+            editor.body = "mine"
+            settle()
+
+            assertEquals("mine", editor.body)
+            assertContains(editor.message.orEmpty(), "disk full")
+            assertNull(app.pendingExit, "no dialog from the autosave")
+
+            database.allowWrites()
+            editor.body = "mine and more"
+            settle()
+            assertEquals("mine and more", notes.get(note.id)?.body)
+            assertNull(editor.message)
+        }
+
+    @Test
+    fun theAutosaveWaitsForTheUsersDecisionOnAStaleDraft() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editFromOutside(note, "their text")
+            editor.body = "mine"
+            settle()
+            assertEquals(EditorProblem.STALE, editor.problem)
+            val revisions = notes.history(note.id).size
+
+            editor.body = "mine and more"
+            settle()
+
+            assertEquals(EditorProblem.STALE, editor.problem)
+            assertEquals(revisions, notes.history(note.id).size)
+            assertEquals("mine and more", editor.body)
         }
 
     @Test
