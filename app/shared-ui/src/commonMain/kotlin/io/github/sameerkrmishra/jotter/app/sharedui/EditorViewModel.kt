@@ -222,6 +222,7 @@ internal class EditorViewModel(
             message = INVALID_TAG_MESSAGE
             return
         }
+        if (message == INVALID_TAG_MESSAGE) message = null
         changeTags(
             inMemory = { it + tag },
             inStore = { id -> notes.addTag(id, tag) },
@@ -336,7 +337,8 @@ internal class EditorViewModel(
         try {
             block()
             if (!keepsProblem) problem = null
-            message = null
+            // A tag change says nothing about the text, whose failed save still needs saying.
+            if (!keepsProblem || !isDirty) message = null
             return true
         } catch (e: CancellationException) {
             throw e
@@ -347,7 +349,8 @@ internal class EditorViewModel(
         } catch (_: StorageBusyException) {
             message = BUSY_MESSAGE
         } catch (e: RuntimeException) {
-            message = "$SAVE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
+            val failure = "$SAVE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
+            message = failure
         } finally {
             isSaving = false
         }

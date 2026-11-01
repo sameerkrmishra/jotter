@@ -472,6 +472,68 @@ class EditorViewModelTest : ViewModelTest() {
         }
 
     @Test
+    fun aTagChangeKeepsASaveFailureWhileTheDraftIsDirty() =
+        test {
+            val editor = open(notes.create("", "base"))
+            editor.body = "my text"
+            database.whileLocked { assertFalse(editor.save()) }
+            editor.tagInput = "work"
+
+            editor.addTag()
+
+            assertEquals(BUSY_MESSAGE, editor.message)
+        }
+
+    @Test
+    fun aTagChangeClearsOldMessagesOtherwise() =
+        test {
+            val editor = open(notes.create("", "base"))
+            editor.tagInput = "work"
+            database.whileLocked { editor.addTag() }
+            assertEquals(BUSY_MESSAGE, editor.message)
+
+            editor.addTag()
+
+            assertNull(editor.message)
+        }
+
+    @Test
+    fun aValidTagReplacesTheInvalidTagMessageOfADirtyDraft() =
+        test {
+            val editor = open(notes.create("", "base"))
+            editor.body = "my text"
+            editor.addTag()
+            assertEquals(INVALID_TAG_MESSAGE, editor.message)
+            editor.tagInput = "work"
+
+            editor.addTag()
+
+            assertNull(editor.message)
+        }
+
+    @Test
+    fun aCancelledSaveShowsNoFailure() =
+        test {
+            val note = notes.create("", "base")
+            val slow = EditorViewModel(
+                notes,
+                scope,
+                StandardTestDispatcher(testScheduler),
+                MutableStateFlow(0),
+                note,
+            )
+            slow.body = "text"
+            val saving = scope.launch { slow.save() }
+
+            saving.cancel()
+            settle()
+
+            assertNull(slow.message)
+            assertFalse(slow.isSaving)
+            slow.close()
+        }
+
+    @Test
     fun aTagChangeLeavesAStaleProblemInPlace() =
         test {
             val note = notes.create("", "base")

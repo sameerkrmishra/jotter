@@ -2,6 +2,8 @@ package io.github.sameerkrmishra.jotter.app.sharedui
 
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -195,6 +197,20 @@ class NotesViewModelTest : ViewModelTest() {
             settle()
 
             assertContains(list.message.orEmpty(), WRITE_FAILED_MESSAGE)
+        }
+
+    @Test
+    fun aWriteCancelledWithTheAppShowsNoFailure() =
+        test {
+            val note = notes.create("note", "")
+            val slowIo = StandardTestDispatcher(testScheduler)
+            val slow = AppViewModel(notes, scope, slowIo)
+
+            slow.list.togglePinned(note)
+            scope.cancel()
+            settle()
+
+            assertNull(slow.list.message)
         }
 
     @Test
