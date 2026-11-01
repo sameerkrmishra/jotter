@@ -12,7 +12,6 @@ import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.set
 import io.kotest.property.checkAll
-import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -311,7 +310,7 @@ class NoteServiceTest {
 
     @Test
     fun whatIsStoredReadsBackEqualAndCanBeRedelivered() =
-        runTest {
+        runDatabaseTest {
             withStore(clock) { store ->
                 val revisions = RevisionStore(store.database.revisionQueries)
                 checkAll(rawTexts, rawTexts, Arb.set(tagNames, 0..3)) { title, body, tags ->

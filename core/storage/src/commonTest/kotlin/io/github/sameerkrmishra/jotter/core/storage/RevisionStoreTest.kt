@@ -10,7 +10,6 @@ import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.long
 import io.kotest.property.arbitrary.next
 import io.kotest.property.checkAll
-import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -19,7 +18,7 @@ import kotlin.test.assertNull
 class RevisionStoreTest {
     @Test
     fun everyShapeOfRevisionRoundTrips() =
-        runTest {
+        runDatabaseTest {
             withDatabase { db, _ ->
                 val store = RevisionStore(db.revisionQueries)
                 checkAll(revisions) { revision ->
@@ -34,7 +33,7 @@ class RevisionStoreTest {
 
     @Test
     fun insertingTheSameRevisionAgainDoesNothing() =
-        runTest {
+        runDatabaseTest {
             withDatabase { db, _ ->
                 val store = RevisionStore(db.revisionQueries)
                 checkAll(revisions) { revision ->
@@ -48,7 +47,7 @@ class RevisionStoreTest {
 
     @Test
     fun seqFollowsInsertionOrderAndADuplicateInsertLeavesItAlone() =
-        runTest {
+        runDatabaseTest {
             withDatabase { db, driver ->
                 val store = RevisionStore(db.revisionQueries)
                 // Three revisions whose ids, stamps and notes say nothing about the order.
@@ -77,7 +76,7 @@ class RevisionStoreTest {
 
     @Test
     fun aDifferentRevisionUnderAStoredIdIsRejected() =
-        runTest {
+        runDatabaseTest {
             withDatabase { db, _ ->
                 val store = RevisionStore(db.revisionQueries)
                 checkAll(revisions, timestamps) { revision, timestamp ->
@@ -99,7 +98,7 @@ class RevisionStoreTest {
 
     @Test
     fun revisionsOfANoteComeInStampOrder() =
-        runTest {
+        runDatabaseTest {
             // Few distinct timestamps and devices, so every tiebreaker of Stamp is needed.
             val tiedTimestamps = Arb.bind(Arb.long(0L..1L), Arb.int(0..1), ::HybridTimestamp)
             val devices = Arb.list(deviceIds, 2..2)
@@ -134,7 +133,7 @@ class RevisionStoreTest {
 
     @Test
     fun unknownIdsGiveNothing() =
-        runTest {
+        runDatabaseTest {
             withDatabase { db, _ ->
                 val store = RevisionStore(db.revisionQueries)
                 checkAll(revisionIds, noteIds) { id, noteId ->
@@ -146,7 +145,7 @@ class RevisionStoreTest {
 
     @Test
     fun textThatCannotBeStoredUnchangedIsRejected() =
-        runTest {
+        runDatabaseTest {
             withDatabase { db, _ ->
                 val store = RevisionStore(db.revisionQueries)
                 checkAll(revisions) { revision ->
