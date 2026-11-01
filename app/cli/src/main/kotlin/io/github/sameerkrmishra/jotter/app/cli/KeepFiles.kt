@@ -98,8 +98,7 @@ internal class KeepFileReader {
      * Returns the documents of [files]. Each is read when its turn comes, so only one is in memory
      * at a time, and no failure to read one reaches the importer, which would lose its report.
      */
-    fun documents(files: List<Path>): Sequence<KeepDocument> =
-        files.asSequence().mapNotNull(::read)
+    fun documents(files: List<Path>): Sequence<KeepDocument> = files.asSequence().mapNotNull(::read)
 
     private fun read(file: Path): KeepDocument? =
         try {
