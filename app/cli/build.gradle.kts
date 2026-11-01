@@ -22,6 +22,7 @@ tasks.startScripts {
 tasks.test {
     dependsOn(tasks.installDist)
     val installation = layout.buildDirectory.dir("install/jotter")
+    inputs.dir(installation).withPathSensitivity(PathSensitivity.RELATIVE)
     jvmArgumentProviders.add { listOf("-Djotter.installation=${installation.get().asFile}") }
 }
 
