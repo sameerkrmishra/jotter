@@ -128,11 +128,12 @@ public class NoteService internal constructor(
      * The edit builds on the note's current revision. [basedOn] is only checked: if the title or
      * body changed since that revision, someone else edited the text in the meantime and saving
      * would silently drop their change, so the edit is rejected. Tag, pin and state changes in
-     * the meantime are fine and are kept.
+     * the meantime are fine and are kept. Saving the text the note already has changes nothing, so
+     * it is never rejected: a retried save finds its own edit and returns the note.
      *
      * @param basedOn The [Note.revisionId] the editor showed when the user started editing.
-     * @throws StaleEditException if [basedOn] is not a revision of this note, or its title or body
-     *   differ from the current ones.
+     * @throws StaleEditException if the text changes and [basedOn] is not a revision of this note,
+     *   or its title or body differ from the current ones.
      * @throws NoSuchNoteException if there is no note [id].
      * @throws StorageBusyException if another process kept the database locked.
      */
@@ -319,7 +320,8 @@ public class NoteService internal constructor(
     /**
      * Applies a change to the current content of the note [id], in one write transaction.
      * [change] returns null if the change would change nothing; otherwise a function that builds
-     * the new content from the new revision's stamp, for the fields it writes.
+     * the new content from the new revision's stamp, for the fields it writes. [basedOn] is only
+     * checked for a real change: a save of the current text cannot lose anything.
      */
     private fun change(
         id: NoteId,
@@ -329,10 +331,10 @@ public class NoteService internal constructor(
         write { hlc ->
             val current = currentNote(id)
             val snapshot = snapshotOf(current)
+            val build = change(snapshot) ?: return@write current
             if (basedOn != null && !hasTextOf(id, basedOn, snapshot)) {
                 throw StaleEditException(id, basedOn, current.revisionId)
             }
-            val build = change(snapshot) ?: return@write current
             val stamp = nextStamp(hlc, after = current.updatedAt)
             val content = build(stamp)
             val revision = userRevision(stamp, current.id, current.revisionId, content)

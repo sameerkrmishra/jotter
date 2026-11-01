@@ -113,8 +113,10 @@ Encoding:
   builds on the note's current revision. Inside the write transaction it
   fails with `StaleEditException` if that revision is not one of the note's
   or its title or body differ from the current ones: without merging (M3),
-  saving would drop the other edit. A tag, pin or state change in between is
-  fine and is kept. Tag, pin and state changes themselves apply to the
+  saving would drop the other edit. Saving the text the note already has is a
+  no-op whatever it is based on, so a retried save does not fail on its own
+  earlier success. A tag, pin or state change in between is fine and is kept.
+  Tag, pin and state changes themselves apply to the
   current revision: they touch one item and cannot lose concurrent text.
 - **Delete forever** is allowed only from the trash. It writes a tombstone
   and removes the `note` row; `history` still returns every revision.

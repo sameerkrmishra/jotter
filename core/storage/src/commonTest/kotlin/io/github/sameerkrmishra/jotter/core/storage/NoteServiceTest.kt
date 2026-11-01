@@ -180,6 +180,21 @@ class NoteServiceTest {
         }
 
     @Test
+    fun aRetriedSaveOfTheCurrentTextIsANoOpWhateverItIsBasedOn() =
+        withStore(clock) { store ->
+            val notes = store.notes
+            val opened = notes.create("title", "draft")
+            val saved = notes.edit(opened.id, opened.revisionId, "title", "my edit")
+
+            // The first save worked, but its caller never heard and tries again.
+            assertEquals(saved, notes.edit(opened.id, opened.revisionId, "title", "my edit"))
+
+            val unknown = RevisionId.parse("0192e6f08b4a7c3e9d2f1a2b3c4d5e6f")
+            assertEquals(saved, notes.edit(opened.id, unknown, "title", "my edit"))
+            assertEquals(2, notes.history(opened.id).size)
+        }
+
+    @Test
     fun tagPinAndStateChangesNeedNoBaseRevision() =
         withStore(clock) { store ->
             val notes = store.notes
