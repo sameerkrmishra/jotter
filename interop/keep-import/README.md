@@ -37,13 +37,14 @@ kotlinx.serialization and okio. Both libraries publish linuxX64 variants
 | `title` | Title, possibly empty |
 | `textContent` | Body, as it is. Keep's text is not escaped, so Markdown characters in it take effect |
 | `listContent` | Body: a task list of `- [ ] text` and `- [x] text`, after `textContent` and a blank line if a note has both. Further lines of an item are indented by two spaces |
+| `annotations` of source `WEBLINK` | Body: one line each after the text, unless the text already contains the URL. `[title](url)` if the title is not empty, differs from the URL, and neither has a character that breaks a Markdown link; otherwise the bare URL |
 | `labels[].name` | Tags, through `TagName` |
 | `isPinned` | Pin |
 | `isTrashed`, `isArchived` | State; trashed wins over archived |
 | `createdTimestampUsec` | Time of the root revision, and the source of the note id |
 | `userEditedTimestampUsec` | Time of a second revision, if later in whole milliseconds |
 | `attachments` | Dropped, with a warning: v1 has no attachments |
-| `color` and all other fields | Ignored |
+| `color`, other kinds of `annotations` and all other fields | Ignored |
 
 A `null` counts as a missing field.
 

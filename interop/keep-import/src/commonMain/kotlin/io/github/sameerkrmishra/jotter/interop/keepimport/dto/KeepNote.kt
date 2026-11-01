@@ -14,6 +14,7 @@ internal data class KeepNote(
     val listContent: List<KeepListItem> = emptyList(),
     val labels: List<KeepLabel> = emptyList(),
     val attachments: List<KeepAttachment> = emptyList(),
+    val annotations: List<KeepAnnotation> = emptyList(),
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
     val isTrashed: Boolean = false,
@@ -32,6 +33,14 @@ internal data class KeepListItem(
 @Serializable
 internal data class KeepLabel(
     val name: String = "",
+)
+
+/** Something Keep attached to a note. [source] says what; `WEBLINK` is a web link. */
+@Serializable
+internal data class KeepAnnotation(
+    val source: String = "",
+    val title: String = "",
+    val url: String = "",
 )
 
 /** A file attached to a Keep note. Only its name is read, to report that it was dropped. */

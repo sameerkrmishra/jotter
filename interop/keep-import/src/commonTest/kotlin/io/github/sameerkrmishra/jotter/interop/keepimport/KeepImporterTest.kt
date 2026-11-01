@@ -119,6 +119,19 @@ class KeepImporterTest {
         }
 
     @Test
+    fun aNoteWithOnlyAWebLinkKeepsTheLink() =
+        withStore { store ->
+            val fields =
+                """"title":"","annotations":[{"description":"An example","source":"WEBLINK",""" +
+                    """"title":"Example","url":"https://example.org/a"}]"""
+
+            val report = KeepImporter(store.notes).import(documents(takeout(fields = fields)))
+
+            val note = assertNotNull(store.notes.get(report.imported.single().id))
+            assertEquals("[Example](https://example.org/a)", note.body)
+        }
+
+    @Test
     fun archivedAndTrashedNotesKeepTheirState() =
         withStore { store ->
             val archived = takeout(1_000_000, """"isArchived":true""")

@@ -4,6 +4,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.ImportedNote
+import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepAnnotation
 import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepListItem
 import io.github.sameerkrmishra.jotter.interop.keepimport.dto.KeepNote
 import okio.Buffer
@@ -26,6 +27,12 @@ private const val VARIANT_BYTE = 8
 private const val RFC_VARIANT = 0x80
 private const val LOW_SIX_BITS = 0x3F
 private const val MICROS_PER_MILLI = 1_000L
+
+/** The [KeepAnnotation.source] of a web link. */
+private const val WEB_LINK = "WEBLINK"
+
+/** Characters that would break a Markdown link, in its title or its URL. */
+private const val LINK_BREAKERS = "[]()\\\r\n"
 
 /** A second line and later ones of a task list item start here to stay inside the item. */
 private const val CONTINUATION = "\n  "
@@ -51,12 +58,29 @@ internal fun keepNoteId(createdUsec: Long): NoteId {
 }
 
 /**
- * The note's text as Markdown: `textContent` as it is, then `listContent` as a task list. Keep
- * writes one or the other, but nothing is lost if a note has both.
+ * The note's text as Markdown: `textContent` as it is, then `listContent` as a task list, then one
+ * line per web link that the text does not already contain. Keep writes either a text or a list,
+ * but nothing is lost if a note has both.
  */
 internal fun KeepNote.markdownBody(): String {
     val list = listContent.joinToString("\n", transform = KeepListItem::toTaskLine)
-    return listOf(textContent, list).filter(String::isNotEmpty).joinToString("\n\n")
+    val text = joinParagraphs(textContent, list)
+    val links =
+        annotations
+            .filter { it.source == WEB_LINK && it.url.isNotEmpty() && it.url !in text }
+            .distinctBy(KeepAnnotation::url)
+            .joinToString("\n", transform = KeepAnnotation::toMarkdownLine)
+    return joinParagraphs(text, links)
+}
+
+private fun joinParagraphs(vararg paragraphs: String): String =
+    paragraphs.filter(String::isNotEmpty).joinToString("\n\n")
+
+/** A link with its title, if it has one that adds something and is safe in a Markdown link. */
+private fun KeepAnnotation.toMarkdownLine(): String {
+    val hasUsableTitle =
+        title.isNotBlank() && title != url && (title + url).none { it in LINK_BREAKERS }
+    return if (hasUsableTitle) "[$title]($url)" else url
 }
 
 /** A task list line. Further lines of the text are indented, so they stay in the item. */
