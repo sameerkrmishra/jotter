@@ -1,8 +1,11 @@
 package io.github.sameerkrmishra.jotter.app.cli
 
+import com.github.ajalt.clikt.core.CliktError
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class DatabasePathTest {
     private fun path(
@@ -38,5 +41,31 @@ class DatabasePathTest {
     @Test
     fun withoutHomeTheUsersHomeDirectoryIsUsed() {
         assertEquals(Path.of("/fallback/.local/share/jotter/jotter.db"), path())
+    }
+
+    @Test
+    fun anEmptyHomeCountsAsNotSet() {
+        assertEquals(Path.of("/fallback/.local/share/jotter/jotter.db"), path(null, "HOME" to ""))
+    }
+
+    @Test
+    fun aRelativeHomeIsNoUsableLocation() {
+        val error = assertFailsWith<CliktError> { path(null, "HOME" to "relative") }
+
+        assertContains(error.message.orEmpty(), "no database location")
+    }
+
+    @Test
+    fun noHomeAtAllIsNoUsableLocation() {
+        val error = assertFailsWith<CliktError> { databasePath(null, { null }, "?") }
+
+        assertContains(error.message.orEmpty(), "no database location")
+    }
+
+    @Test
+    fun aPathTheFileSystemCannotHoldIsAnError() {
+        val error = assertFailsWith<CliktError> { path("a\u0000b") }
+
+        assertContains(error.message.orEmpty(), "not a valid path")
     }
 }

@@ -7,6 +7,7 @@ import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -21,22 +22,39 @@ private const val UNABLE_TO_OPEN = "unable to open database file"
 /**
  * Returns the database file: [option] (`--db` or `JOTTER_DB`), then `jotter/jotter.db` in
  * `$XDG_DATA_HOME`, then in `~/.local/share`. The XDG Base Directory specification says to ignore
- * an empty or relative `XDG_DATA_HOME`. An empty [option] counts as not given.
+ * an empty or relative `XDG_DATA_HOME`. An empty [option] or `HOME` counts as not given.
  *
  * @param readEnvvar Reads an environment variable.
  * @param userHome The home directory if `HOME` is not set.
+ * @throws CliktError if there is no usable location, or a variable is not a valid path, which
+ *   happens to non-ASCII text under a locale that cannot represent it.
  */
 internal fun databasePath(
     option: String?,
     readEnvvar: (String) -> String?,
     userHome: String,
 ): Path {
-    if (!option.isNullOrEmpty()) return Path.of(option)
-    val dataHome =
-        readEnvvar("XDG_DATA_HOME")?.let(Path::of)?.takeIf(Path::isAbsolute)
-            ?: Path.of(readEnvvar("HOME") ?: userHome, ".local", "share")
-    return dataHome.resolve("jotter").resolve("jotter.db")
+    try {
+        if (!option.isNullOrEmpty()) return Path.of(option)
+        val dataHome =
+            readEnvvar("XDG_DATA_HOME")?.let(Path::of)?.takeIf(Path::isAbsolute)
+                ?: homeDirectory(readEnvvar, userHome).resolve(".local").resolve("share")
+        return dataHome.resolve("jotter").resolve("jotter.db")
+    } catch (e: InvalidPathException) {
+        throw CliktError("jotter: not a valid path: ${e.input}", e)
+    }
 }
+
+// The JVM's user.home is "?" for a user without a passwd entry. A relative home would put the
+// notes wherever the command happened to run.
+private fun homeDirectory(
+    readEnvvar: (String) -> String?,
+    userHome: String,
+): Path =
+    Path
+        .of(readEnvvar("HOME")?.takeUnless(String::isEmpty) ?: userHome)
+        .takeIf(Path::isAbsolute)
+        ?: throw CliktError("jotter: no database location: set HOME, --db or $DATABASE_ENVVAR")
 
 /** The database file, which is known once the root command's options are parsed. */
 internal class DatabaseLocation {
@@ -67,19 +85,23 @@ internal fun <T> withNotes(
     }
 
 private fun open(path: Path): NoteStore {
-    val file = path.toAbsolutePath()
-    try {
-        Files.createDirectories(file.parent)
-    } catch (e: IOException) {
-        throw cannotOpen(path, "cannot create its directory", e)
-    }
+    createDirectory(path)
     return try {
-        NoteStore.open(file.toString(), DEVICE_NAME, EmptyCoroutineContext)
+        NoteStore.open(path.toAbsolutePath().toString(), DEVICE_NAME, EmptyCoroutineContext)
     } catch (e: StorageBusyException) {
         throw e
     } catch (e: IllegalStateException) {
         // Another application's database, or one written by a newer version of Jotter.
         throw cannotOpen(path, e.message.orEmpty(), e)
+    }
+}
+
+private fun createDirectory(path: Path) {
+    try {
+        // The root directory has no parent.
+        path.toAbsolutePath().parent?.let(Files::createDirectories)
+    } catch (e: IOException) {
+        throw cannotOpen(path, "cannot create its directory", e)
     }
 }
 
