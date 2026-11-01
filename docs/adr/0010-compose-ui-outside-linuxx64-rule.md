@@ -1,6 +1,6 @@
 # 0010. Compose UI stays outside the linuxX64 rule
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-01
 
 ## Context

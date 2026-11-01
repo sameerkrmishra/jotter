@@ -1,6 +1,6 @@
 # 0006. Shared modules compile and test on Kotlin/Native
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by 0010
 - **Date:** 2026-10-26
 
 ## Context
