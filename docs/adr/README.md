@@ -12,6 +12,8 @@ Each ADR has one status:
 
 - **Proposed**: written and under review. Not yet binding.
 - **Accepted**: agreed. Code and reviews follow it.
+- **Accepted, amended by NNNN**: still binding. Read it together with the later
+  ADR, which takes precedence where the two differ.
 - **Superseded by NNNN**: replaced by a later ADR. The old record stays in
   place, unchanged except for its status line, so the history is kept.
 
@@ -38,7 +40,7 @@ write a new ADR and mark the old one as superseded.
 | [0004](0004-immutable-change-segments.md) | Immutable change segments on dumb blob stores | Accepted |
 | [0005](0005-manual-dependency-injection.md) | Manual constructor injection | Accepted |
 | [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted |
-| [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Proposed |
+| [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.

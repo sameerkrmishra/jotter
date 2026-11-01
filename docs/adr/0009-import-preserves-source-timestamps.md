@@ -1,6 +1,6 @@
 # 0009. Imported notes keep their source timestamps as revision stamps
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-01
 
 ## Context
@@ -33,8 +33,12 @@ for different content, which `RevisionStore.insert` rejects.
 - **The clock.** This is the one exception to "fresh clock reading". The
   device's clock is not moved back. Later edits use `now(after = parent)`.
 - **Re-import.** A note with any history, including a tombstone, is skipped.
-- **Two roots.** M3 must merge two roots with no common ancestor, with
-  identical text merging cleanly (an empty base).
+- **Several roots.** M3 must merge heads of a note that has several roots and
+  so no common ancestor. When the roots have identical text, that text is the
+  merge base. It derives from the revisions alone, so every device picks the
+  same base. An empty base would conflict on all the text as soon as one
+  device edits its copy, although the other changed nothing. Roots with
+  different text use an empty base and may conflict.
 
 ## Consequences
 
@@ -52,7 +56,11 @@ for different content, which `RevisionStore.insert` rejects.
 - Accepted limitation: if device A deletes a note forever and device B imports
   it before syncing, delete-vs-edit brings it back in the trash. Nothing is
   lost, and the "tombstone is skipped" guarantee is local to a device.
-- `merge` code has a case that only imports create: two roots of one note.
+- A re-import silently skips newer Keep edits of a note already imported.
+- Roots with different text, for example two Takeouts taken apart with an edit
+  in Keep in between, merge against an empty base and may conflict on the whole
+  text.
+- `merge` code has a case that only imports create: several roots of one note.
   Two devices importing one note also keep two extra revisions in its history
   for good.
 - A pin or state written by an import carries the old stamp, so any real later

@@ -220,8 +220,8 @@ so all of its fields derive from the parents alone. If two devices auto-merge
 the same heads, they produce the same revision and it deduplicates. Two
 different automatic merges can share a stamp, so the revision id is the final
 tiebreaker. The one exception to a fresh timestamp is an imported note, whose
-revisions carry the source times and whose two imports give two roots that
-merge against an empty base
+revisions carry the source times. Two imports give two roots, which merge
+against their text if it is identical, otherwise against an empty base
 ([ADR-0009](adr/0009-import-preserves-source-timestamps.md)).
 
 **On conflict:** only `body` and `title` conflict. The device still writes a
