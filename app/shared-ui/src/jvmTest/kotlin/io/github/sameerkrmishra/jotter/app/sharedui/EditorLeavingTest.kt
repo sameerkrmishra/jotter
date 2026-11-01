@@ -356,6 +356,24 @@ class EditorLeavingTest : EditorTest() {
         }
 
     @Test
+    fun aBlankDraftSavedAsANewNoteGoesToTheTrashOnBack() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editor.body = ""
+            editFromOutside(note, "their text")
+            assertFalse(editor.save())
+            assertTrue(editor.saveAsNewNote())
+            val copy = assertNotNull(editor.base)
+
+            app.leaveEditor()
+            settle()
+
+            assertNull(app.editor)
+            assertEquals(NoteState.TRASHED, notes.get(copy.id)?.state)
+        }
+
+    @Test
     fun aFailedTrashWriteStaysInTheEditor() =
         test {
             val io = HeldDispatcher()

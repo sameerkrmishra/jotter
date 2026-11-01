@@ -226,6 +226,7 @@ internal class EditorViewModel(
             val draftTags = tags
             guarded {
                 val saved = withContext(io) { notes.create(draftTitle, draftBody, draftTags) }
+                createdHere = true
                 stored(saved, draftTitle, draftBody)
             }
         }
