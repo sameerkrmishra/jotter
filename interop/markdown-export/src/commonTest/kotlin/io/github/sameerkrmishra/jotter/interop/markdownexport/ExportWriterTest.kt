@@ -1,12 +1,14 @@
 package io.github.sameerkrmishra.jotter.interop.markdownexport
 
 import io.github.sameerkrmishra.jotter.core.model.Note
+import io.github.sameerkrmishra.jotter.core.model.NoteState
 import okio.FileSystem
 import okio.ForwardingFileSystem
 import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.Sink
+import okio.Source
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -14,6 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 
+private const val NO_SPACE = "No space left on device"
 private const val COMPOSED = "é"
 private const val DECOMPOSED = "e\u0301"
 
@@ -158,6 +161,22 @@ class ExportWriterTest {
     }
 
     @Test
+    fun aHigherRankedTwinKeepsTheNameEvenIfItsNameSortsLater() {
+        // In file name order the decomposed form comes first, in naming order the active note.
+        val active = noteOf(COMPOSED, 2, body = "active")
+        val trashed = noteOf(DECOMPOSED, 1, body = "trashed", state = NoteState.TRASHED)
+
+        val renamed = export(trashed, active)
+
+        assertEquals(
+            listOf(RenamedFile("$DECOMPOSED.md", "$DECOMPOSED ${noteIdOf(1)}.md")),
+            renamed,
+        )
+        assertEquals(renderMarkdown(active), (out / "$COMPOSED.md").text())
+        assertHolds(active, trashed)
+    }
+
+    @Test
     fun aRenamedNoteReplacesItsOwnFileOnAFileSystemThatNormalises() {
         export(noteOf(DECOMPOSED, 1, body = "old"))
         val renamed = noteOf(COMPOSED, 1, body = "new")
@@ -246,6 +265,39 @@ class ExportWriterTest {
         assertHolds(new, old[1])
     }
 
+    @Test
+    fun aTargetThatCannotBeReadCountsAsAnotherFile() {
+        val note = noteOf("One", 1, body = "new")
+        export(noteOf("One", 1, body = "old"), fileSystem = system)
+        val old = (out / "One.md").text()
+        val failing = FailingFileSystem(system, unreadable = out / "One.md")
+
+        val renamed = export(note, fileSystem = failing)
+
+        assertEquals(listOf(RenamedFile("One.md", "One ${noteIdOf(1)}.md")), renamed)
+        assertEquals(old, (out / "One.md").text())
+        assertEquals(renderMarkdown(note), (out / "One ${noteIdOf(1)}.md").text())
+    }
+
+    @Test
+    fun aFailedCleanupDoesNotFailAFinishedExport() {
+        val note = noteOf("One", 1)
+        val failing = FailingFileSystem(system, deletesFail = true)
+
+        assertEquals(emptyList(), export(note, fileSystem = failing))
+
+        assertEquals(renderMarkdown(note), (out / "One.md").text())
+    }
+
+    @Test
+    fun aFailedCleanupDoesNotHideTheFailureItFollows() {
+        val failing = FailingFileSystem(system, writesLeft = 0, deletesFail = true)
+
+        val thrown = assertFailsWith<IOException> { export(noteOf("One", 1), fileSystem = failing) }
+
+        assertEquals(NO_SPACE, thrown.message)
+    }
+
     // Stores names in composed form, as Android's case-folding storage treats them.
     private class NormalisingFileSystem(
         delegate: FileSystem,
@@ -262,12 +314,27 @@ class ExportWriterTest {
         delegate: FileSystem,
         private var writesLeft: Int = Int.MAX_VALUE,
         private var movesLeft: Int = Int.MAX_VALUE,
+        private val unreadable: Path? = null,
+        private val deletesFail: Boolean = false,
     ) : ForwardingFileSystem(delegate) {
+        override fun source(file: Path): Source {
+            if (file == unreadable) throw IOException("Permission denied")
+            return super.source(file)
+        }
+
+        override fun delete(
+            path: Path,
+            mustExist: Boolean,
+        ) {
+            if (deletesFail) throw IOException("Device or resource busy")
+            super.delete(path, mustExist)
+        }
+
         override fun sink(
             file: Path,
             mustCreate: Boolean,
         ): Sink {
-            if (writesLeft-- == 0) throw IOException("No space left on device")
+            if (writesLeft-- == 0) throw IOException(NO_SPACE)
             return super.sink(file, mustCreate)
         }
 
@@ -275,7 +342,7 @@ class ExportWriterTest {
             source: Path,
             target: Path,
         ) {
-            if (movesLeft-- == 0) throw IOException("No space left on device")
+            if (movesLeft-- == 0) throw IOException(NO_SPACE)
             super.atomicMove(source, target)
         }
     }

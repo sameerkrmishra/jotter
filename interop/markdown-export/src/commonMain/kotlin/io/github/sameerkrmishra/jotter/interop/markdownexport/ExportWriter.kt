@@ -23,6 +23,9 @@ private const val STAGING_PREFIX = ".jotter-export-"
  * temporary directory inside [directory], where such a clash shows, and then moved into place
  * atomically. So a full disk or a crash leaves each file either complete and new, or as it was.
  *
+ * A file that cannot be read counts as someone else's. Removing the temporary directory is best
+ * effort, so a failure there is neither reported nor hides another failure.
+ *
  * @throws IOException if the file system fails. Files not moved yet keep their previous content.
  */
 public fun writeExport(
@@ -46,7 +49,17 @@ public fun writeExport(
             .map { (planned, written) -> RenamedFile(planned, written) }
             .sortedBy { it.plannedName }
     } finally {
-        fileSystem.deleteRecursively(staging)
+        fileSystem.deleteBestEffort(staging)
+    }
+}
+
+// A leftover directory is harmless. By now the export has either succeeded, and failing it would
+// be wrong, or it is failing, and this must not replace the exception that says why.
+private fun FileSystem.deleteBestEffort(directory: Path) {
+    try {
+        deleteRecursively(directory)
+    } catch (_: IOException) {
+        // Nothing to do; see above.
     }
 }
 
@@ -65,8 +78,12 @@ private fun FileSystem.isFree(
 private fun FileSystem.canReplace(
     path: Path,
     file: ExportedFile,
-): Boolean {
-    val metadata = metadataOrNull(path) ?: return true
-    val mark = ownerMark(file.noteId).encodeUtf8()
-    return metadata.isRegularFile && read(path) { rangeEquals(0, mark) }
-}
+): Boolean =
+    try {
+        val metadata = metadataOrNull(path)
+        val mark = ownerMark(file.noteId).encodeUtf8()
+        metadata == null || (metadata.isRegularFile && read(path) { rangeEquals(0, mark) })
+    } catch (_: IOException) {
+        // A file that cannot be read cannot be shown to be this note's.
+        false
+    }

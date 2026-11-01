@@ -113,8 +113,9 @@ the target, on the same file system, writes every file there, and then moves
 each one into place atomically. The directory is removed at the end, even after
 a failure. A full disk during writing changes nothing in the target. A failure
 during the moves leaves every file whole, either new or as it was, and throws an
-`IOException`. Only a crash of the process can leave the staging directory
-behind; it is harmless and can be deleted.
+`IOException`. Removing the directory is best effort, so a failure there does
+not fail a finished export or hide an earlier failure. That, or a crash of the
+process, can leave the directory behind; it is harmless and can be deleted.
 
 **Clashes.** Common code has no Unicode normalisation tables, so rule 6 does not
 see that `é` as one character and as `e` plus an accent are the same file on
@@ -127,7 +128,8 @@ the same notes get the same names on every run. A clash never aborts an export.
 **Files already in the target.** Each exported file starts with `---` and
 `id: <note id>`, which is how a later export knows whose file it finds. A file
 that starts with this note's id is replaced. Anything else under the name stays
-as it is: another note's file, the user's own file, a directory. The note takes
+as it is: another note's file, the user's own file, a directory, a file that
+cannot be read. The note takes
 its name with the id, or if that is taken as well, `<note id> 1.md` and so on.
 This also holds for a note that was exported earlier and is not part of this
 export, so a filter or a deleted note cannot lose a file. The price is that a
