@@ -30,6 +30,25 @@ internal fun searchLine(hit: SearchHit): String =
 /** The line of `jotter tags`. */
 internal fun tagLine(tag: TagCount): String = "${tag.tag}$SEPARATOR${tag.count}"
 
+/** A line of the summary of `jotter import` and `jotter export`. */
+internal fun countLine(
+    name: String,
+    count: Int,
+): String = "$name$SEPARATOR$count"
+
+/**
+ * A line of `jotter import` on stderr. A file name or a label can hold any character, so they get
+ * the same treatment as a summary.
+ */
+internal fun problemLine(
+    severity: String,
+    source: String,
+    kind: String,
+    detail: String,
+): String =
+    listOf(severity, oneLine(source), kind, oneLine(detail).ifEmpty { EMPTY })
+        .joinToString(SEPARATOR)
+
 /** The output of `jotter show`: `name: value` headers, a blank line, the body as it is. */
 internal fun fullNote(note: Note): String =
     listOf(

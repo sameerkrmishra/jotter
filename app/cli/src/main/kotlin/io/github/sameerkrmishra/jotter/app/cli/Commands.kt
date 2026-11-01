@@ -3,7 +3,9 @@ package io.github.sameerkrmishra.jotter.app.cli
 import com.github.ajalt.clikt.core.CliktError
 import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.CoreCliktCommand
+import com.github.ajalt.clikt.parameters.arguments.ProcessedArgument
 import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.convert
 import com.github.ajalt.clikt.parameters.options.NullableOption
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
@@ -16,6 +18,8 @@ import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
 
 /** A subcommand that works on the notes in the database at [location]. */
 internal abstract class NoteCommand(
@@ -117,3 +121,14 @@ internal class TagsCommand(
 
 private fun NullableOption<String, String>.tag() =
     convert("TAG") { TagName.parseOrNull(it) ?: fail("not a valid tag: \"$it\"") }
+
+/** An empty path would otherwise mean the current directory. */
+internal fun ProcessedArgument<String, String>.path() =
+    convert {
+        if (it.isEmpty()) fail("the path is empty")
+        try {
+            Path.of(it)
+        } catch (_: InvalidPathException) {
+            fail("not a valid path: $it")
+        }
+    }

@@ -35,3 +35,17 @@ internal fun runJotter(
         }
     return CliResult(stdout.toString(), stderr.toString(), result.statusCode)
 }
+
+/** The text of a Takeout document with synthetic content. [more] holds further JSON members. */
+internal fun keepNote(
+    createdUsec: Long,
+    title: String = "Note $createdUsec",
+    text: String = "Text of $createdUsec",
+    more: String = "",
+): String =
+    """
+    {"title":"$title","textContent":"$text","createdTimestampUsec":$createdUsec,
+    "userEditedTimestampUsec":${createdUsec + EDIT_DELAY_USEC}$more}
+    """.trimIndent()
+
+private const val EDIT_DELAY_USEC = 5_000_000L

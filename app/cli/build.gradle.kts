@@ -28,6 +28,7 @@ tasks.test {
 
 dependencies {
     implementation(projects.core.storage)
+    implementation(projects.interop.keepImport)
     // The exception NoteStore.open lets through, to report it without a stack trace.
     implementation(libs.androidx.sqlite)
     implementation(libs.clikt.core)
