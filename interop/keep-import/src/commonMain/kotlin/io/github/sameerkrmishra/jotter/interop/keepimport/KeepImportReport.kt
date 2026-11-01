@@ -70,8 +70,9 @@ public data class KeepImportWarning(
  *
  * @property source The [KeepDocument.name].
  * @property kind What happened.
- * @property detail The parser's message without any of the file, the database's message, or for
- *   a duplicate the name of the first document with the id; empty for a missing time.
+ * @property detail A fixed text for malformed JSON, which never quotes the file, the database's
+ *   message, or for a duplicate the name of the first document with the id; empty for a missing
+ *   time.
  */
 public data class KeepImportFailure(
     val source: String,

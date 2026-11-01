@@ -62,7 +62,7 @@ new one.
 
 | Case | Result |
 |---|---|
-| Not JSON, not an object, or a field of the wrong type | Failure `MALFORMED_JSON` |
+| Not JSON, not an object, or a field of the wrong type | Failure `MALFORMED_JSON` with a fixed detail: the parser's message quotes the file, and a report must not repeat a note's content |
 | `createdTimestampUsec` missing or not positive | Failure `MISSING_CREATED_TIME`: there is no stable id, and an id from anything else would import the note again from the next Takeout |
 | Same id as an earlier document of this run | Failure `DUPLICATE_ID` for the later one, naming the first |
 | `userEditedTimestampUsec` missing or not positive | Imported at the created time, warning `MISSING_EDITED_TIME` |

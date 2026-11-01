@@ -21,6 +21,9 @@ private val keepJson: Json =
         coerceInputValues = true
     }
 
+/** The fixed detail of a [KeepImportFailure.Kind.MALFORMED_JSON] failure. */
+private const val MALFORMED_DETAIL = "Not a valid Keep note"
+
 /**
  * One JSON file of the `Keep` folder of a Takeout.
  *
@@ -108,9 +111,10 @@ public class KeepImporter internal constructor(
         private fun decode(document: KeepDocument): KeepNote? =
             try {
                 keepJson.decodeFromString<KeepNote>(document.json)
-            } catch (e: IllegalArgumentException) {
-                // SerializationException is a subclass.
-                fail(document.name, KeepImportFailure.Kind.MALFORMED_JSON, parserMessage(e))
+            } catch (_: IllegalArgumentException) {
+                // SerializationException is a subclass. Its message quotes the file, so it stays
+                // out of the report, and the library has no structured field for the JSON path.
+                fail(document.name, KeepImportFailure.Kind.MALFORMED_JSON, MALFORMED_DETAIL)
                 null
             }
 
@@ -187,10 +191,6 @@ public class KeepImporter internal constructor(
                 warn(source, KeepImportWarning.Kind.TEXT_REPLACED, "body")
             }
         }
-
-        /** The parser's message, without the excerpt of the file, which may hold personal data. */
-        private fun parserMessage(error: IllegalArgumentException): String =
-            error.message.orEmpty().substringBefore("\nJSON input:")
 
         private fun warn(
             source: String,

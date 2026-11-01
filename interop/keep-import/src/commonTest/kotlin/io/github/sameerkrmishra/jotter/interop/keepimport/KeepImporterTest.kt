@@ -380,13 +380,20 @@ class KeepImporterTest {
     @Test
     fun aMalformedDocumentReportsNoneOfItsContent() =
         withStore { store ->
-            val broken = """{"sharees":[{"email":"friend@example.invalid"}],"isPinned":"x"}"""
-            val truncated = """{"sharees":[{"email":"friend@example.invalid"""
+            val sentinel = "my bank pin 1234"
+            val broken =
+                listOf(
+                    """{"isTrashed":"$sentinel"}""",
+                    """{"createdTimestampUsec":"$sentinel"}""",
+                    """{"title":"$sentinel","isPinned":"x"}""",
+                    """{"title":"$sentinel""",
+                    """$sentinel""",
+                )
 
-            val report = KeepImporter(store.notes).import(documents(broken, truncated))
+            val report = KeepImporter(store.notes).import(documents(*broken.toTypedArray()))
 
-            assertEquals(2, report.failures.size)
-            assertFalse(report.toString().contains("example.invalid"))
+            assertEquals(broken.size, report.failures.size)
+            assertFalse(sentinel in report.toString())
         }
 
     @Test
