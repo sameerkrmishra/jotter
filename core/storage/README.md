@@ -64,7 +64,12 @@ Encoding:
   by sync before its parent.
 - `revision` is an ordinary rowid table (its rows hold whole bodies, which a
   WITHOUT ROWID table stores larger and reads slower); the small edge tables
-  are WITHOUT ROWID. `revision_by_note` indexes
+  are WITHOUT ROWID. Its key is `seq INTEGER PRIMARY KEY`, the order in which
+  revisions arrived on this device, which M3's push uses to find revisions
+  not yet on a backend. `seq` names the rowid because VACUUM (and `VACUUM
+  INTO`, for export) may renumber an implicit one. It is local: it is not part
+  of a `Revision` and never syncs. `id` is `UNIQUE`, and what other tables
+  reference. `revision_by_note` indexes
   `(note_id, hlc_physical, hlc_counter, device_id, id)`, which serves both
   `history` in `Stamp` order and the `createdAt` minimum.
 - `note.fts_rowid` exists only because an FTS5 index with external content

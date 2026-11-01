@@ -3,7 +3,12 @@
 -- whose text order is their byte order, so ORDER BY gives Stamp order. An ordinary rowid table:
 -- its rows hold whole bodies, which a WITHOUT ROWID table stores less compactly and reads slower.
 CREATE TABLE revision (
-  id TEXT NOT NULL PRIMARY KEY,
+  -- The local arrival order, for "revisions not yet on this backend" (M3). Only this device's
+  -- order: it is not part of a revision and never syncs. It is the rowid under a name, because
+  -- VACUUM (and VACUUM INTO, used for export) may renumber an implicit rowid but keeps this. No
+  -- AUTOINCREMENT needed: rows are never deleted, so a new row always gets the highest value yet.
+  seq INTEGER PRIMARY KEY,
+  id TEXT NOT NULL UNIQUE,
   note_id TEXT NOT NULL,
   hlc_physical INTEGER NOT NULL CHECK (hlc_physical >= 0),
   hlc_counter INTEGER NOT NULL CHECK (hlc_counter BETWEEN 0 AND 2147483647),

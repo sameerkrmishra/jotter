@@ -8,6 +8,7 @@ import io.kotest.property.arbitrary.bind
 import io.kotest.property.arbitrary.int
 import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.long
+import io.kotest.property.arbitrary.next
 import io.kotest.property.checkAll
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -42,6 +43,35 @@ class RevisionStoreTest {
 
                     assertEquals(listOf(revision), store.forNote(revision.noteId))
                 }
+            }
+        }
+
+    @Test
+    fun seqFollowsInsertionOrderAndADuplicateInsertLeavesItAlone() =
+        runTest {
+            withDatabase { db, driver ->
+                val store = RevisionStore(db.revisionQueries)
+                // Three revisions whose ids, stamps and notes say nothing about the order.
+                val inserted = Arb.list(revisions, 3..3).next()
+                inserted.forEach(store::insert)
+
+                fun seqs() =
+                    inserted.map { revision ->
+                        driver.queryLong("SELECT seq FROM revision WHERE id = '${revision.id}'")
+                    }
+                val seqs = seqs()
+                assertEquals(seqs.sortedBy { it }, seqs)
+                assertEquals(seqs.size, seqs.toSet().size)
+
+                inserted.reversed().forEach(store::insert)
+                assertEquals(seqs, seqs())
+                assertEquals(3L, driver.queryLong("SELECT count(*) FROM revision"))
+
+                val later = Arb.list(revisions, 1..1).next().single()
+                store.insert(later)
+                val laterSeq =
+                    driver.queryLong("SELECT seq FROM revision WHERE id = '${later.id}'")
+                assertEquals(seqs.last()?.plus(1), laterSeq)
             }
         }
 
