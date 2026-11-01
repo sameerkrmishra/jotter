@@ -398,7 +398,8 @@ class MarkdownParserTest {
         val nested = "- [ ] - [x] - [X] a"
         assertEquals(3, parseMarkdown(nested).rows.count { it.task != null })
 
-        val deep = "- [ ] ".repeat(100_000)
+        // Small enough that the parser finishes, so that only the scan can make this plain text.
+        val deep = "- [ ] ".repeat(1_000)
         assertEquals(listOf(Paragraph(listOf(Span(deep)))), blocks(deep))
         // Only a real box is skipped: this text is the line's content, so it cannot nest.
         val text = "- [y] " + "- ".repeat(MAX_NESTING)
