@@ -18,6 +18,13 @@ tasks.startScripts {
         resources.text.fromFile(template)
 }
 
+// StartScriptTest runs the real start script from the installed distribution.
+tasks.test {
+    dependsOn(tasks.installDist)
+    val installation = layout.buildDirectory.dir("install/jotter")
+    jvmArgumentProviders.add { listOf("-Djotter.installation=${installation.get().asFile}") }
+}
+
 dependencies {
     implementation(projects.core.storage)
     // The exception NoteStore.open lets through, to report it without a stack trace.
