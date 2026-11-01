@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.interop.markdownexport
 
 import io.github.sameerkrmishra.jotter.core.model.Note
+import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.map
@@ -119,6 +120,21 @@ class FileNamesTest {
         assertEquals(
             listOf("Soup.md", "Soup ${noteIdOf(1)}.md", "Soup ${noteIdOf(2)}.md"),
             namesOf(listOf("Soup", "Soup", "Soup")),
+        )
+    }
+
+    @Test
+    fun anActiveNoteKeepsTheNameOverAnOlderOneInAnotherState() {
+        val trashed = noteOf("Soup", 1, state = NoteState.TRASHED)
+        val archived = noteOf("Soup", 2, state = NoteState.ARCHIVED)
+        val active = noteOf("Soup", 3)
+        assertEquals(
+            listOf(
+                active to "Soup.md",
+                archived to "Soup ${noteIdOf(2)}.md",
+                trashed to "Soup ${noteIdOf(1)}.md",
+            ),
+            assignFileNames(listOf(trashed, archived, active)),
         )
     }
 

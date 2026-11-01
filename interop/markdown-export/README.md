@@ -89,7 +89,8 @@ A file's name comes from the note's title, so the rules below apply in order:
    `con.txt`) gets a `_` in front, because the flash drive may end up in a
    Windows PC.
 6. Names that are equal ignoring case (through `uppercase().lowercase()`, so
-   `straße` meets `STRASSE`) collide. The note with the lowest id keeps the
+   `straße` meets `STRASSE`) collide. Active notes come first, then archived,
+   then trashed, and within a state the lowest id. The first note keeps the
    name; each other one gets its id, as in `Soup 0192e6f0-...-5e6f.md`, with
    the title cut shorter to make room. If another note's title is exactly that
    name, that note keeps it and a counter follows the id.

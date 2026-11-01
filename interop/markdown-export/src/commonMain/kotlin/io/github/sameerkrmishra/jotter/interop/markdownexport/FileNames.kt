@@ -46,13 +46,18 @@ private val reserved = Regex("""CON|PRN|AUX|NUL|CLOCK\$|CONIN\$|CONOUT\$|(COM|LP
 
 private val whitespaceRun = Regex(" +")
 
+// The order in which notes claim names. A note in use should not lose its plain name to an older
+// one in the trash, so states go first ([NoteState] lists active, archived, trashed). The id makes
+// the order total, whatever order the notes arrive in.
+private val namingOrder: Comparator<Note> = compareBy({ it.state }, { it.id.toString() })
+
 /**
- * Gives each of [notes] a file name, and returns them in note id order. The names are safe on
+ * Gives each of [notes] a file name, and returns them in [namingOrder]. The names are safe on
  * Linux, FAT and Android storage, unique ignoring letter case, and depend only on the set of
  * notes, not on their order. See README.md for the rules.
  */
 internal fun assignFileNames(notes: Collection<Note>): List<Pair<Note, String>> {
-    val sorted = notes.sortedBy { it.id.toString() }
+    val sorted = notes.sortedWith(namingOrder)
     val taken = HashSet<String>()
     // Every plain name is claimed before any disambiguated one, so a note whose title happens to
     // look like a disambiguated name keeps it.
