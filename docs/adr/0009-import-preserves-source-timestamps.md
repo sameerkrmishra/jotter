@@ -33,12 +33,15 @@ for different content, which `RevisionStore.insert` rejects.
 - **The clock.** This is the one exception to "fresh clock reading". The
   device's clock is not moved back. Later edits use `now(after = parent)`.
 - **Re-import.** A note with any history, including a tombstone, is skipped.
-- **Several roots.** M3 must merge heads of a note that has several roots and
-  so no common ancestor. When the roots have identical text, that text is the
-  merge base. It derives from the revisions alone, so every device picks the
-  same base. An empty base would conflict on all the text as soon as one
-  device edits its copy, although the other changed nothing. Roots with
-  different text use an empty base and may conflict.
+- **Several roots.** M3 must merge two parents that have no common ancestor,
+  which happens only when a note has several roots. Then, for each of `body`
+  and `title` separately, if all roots among the ancestors of the two parents
+  being merged have the same value, that value is the base; otherwise the base
+  is empty. The rule depends only on the two parents, as ADR-0003 requires of
+  an automatic merge, so devices that know of different roots still agree. An
+  empty base alone would conflict on all the text as soon as one device edits
+  its copy, although the other changed nothing. Two parents with a common
+  ancestor use it as usual, so a note with one root is unaffected.
 
 ## Consequences
 
@@ -57,9 +60,9 @@ for different content, which `RevisionStore.insert` rejects.
   it before syncing, delete-vs-edit brings it back in the trash. Nothing is
   lost, and the "tombstone is skipped" guarantee is local to a device.
 - A re-import silently skips newer Keep edits of a note already imported.
-- Roots with different text, for example two Takeouts taken apart with an edit
-  in Keep in between, merge against an empty base and may conflict on the whole
-  text.
+- Roots with different values, for example from two Takeouts taken apart with
+  an edit in Keep in between, merge against an empty base and may conflict on
+  the whole `body` or `title`.
 - `merge` code has a case that only imports create: several roots of one note.
   Two devices importing one note also keep two extra revisions in its history
   for good.

@@ -18,7 +18,7 @@ Each ADR has one status:
   place, unchanged except for its status line, so the history is kept.
 
 An accepted ADR is not edited to change its decision. To change a decision,
-write a new ADR and mark the old one as superseded.
+write a new ADR and mark the old one as amended or superseded.
 
 ## Adding an ADR
 
