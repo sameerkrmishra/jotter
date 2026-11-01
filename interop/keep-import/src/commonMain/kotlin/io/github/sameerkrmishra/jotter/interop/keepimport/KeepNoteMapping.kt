@@ -34,6 +34,9 @@ private const val WEB_LINK = "WEBLINK"
 /** Characters that would break a Markdown link, in its title or its URL. */
 private const val LINK_BREAKERS = "[]()\\\r\n"
 
+/** The ASCII characters above the control characters and space that no URL can contain. */
+private const val NOT_IN_URLS = "\"<>\\^`{|}\u007F"
+
 /** A second line and later ones of a task list item start here to stay inside the item. */
 private const val CONTINUATION = "\n  "
 
@@ -67,10 +70,25 @@ internal fun KeepNote.markdownBody(): String {
     val text = joinParagraphs(textContent, list)
     val links =
         annotations
-            .filter { it.source == WEB_LINK && it.url.isNotEmpty() && it.url !in text }
+            .filter { it.source == WEB_LINK && it.url.isNotEmpty() && !text.containsUrl(it.url) }
             .distinctBy(KeepAnnotation::url)
             .joinToString("\n", transform = KeepAnnotation::toMarkdownLine)
     return joinParagraphs(text, links)
+}
+
+/**
+ * Whether this text has [url] as a whole URL, not as the start of a longer one: `https://a.co/foo`
+ * is not in `https://a.co/foobar`. Punctuation can continue a URL, so a URL before a full stop
+ * does not count and the link is repeated, which is better than losing it.
+ */
+private fun String.containsUrl(url: String): Boolean {
+    var start = indexOf(url)
+    while (start >= 0) {
+        val next = getOrNull(start + url.length)
+        if (next == null || next <= ' ' || next in NOT_IN_URLS) return true
+        start = indexOf(url, start + 1)
+    }
+    return false
 }
 
 private fun joinParagraphs(vararg paragraphs: String): String =

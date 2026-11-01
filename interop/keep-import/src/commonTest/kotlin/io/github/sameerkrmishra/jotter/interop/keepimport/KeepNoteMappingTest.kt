@@ -104,6 +104,36 @@ class KeepNoteMappingTest {
     }
 
     @Test
+    fun aLinkThatOnlyStartsALongerUrlIsKept() {
+        val text = "See ${URL}bar now"
+
+        assertEquals("$text\n\n$URL", linkNote("").copy(textContent = text).markdownBody())
+    }
+
+    @Test
+    fun aWholeUrlIsFoundAfterALongerOne() {
+        val text = "${URL}bar and $URL"
+
+        assertEquals(text, linkNote("").copy(textContent = text).markdownBody())
+    }
+
+    @Test
+    fun aUrlEndsAtACharacterNoUrlCanContain() {
+        listOf(" ", "\n", "\t", "\"", "<", ">", "\\", "^", "`", "{", "|", "}").forEach { end ->
+            val text = "$URL${end}x"
+
+            assertEquals(text, linkNote("").copy(textContent = text).markdownBody())
+        }
+    }
+
+    @Test
+    fun aUrlBeforePunctuationIsRepeatedRatherThanLost() {
+        val text = "See $URL."
+
+        assertEquals("$text\n\n$URL", linkNote("").copy(textContent = text).markdownBody())
+    }
+
+    @Test
     fun aLinkListedTwiceAppearsOnce() {
         val link = KeepAnnotation("WEBLINK", "", URL)
 
