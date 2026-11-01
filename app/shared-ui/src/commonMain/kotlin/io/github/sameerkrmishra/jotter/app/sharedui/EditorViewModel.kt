@@ -56,6 +56,7 @@ internal enum class EditorProblem {
  * @param note The note to edit, or null for a new note, created by the first save with text.
  */
 @Stable
+@Suppress("TooManyFunctions") // What an open note can do, kept together on purpose.
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 internal class EditorViewModel(
     private val notes: NoteService,

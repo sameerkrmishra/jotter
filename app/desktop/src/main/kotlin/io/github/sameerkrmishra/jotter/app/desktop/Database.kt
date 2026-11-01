@@ -26,7 +26,6 @@ internal class DatabaseUnavailableException(
  * @param queryContext Where the store's flows run their queries.
  * @throws DatabaseUnavailableException if that fails.
  */
-@Suppress("TooGenericExceptionCaught") // The driver's exception is not part of NoteStore's API.
 internal fun openNoteStore(
     readEnvvar: (String) -> String?,
     userHome: String,
@@ -35,15 +34,30 @@ internal fun openNoteStore(
     val path =
         linuxDatabasePath(readEnvvar(DATABASE_ENVVAR), readEnvvar, userHome)
             ?: throw DatabaseUnavailableException("no database location: set HOME or JOTTER_DB")
-    return try {
+    return open(path, queryContext)
+}
+
+@Suppress("TooGenericExceptionCaught") // The driver's exception is not part of NoteStore's API.
+private fun open(
+    path: String,
+    queryContext: CoroutineContext,
+): NoteStore =
+    try {
         val file = Path.of(path).toAbsolutePath()
         Files.createDirectories(file.parent)
         NoteStore.open(file.toString(), DEVICE_NAME, queryContext)
-    } catch (e: StorageBusyException) {
-        throw DatabaseUnavailableException("$path is locked by another process, try again", e)
     } catch (e: IOException) {
         throw DatabaseUnavailableException("cannot create the directory of $path", e)
     } catch (e: RuntimeException) {
-        throw DatabaseUnavailableException("cannot open $path: ${e.message}", e)
+        throw DatabaseUnavailableException(reason(path, e), e)
     }
-}
+
+private fun reason(
+    path: String,
+    failure: RuntimeException,
+): String =
+    if (failure is StorageBusyException) {
+        "$path is locked by another process, try again"
+    } else {
+        "cannot open $path: ${failure.message}"
+    }

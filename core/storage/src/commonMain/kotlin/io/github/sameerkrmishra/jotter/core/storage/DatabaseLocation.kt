@@ -31,4 +31,7 @@ public fun linuxDatabasePath(
 private fun homeDirectory(
     readEnvvar: (String) -> String?,
     userHome: String,
-): String? = (readEnvvar("HOME")?.takeUnless(String::isEmpty) ?: userHome).takeIf { it.startsWith('/') }
+): String? =
+    (readEnvvar("HOME")?.takeUnless(String::isEmpty) ?: userHome).takeIf {
+        it.startsWith('/')
+    }

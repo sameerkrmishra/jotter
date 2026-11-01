@@ -556,7 +556,7 @@ class EditorViewModelTest : ViewModelTest() {
             app.requestExit { exits++ }
             settle()
             assertEquals(0, exits)
-            assertNotNull(app.pendingExit)
+            assertTrue(app.pendingExit != null)
 
             app.keepEditing()
 
@@ -616,7 +616,7 @@ class EditorViewModelTest : ViewModelTest() {
             settle()
 
             assertFalse(exited)
-            assertNotNull(app.pendingExit)
+            assertTrue(app.pendingExit != null)
         }
 
     @Test
@@ -646,7 +646,8 @@ class EditorViewModelTest : ViewModelTest() {
             assertNull(editor.message)
         }
 
-    private fun Fixture.slowApp() = AppViewModel(notes, scope, StandardTestDispatcher(testScheduler))
+    private fun Fixture.slowApp() =
+        AppViewModel(notes, scope, StandardTestDispatcher(testScheduler))
 
     @Test
     fun textTypedDuringTheSaveOnBackIsSavedToo() =
