@@ -114,6 +114,19 @@ Further details:
 - Tags are identified exactly and keep their case. Normalisation (trimming
   and collapsing a fixed list of whitespace characters) uses no Unicode
   tables, so every platform derives the same tag sets and merge hashes.
+- Imported notes (2026-11-01, for the importer in M2,
+  [PLAN.md §7](../PLAN.md#7-interop)): an imported note's revisions carry the
+  original timestamps as their HLC stamps, a root at the created time and, when
+  it differs, a revision at the edited time, rather than a fresh clock reading.
+  This is the only exception to "fresh". The rule that a user revision is
+  strictly above its parents still holds, and the clock does not move
+  backwards.
+- Import ids are deterministic from the source note. A note with any history,
+  including a tombstone, is skipped on re-import, so importing again neither
+  duplicates a note nor brings back one that was deleted forever.
+- Two devices that import the same note before syncing give two roots with no
+  common ancestor. Identical text must merge cleanly, so M3 has to handle that
+  case (an empty base).
 
 ## Consequences
 

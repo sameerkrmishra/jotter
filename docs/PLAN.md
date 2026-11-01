@@ -325,8 +325,11 @@ codec. Documented as ADR-0007 in M6.
 - **Google Keep import** (Takeout `Keep/*.json`): `title` and `textContent`
   map to the note. `listContent` becomes a Markdown task list. `labels` become
   tags. `isPinned`, `isArchived` and `isTrashed` map to state. Timestamps are
-  preserved. Colors are dropped. The import is idempotent: re-importing
-  doesn't duplicate notes. Tests run against a synthetic fixture set, never
+  preserved: the revisions of an imported note carry the original created and
+  edited times as their HLC stamps
+  ([ADR-0003](adr/0003-revision-dag-and-three-way-merge.md), refinements).
+  Colors are dropped. The import is idempotent: re-importing doesn't duplicate
+  notes. Tests run against a synthetic fixture set, never
   real user data.
 - **Markdown export:** one `.md` file per note with YAML front-matter (tags,
   pinned, state, timestamps). Filter by tag. Available from the UI and the CLI
