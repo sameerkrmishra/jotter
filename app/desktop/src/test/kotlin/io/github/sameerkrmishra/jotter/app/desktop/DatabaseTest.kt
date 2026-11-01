@@ -1,5 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.desktop
 
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import androidx.sqlite.execSQL
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
@@ -57,6 +59,34 @@ class DatabaseTest {
             }
 
         assertContains(failure.message.orEmpty(), "cannot create the directory")
+    }
+
+    @Test
+    fun aDatabaseLockedDuringOpenIsReported() {
+        val file = directory.resolve("notes.db")
+        // In rollback mode a writer blocks readers too, so NoteStore.open's first read fails.
+        BundledSQLiteDriver().open(file.toString()).use { lock ->
+            lock.execSQL("BEGIN EXCLUSIVE")
+            lock.execSQL("CREATE TABLE being_created (x)")
+
+            val failure =
+                assertFailsWith<DatabaseUnavailableException> {
+                    open(DATABASE_ENVVAR to file.toString())
+                }
+
+            assertContains(failure.message.orEmpty(), "locked by another process")
+            lock.execSQL("ROLLBACK")
+        }
+    }
+
+    @Test
+    fun noUsableHomeIsReported() {
+        val failure =
+            assertFailsWith<DatabaseUnavailableException> {
+                openNoteStore({ null }, "?", EmptyCoroutineContext)
+            }
+
+        assertContains(failure.message.orEmpty(), "no database location")
     }
 
     @Test

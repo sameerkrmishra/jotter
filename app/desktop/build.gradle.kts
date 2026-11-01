@@ -26,4 +26,8 @@ dependencies {
     implementation(projects.app.sharedUi)
     implementation(libs.compose.desktop.linux.x64)
     runtimeOnly(libs.kotlinx.coroutines.swing)
+
+    // To hold a lock on a test database.
+    testImplementation(libs.androidx.sqlite)
+    testImplementation(libs.androidx.sqlite.bundled)
 }
