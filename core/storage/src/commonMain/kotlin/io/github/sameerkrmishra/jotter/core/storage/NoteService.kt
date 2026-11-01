@@ -29,6 +29,7 @@ import kotlin.time.Instant
  *
  * Every change creates a user [Revision] on top of the note's current one and materialises it, in
  * one write transaction (`BEGIN IMMEDIATE`), so the desktop app and the CLI never interleave.
+ * [importNote] is the one write that keeps source times instead of reading the clock (ADR-0009).
  * The transaction also reads and advances the device's hybrid logical clock, which is stored in
  * the database, so timestamps stay strictly increasing across restarts and processes. A change
  * that would change nothing, such as pinning a pinned note, creates no revision and returns the
@@ -82,6 +83,51 @@ public class NoteService internal constructor(
             val revision = userRevision(stamp, NoteId.generate(), parent = null, content)
             store(revision)
             noteOf(revision, content, Instant.fromEpochMilliseconds(stamp.timestamp.physicalMillis))
+        }
+
+    /**
+     * Stores [note], taken from another app, with the source's times as its revisions' timestamps
+     * (ADR-0009), in one write transaction.
+     *
+     * If the note [ImportedNote.id] has any history, even one that ends in deletion forever,
+     * nothing is written and the result is [ImportResult.SKIPPED]: a repeated import duplicates
+     * nothing, changes nothing and brings nothing back.
+     *
+     * Otherwise this writes a root revision at [ImportedNote.createdAt], and a second revision
+     * with the same content at [ImportedNote.editedAt] if that is strictly later in whole
+     * milliseconds, so a child is always above its parent. Both have counter 0 and this device's
+     * id. The pin and state keep the root's stamp, so any real later change beats them. The
+     * device's clock is not moved; [edit] and the other changes go above the imported revisions
+     * with `now(after = parent)`, even if a source time is in the future.
+     *
+     * Text is made storable as by [create].
+     *
+     * @throws IllegalArgumentException if [ImportedNote.createdAt] is before the Unix epoch.
+     * @throws StorageBusyException if another process kept the database locked.
+     */
+    public fun importNote(note: ImportedNote): ImportResult =
+        write { _ ->
+            if (revisions.forNote(note.id).isNotEmpty()) {
+                ImportResult.SKIPPED
+            } else {
+                val createdMillis = note.createdAt.toEpochMilliseconds()
+                val editedMillis = note.editedAt.toEpochMilliseconds()
+                val rootStamp = importStamp(createdMillis)
+                val content =
+                    RevisionContent.Snapshot(
+                        title = note.title.toStorableText(),
+                        body = note.body.toStorableText(),
+                        tags = note.tags,
+                        pinned = Stamped(note.pinned, rootStamp),
+                        state = Stamped(note.state, rootStamp),
+                    )
+                store(userRevision(rootStamp, note.id, parent = null, content))
+                if (editedMillis > createdMillis) {
+                    val parent = rootStamp.revisionId
+                    store(userRevision(importStamp(editedMillis), note.id, parent, content))
+                }
+                ImportResult.IMPORTED
+            }
         }
 
     /** Returns the note with [id], or null if there is none (any more). */
@@ -396,6 +442,10 @@ public class NoteService internal constructor(
         hlc: HybridLogicalClock,
         after: HybridTimestamp?,
     ): Stamp = Stamp(hlc.now(after), deviceId, RevisionId.generate())
+
+    /** The stamp of an imported revision, at a source time instead of a clock reading. */
+    private fun importStamp(physicalMillis: Long): Stamp =
+        Stamp(HybridTimestamp(physicalMillis, counter = 0), deviceId, RevisionId.generate())
 
     private fun userRevision(
         stamp: Stamp,
