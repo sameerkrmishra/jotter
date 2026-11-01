@@ -6,6 +6,11 @@ androidx-sqlite = "2.7.1"
 androidx-test-runner = "1.7.0"
 atomicfu = "0.33.0"
 clikt = "5.1.0"
+# Compose Multiplatform 1.12.x supports Kotlin 2.4.x (docs/spikes/0002-desktop-packaging.md). The
+# Compose compiler plugin is released with Kotlin, so it uses version.ref = "kotlin".
+compose-multiplatform = "1.12.2"
+# Material3 is versioned apart from Compose Multiplatform since 1.10: upgrades are two bumps.
+compose-material3 = "1.9.0"
 kotlin = "2.4.21"
 # detekt 1.23.x embeds Kotlin 2.0.21 and cannot analyse Kotlin 2.1+ sources. 2.0.0-alpha.6
 # embeds Kotlin 2.4.10, the only detekt release that matches our compiler.
@@ -21,6 +26,8 @@ sqldelight = "2.4.1"
 [libraries]
 # Gradle plugins, consumed by build-logic/ as regular dependencies.
 android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+compose-compiler-gradlePlugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
+compose-gradlePlugin = { module = "org.jetbrains.compose:compose-gradle-plugin", version.ref = "compose-multiplatform" }
 detekt-gradlePlugin = { module = "dev.detekt:detekt-gradle-plugin", version.ref = "detekt" }
 kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 kover-gradlePlugin = { module = "org.jetbrains.kotlinx:kover-gradle-plugin", version.ref = "kover" }
@@ -31,7 +38,14 @@ androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidx-s
 androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "androidx-sqlite" }
 atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
 clikt-core = { module = "com.github.ajalt.clikt:clikt-core", version.ref = "clikt" }
+compose-desktop-linux-x64 = { module = "org.jetbrains.compose.desktop:desktop-jvm-linux-x64", version.ref = "compose-multiplatform" }
+compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
+compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
+compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+# Dispatchers.Main on the desktop.
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
 sqldelight-coroutines-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
 # The SQL dialect of core/storage's .sq files. Both bundled SQLite builds are 3.50 (ADR-0002).
 sqldelight-dialect-sqlite344 = { module = "app.cash.sqldelight:sqlite-3-44-dialect", version.ref = "sqldelight" }
@@ -41,6 +55,8 @@ sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sq
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
 # Clikt's test support. It is not in clikt-core, and it brings the Mordant terminal library.
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
+# runComposeUiTest.
+compose-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "compose-multiplatform" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 # runTest, to call Kotest's suspending property checks from kotlin.test.
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }

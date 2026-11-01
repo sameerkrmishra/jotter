@@ -28,7 +28,9 @@ The reasons behind these are recorded in [docs/adr/](docs/adr/README.md).
 - **Disk space** for the Kotlin/Native toolchain (about 1.8 GB in `~/.konan`),
   which the first build downloads. Shared modules are also built and tested
   for `linuxX64`, so they must not use JVM-only APIs or libraries
-  ([ADR-0006](docs/adr/0006-native-compatible-shared-modules.md)).
+  ([ADR-0006](docs/adr/0006-native-compatible-shared-modules.md)). The Compose
+  UI in `app/shared-ui` is the one exception
+  ([ADR-0010](docs/adr/0010-compose-ui-outside-linuxx64-rule.md)).
 
 ## Everyday commands
 

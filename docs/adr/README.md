@@ -41,6 +41,7 @@ write a new ADR and mark the old one as amended or superseded.
 | [0005](0005-manual-dependency-injection.md) | Manual constructor injection | Accepted |
 | [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted |
 | [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
+| [0010](0010-compose-ui-outside-linuxx64-rule.md) | Compose UI stays outside the linuxX64 rule | Proposed |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.

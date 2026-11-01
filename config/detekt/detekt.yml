@@ -10,6 +10,11 @@ comments:
   UndocumentedPublicProperty:
     active: true
 
+naming:
+  # A @Composable that emits UI is named like a class, by Compose's convention.
+  FunctionNaming:
+    ignoreAnnotated: ["Composable"]
+
 style:
   # Matches .editorconfig, so detekt and ktlint agree.
   MaxLineLength:
