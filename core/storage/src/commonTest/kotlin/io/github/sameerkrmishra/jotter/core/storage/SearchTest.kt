@@ -11,7 +11,6 @@ import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.map
 import io.kotest.property.arbitrary.string
 import io.kotest.property.checkAll
-import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -106,7 +105,7 @@ class SearchTest {
 
     @Test
     fun noQueryThrowsAndEveryHighlightIsValid() =
-        runTest {
+        runDatabaseTest {
             withStore(clock) { store ->
                 store.notes.create(
                     "Caf\u00E9 \"NEAR\" (notes)",
@@ -267,7 +266,7 @@ class SearchTest {
 
     @Test
     fun theIndexStaysConsistentWithTheNotes() =
-        runTest {
+        runDatabaseTest {
             withStore(clock) { store ->
                 val notes = store.notes
                 checkAll(Arb.list(texts, 1..4)) { bodies ->
