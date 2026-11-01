@@ -40,6 +40,10 @@ public class AppViewModel(
     internal var editor by mutableStateOf<EditorViewModel?>(null)
         private set
 
+    /** How to exit, while the text could not be saved and the user has to decide. */
+    internal var pendingExit by mutableStateOf<(() -> Unit)?>(null)
+        private set
+
     /**
      * Reads the notes again. The flows of [NoteService] do not notice a write by another process,
      * such as the CLI, so the UI calls this when its window gains focus.
@@ -49,10 +53,15 @@ public class AppViewModel(
     }
 
     /**
-     * Saves the open editor's text. Call this before exiting, and exit only on true: on false the
-     * text is still in the editor, which shows what went wrong.
+     * Closes the app: saves the open editor's text and then calls [exit]. If the text cannot be
+     * saved, [JotterApp] asks the user whether to keep editing or to exit without it, so [exit] may
+     * run later or not at all.
      */
-    public suspend fun saveBeforeExit(): Boolean = editor?.save() ?: true
+    public fun requestExit(exit: () -> Unit) {
+        scope.launch {
+            if (editor?.saveAll() != false) exit() else pendingExit = exit
+        }
+    }
 
     /** Opens the editor on [note], or on a new note, which is created by its first save. */
     internal fun openEditor(note: Note?) {
@@ -62,8 +71,19 @@ public class AppViewModel(
     /** Saves and closes the editor. If saving fails, it stays open and keeps the text. */
     internal fun leaveEditor() {
         scope.launch {
-            if (editor?.save() == true) discardEditor()
+            if (editor?.saveAll() == true) discardEditor()
         }
+    }
+
+    /** Answers the question that [pendingExit] asks: the user stays with their text. */
+    internal fun keepEditing() {
+        pendingExit = null
+    }
+
+    /** Answers the question that [pendingExit] asks: the user gives up their text. */
+    internal fun exitWithoutSaving() {
+        pendingExit?.invoke()
+        pendingExit = null
     }
 
     /** Closes the editor without saving. */

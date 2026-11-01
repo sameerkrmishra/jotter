@@ -39,6 +39,9 @@ internal fun EditorScreen(
             Button(onClick = { scope.launch { editor.save() } }, enabled = editor.isDirty) {
                 Text("Save")
             }
+            if (editor.isSaving) {
+                Text("Saving…")
+            }
         }
         EditorMessages(editor, app)
         OutlinedTextField(

@@ -1,8 +1,11 @@
 package io.github.sameerkrmishra.jotter.app.sharedui
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
@@ -23,8 +26,24 @@ public fun JotterApp(viewModel: AppViewModel) {
             } else {
                 EditorScreen(editor, viewModel)
             }
+            if (viewModel.pendingExit != null) {
+                ConfirmExit(viewModel)
+            }
         }
     }
+}
+
+@Composable
+private fun ConfirmExit(app: AppViewModel) {
+    AlertDialog(
+        onDismissRequest = app::keepEditing,
+        title = { Text("Your text could not be saved") },
+        text = { Text("If you close now, what is in the editor is lost.") },
+        confirmButton = { TextButton(onClick = app::keepEditing) { Text("Keep editing") } },
+        dismissButton = {
+            TextButton(onClick = app::exitWithoutSaving) { Text("Close without saving") }
+        },
+    )
 }
 
 /** Calls [refresh] each time [focused] becomes true: another process may have changed the notes. */

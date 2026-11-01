@@ -13,6 +13,7 @@ import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import io.github.sameerkrmishra.jotter.core.storage.TagCount
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -33,6 +34,7 @@ internal const val BUSY_MESSAGE = "Another program is using the notes. Nothing c
 internal const val GONE_MESSAGE = "That note no longer exists."
 internal const val MOVED_MESSAGE = "That note is no longer in the trash, so it was not deleted."
 internal const val READ_FAILED_MESSAGE = "The notes could not be read."
+internal const val WRITE_FAILED_MESSAGE = "The note could not be changed."
 
 /**
  * What the note list shows.
@@ -144,12 +146,15 @@ internal class NotesViewModel(
             }.catch { message = READ_FAILED_MESSAGE }
     }
 
+    @Suppress("TooGenericExceptionCaught") // The driver's exception is not in NoteService's API.
     private fun write(block: () -> Any) {
         scope.launch {
             message =
                 try {
                     withContext(io) { block() }
                     null
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: StorageBusyException) {
                     BUSY_MESSAGE
                 } catch (_: NoSuchNoteException) {
@@ -159,6 +164,8 @@ internal class NotesViewModel(
                     // deleteForever, on a note that another process took out of the trash.
                     refreshes.update { it + 1 }
                     MOVED_MESSAGE
+                } catch (e: RuntimeException) {
+                    "$WRITE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
                 }
         }
     }

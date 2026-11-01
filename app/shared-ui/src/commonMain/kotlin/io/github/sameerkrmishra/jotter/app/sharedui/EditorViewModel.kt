@@ -10,6 +10,7 @@ import io.github.sameerkrmishra.jotter.core.storage.NoSuchNoteException
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.StaleEditException
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,6 +26,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+
+internal const val SAVE_FAILED_MESSAGE = "Your text is kept here but could not be saved."
 
 /** Why the draft cannot simply be saved. Either way the draft stays until the user decides. */
 internal enum class EditorProblem {
@@ -75,6 +78,10 @@ internal class EditorViewModel(
     var message by mutableStateOf<String?>(null)
         private set
 
+    /** Whether a save is running, which can take 5 s if another process holds the database. */
+    var isSaving by mutableStateOf(false)
+        private set
+
     /** Whether the draft holds text that is not stored. */
     val isDirty: Boolean
         get() =
@@ -112,6 +119,17 @@ internal class EditorViewModel(
             }
         }
 
+    /**
+     * Saves until nothing is left to save, for leaving the editor: text typed during a save would
+     * otherwise be dropped with the editor. Returns whether it is safe to leave, like [save].
+     */
+    suspend fun saveAll(): Boolean {
+        while (isDirty) {
+            if (!save()) return false
+        }
+        return true
+    }
+
     /** Stores the draft as a new note with the same tags, for when it cannot replace this one. */
     suspend fun saveAsNewNote(): Boolean =
         saving.withLock {
@@ -124,13 +142,15 @@ internal class EditorViewModel(
             }
         }
 
-    /** Drops the draft and loads the stored note. */
-    suspend fun reload(): Unit =
+    /** Drops the draft and loads the stored note. If that fails, the draft stays. */
+    suspend fun reload() {
         saving.withLock {
             val id = base?.id ?: return
-            val stored = withContext(io) { notes.get(id) }
-            if (stored == null) problem = EditorProblem.DELETED else load(stored)
+            guarded {
+                load(withContext(io) { notes.get(id) } ?: throw NoSuchNoteException(id))
+            }
         }
+    }
 
     /** Stops observing the note. */
     fun close() {
@@ -160,6 +180,7 @@ internal class EditorViewModel(
         title = note.title
         body = note.body
         problem = null
+        message = null
     }
 
     // Text typed during the save stays. Otherwise the draft takes the stored form of the text,
@@ -175,21 +196,29 @@ internal class EditorViewModel(
         noteIds.value = saved.id
     }
 
+    // Whatever goes wrong, the draft stays: this runs in scopes where an exception would end the
+    // app, and a disk that is full or read-only must not cost the user their text.
+    @Suppress("TooGenericExceptionCaught") // The driver's exception is not in NoteService's API.
     private suspend fun guarded(block: suspend () -> Unit): Boolean {
-        val failure =
-            try {
-                block()
-                null
-            } catch (_: StaleEditException) {
-                EditorProblem.STALE
-            } catch (_: NoSuchNoteException) {
-                EditorProblem.DELETED
-            } catch (_: StorageBusyException) {
-                message = BUSY_MESSAGE
-                return false
-            }
-        problem = failure
-        if (failure == null) message = null
-        return failure == null
+        isSaving = true
+        try {
+            block()
+            problem = null
+            message = null
+            return true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: StaleEditException) {
+            problem = EditorProblem.STALE
+        } catch (_: NoSuchNoteException) {
+            problem = EditorProblem.DELETED
+        } catch (_: StorageBusyException) {
+            message = BUSY_MESSAGE
+        } catch (e: RuntimeException) {
+            message = "$SAVE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
+        } finally {
+            isSaving = false
+        }
+        return false
     }
 }

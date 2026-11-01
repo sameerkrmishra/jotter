@@ -23,8 +23,8 @@ or holds it exclusively.
 - **One composition root** ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)):
   `main()`, in `Main.kt`, excluded with its lambdas from the coverage gate in
   `jotter.root`. `Database.kt` opens the store and is tested.
-- **Exit.** Closing the window saves the open editor first, and stays open if that
-  fails, so the message shows. Then `main()` finishes the view models' scope, closes
+- **Exit.** Closing the window saves the open editor first. If that fails, the user
+  chooses to keep editing or to close without saving. Then `main()` finishes the view models' scope, closes
   the store and calls `exitProcess`. Closing checkpoints the WAL, unless another
   process is reading or writing: then it gives up at once and the last connection
   to close does it (`core:sqlite`). So exit never waits for a lock. `exitProcess`

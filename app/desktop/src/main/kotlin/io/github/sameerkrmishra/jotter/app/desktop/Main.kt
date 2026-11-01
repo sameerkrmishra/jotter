@@ -11,7 +11,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.system.exitProcess
 
@@ -38,12 +37,8 @@ public fun main(args: Array<String>) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val app = AppViewModel(store.notes, scope, Dispatchers.IO)
     application(exitProcessOnExit = false) {
-        val close = {
-            scope.launch {
-                if (app.saveBeforeExit()) exitApplication()
-            }
-        }
-        Window(onCloseRequest = { close() }, title = "Jotter") {
+        val close = { app.requestExit(::exitApplication) }
+        Window(onCloseRequest = close, title = "Jotter") {
             if (AUTOCLOSE_ARG in args) {
                 LaunchedEffect(Unit) {
                     delay(AUTOCLOSE_DELAY_MS)

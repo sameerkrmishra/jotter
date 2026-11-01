@@ -3,6 +3,7 @@ package io.github.sameerkrmishra.jotter.app.sharedui
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -181,6 +182,19 @@ class NotesViewModelTest : ViewModelTest() {
             list.togglePinned(note)
             settle()
             assertNull(list.message)
+        }
+
+    @Test
+    fun aDiskErrorShowsAMessage() =
+        test {
+            val note = notes.create("note", "")
+            settle()
+            database.failWrites()
+
+            list.togglePinned(note)
+            settle()
+
+            assertContains(list.message.orEmpty(), WRITE_FAILED_MESSAGE)
         }
 
     @Test

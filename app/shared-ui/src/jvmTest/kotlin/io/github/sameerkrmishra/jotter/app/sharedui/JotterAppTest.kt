@@ -195,6 +195,58 @@ class JotterAppTest {
         }
 
     @Test
+    fun aDiskErrorKeepsTheTextOnScreenWithAMessage() =
+        app { notes ->
+            val note = notes.create("", "base")
+            awaitText("base")
+            openNote(note)
+            onNodeWithTag(BODY_FIELD).performTextInput("mine ")
+            database.failWrites()
+
+            click("Save")
+
+            awaitText(SAVE_FAILED_MESSAGE, substring = true)
+            fieldShows(BODY_FIELD, "mine base")
+        }
+
+    @Test
+    fun aFailedSaveOnCloseAsksBeforeClosing() {
+        var exits = 0
+        var viewModel: AppViewModel? = null
+        database.open(Dispatchers.IO).use { store ->
+            runComposeUiTest {
+                setContent {
+                    val scope = rememberCoroutineScope()
+                    JotterApp(
+                        remember {
+                            AppViewModel(store.notes, scope, Dispatchers.IO).also {
+                                viewModel = it
+                            }
+                        },
+                    )
+                }
+                val note = store.notes.create("", "base")
+                awaitText("base")
+                openNote(note)
+                onNodeWithTag(BODY_FIELD).performTextInput("mine ")
+                database.failWrites()
+
+                viewModel?.requestExit { exits++ }
+                awaitText("Your text could not be saved")
+                assertEquals(0, exits)
+                click("Keep editing")
+                awaitNoText("Your text could not be saved")
+                fieldShows(BODY_FIELD, "mine base")
+
+                viewModel?.requestExit { exits++ }
+                awaitText("Your text could not be saved")
+                click("Close without saving")
+                waitUntil(timeoutMillis = TIMEOUT_MS) { exits == 1 }
+            }
+        }
+    }
+
+    @Test
     fun aLockedDatabaseShowsAMessageInTheEditor() =
         app { notes ->
             val note = notes.create("", "base")
@@ -203,7 +255,8 @@ class JotterAppTest {
             onNodeWithTag(BODY_FIELD).performTextInput("mine ")
 
             database.whileLocked {
-                click("Save")
+                click("Back")
+                awaitText("Saving…")
                 awaitText(BUSY_MESSAGE)
             }
 

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
@@ -345,22 +346,157 @@ class EditorViewModelTest : ViewModelTest() {
     @Test
     fun aDraftIsSavedBeforeExit() =
         test {
-            assertTrue(app.saveBeforeExit(), "nothing is open")
+            var exits = 0
+            app.requestExit { exits++ }
+            settle()
+            assertEquals(1, exits, "nothing is open")
 
             val note = notes.create("", "base")
             open(note).body = "my text"
+            app.requestExit { exits++ }
+            settle()
 
-            assertTrue(app.saveBeforeExit())
+            assertEquals(2, exits)
             assertEquals("my text", notes.get(note.id)?.body)
         }
 
     @Test
-    fun aStaleDraftHoldsUpExit() =
+    fun aStaleDraftHoldsUpExitUntilTheUserDecides() =
         test {
             val note = notes.create("", "base")
-            open(note).body = "my text"
+            val editor = open(note)
+            editor.body = "my text"
             editFromOutside(note, "their text")
+            var exits = 0
+            app.requestExit { exits++ }
+            settle()
+            assertEquals(0, exits)
+            assertNotNull(app.pendingExit)
 
-            assertFalse(app.saveBeforeExit())
+            app.keepEditing()
+
+            assertNull(app.pendingExit)
+            assertEquals("my text", editor.body)
+            assertEquals(0, exits)
+
+            app.requestExit { exits++ }
+            settle()
+            app.exitWithoutSaving()
+
+            assertEquals(1, exits)
+            assertNull(app.pendingExit)
+        }
+
+    @Test
+    fun aDiskErrorKeepsTheDraftAndShowsTheReason() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editor.body = "my text"
+            database.failWrites()
+
+            assertFalse(editor.save())
+
+            assertEquals("my text", editor.body)
+            assertContains(editor.message.orEmpty(), SAVE_FAILED_MESSAGE)
+            assertContains(editor.message.orEmpty(), "disk full")
+
+            database.allowWrites()
+            assertTrue(editor.save())
+            assertNull(editor.message)
+        }
+
+    @Test
+    fun aDiskErrorOnBackStaysInTheEditor() =
+        test {
+            val editor = open(notes.create("", "base"))
+            editor.body = "my text"
+            database.failWrites()
+
+            app.leaveEditor()
+            settle()
+
+            assertEquals(editor, app.editor)
+            assertContains(editor.message.orEmpty(), "disk full")
+        }
+
+    @Test
+    fun aDiskErrorOnExitAsksTheUser() =
+        test {
+            open(notes.create("", "base")).body = "my text"
+            database.failWrites()
+            var exited = false
+
+            app.requestExit { exited = true }
+            settle()
+
+            assertFalse(exited)
+            assertNotNull(app.pendingExit)
+        }
+
+    @Test
+    fun aFailedReloadKeepsTheDraft() =
+        test {
+            val editor = open(notes.create("", "base"))
+            editor.body = "my text"
+            store.close()
+
+            editor.reload()
+
+            assertEquals("my text", editor.body)
+            assertContains(editor.message.orEmpty(), SAVE_FAILED_MESSAGE)
+        }
+
+    @Test
+    fun loadingTheStoredNoteClearsAnOldMessage() =
+        test {
+            val note = notes.create("", "base")
+            val editor = open(note)
+            editor.body = "my text"
+            database.whileLocked { assertFalse(editor.save()) }
+            assertEquals(BUSY_MESSAGE, editor.message)
+
+            editor.reload()
+
+            assertNull(editor.message)
+        }
+
+    private fun Fixture.slowApp() = AppViewModel(notes, scope, StandardTestDispatcher(testScheduler))
+
+    @Test
+    fun textTypedDuringTheSaveOnBackIsSavedToo() =
+        test {
+            val note = notes.create("", "base")
+            val slow = slowApp()
+            slow.openEditor(note)
+            val editor = assertNotNull(slow.editor)
+            editor.body = "first"
+
+            slow.leaveEditor()
+            assertTrue(editor.isSaving, "the screen can show that it is saving")
+            editor.body = "first and more"
+            settle()
+
+            assertFalse(editor.isSaving)
+            assertNull(slow.editor)
+            assertEquals("first and more", notes.get(note.id)?.body)
+        }
+
+    @Test
+    fun textTypedDuringTheSaveOnCloseIsSavedToo() =
+        test {
+            val note = notes.create("", "base")
+            val slow = slowApp()
+            slow.openEditor(note)
+            val editor = assertNotNull(slow.editor)
+            editor.body = "first"
+            var exited = false
+
+            slow.requestExit { exited = true }
+            editor.body = "first and more"
+            settle()
+
+            assertTrue(exited)
+            assertEquals("first and more", notes.get(note.id)?.body)
         }
 }

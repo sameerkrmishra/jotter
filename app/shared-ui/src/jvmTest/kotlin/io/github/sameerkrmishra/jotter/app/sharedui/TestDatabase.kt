@@ -34,6 +34,21 @@ class TestDatabase {
             }
         }
 
+    /** Makes every later write fail with a real SQLite error that is not about a lock. */
+    fun failWrites() {
+        BundledSQLiteDriver().open(file).use { connection ->
+            connection.execSQL(
+                "CREATE TRIGGER fail BEFORE INSERT ON revision " +
+                    "BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+            )
+        }
+    }
+
+    /** Lets writes work again after [failWrites]. */
+    fun allowWrites() {
+        BundledSQLiteDriver().open(file).use { it.execSQL("DROP TRIGGER fail") }
+    }
+
     fun delete() {
         directory.deleteRecursively()
     }
