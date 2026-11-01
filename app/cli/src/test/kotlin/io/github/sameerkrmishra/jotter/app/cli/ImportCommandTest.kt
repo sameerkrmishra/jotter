@@ -6,6 +6,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import java.io.RandomAccessFile
 import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.io.path.createDirectories
@@ -214,6 +215,20 @@ class ImportCommandTest {
     }
 
     @Test
+    fun aHugeFileIsAFailureAndTheRestIsImported() {
+        // Sparse, so it takes no disk space, and past what a String can hold.
+        RandomAccessFile(keep.resolve("big.json").toFile(), "rw").use { it.setLength(HUGE_FILE) }
+        writeNote("c.json", keepNote(1_000_000))
+
+        val result = importKeep()
+
+        assertEquals(1, result.statusCode)
+        assertEquals(summary(imported = 1, failures = 1), result.stdout)
+        val expected = "failure\tbig.json\tREAD_ERROR\tLarger than 64 MiB\n"
+        assertTrue(expected in result.stderr, result.stderr)
+    }
+
+    @Test
     fun aFileThatIsNotJsonIsRefused() {
         val file = keep.resolve("a.html").apply { writeText("<html>") }
 
@@ -245,5 +260,10 @@ class ImportCommandTest {
         second.writeText("after")
 
         assertEquals("after", documents.next().json)
+    }
+
+    private companion object {
+        /** 3 GiB. */
+        const val HUGE_FILE = 3L * 1024 * 1024 * 1024
     }
 }

@@ -36,7 +36,8 @@ Each `.json` directly in the directory is read in turn, sorted by name, so only
 one is in memory at a time and a repeated run fails the same one of two
 duplicates. Everything else there, such as Keep's `.html`, attachments and
 subdirectories, is left alone and counted as `ignored`. A bad file does not stop
-the rest. A file must be UTF-8. What maps to what and what can go wrong is in
+the rest. A file must be UTF-8 and at most 64 MiB; otherwise it is a `READ_ERROR`
+failure. What maps to what and what can go wrong is in
 [`interop:keep-import`](../../interop/keep-import/README.md).
 
 Importing again is always safe: a note that is already here, even one deleted

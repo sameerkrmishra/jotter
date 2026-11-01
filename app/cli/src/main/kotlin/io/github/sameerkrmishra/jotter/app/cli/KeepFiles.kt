@@ -16,6 +16,10 @@ import kotlin.io.path.readAttributes
 
 private const val JSON_EXTENSION = ".json"
 
+/** Far above any Keep note, whose text is limited to some 20,000 characters. */
+private const val MAX_FILE_MIB = 64
+private const val MAX_FILE_BYTES = MAX_FILE_MIB * 1024L * 1024L
+
 /**
  * The files of a Takeout that `jotter import` will read.
  *
@@ -85,17 +89,28 @@ internal class KeepFileReader {
      * at a time, and no failure to read one reaches the importer, which would lose its report.
      */
     fun documents(files: List<Path>): Sequence<KeepDocument> =
-        files.asSequence().mapNotNull { file ->
-            val source = file.name
-            try {
-                // Strict about UTF-8, unlike readText, which would change the note without a word.
-                KeepDocument(source, Files.readString(file))
-            } catch (_: CharacterCodingException) {
-                unreadable += UnreadableFile(source, "Not valid UTF-8")
-                null
-            } catch (_: IOException) {
-                unreadable += UnreadableFile(source, "The file could not be read")
-                null
+        files.asSequence().mapNotNull(::read)
+
+    private fun read(file: Path): KeepDocument? =
+        try {
+            if (Files.size(file) > MAX_FILE_BYTES) {
+                // readString would end the run with an OutOfMemoryError, on every repeat too.
+                fail(file, "Larger than $MAX_FILE_MIB MiB")
+            } else {
+                // Strict about UTF-8, unlike readText, which would change a note without a word.
+                KeepDocument(file.name, Files.readString(file))
             }
+        } catch (_: CharacterCodingException) {
+            fail(file, "Not valid UTF-8")
+        } catch (_: IOException) {
+            fail(file, "The file could not be read")
         }
+
+    private fun fail(
+        file: Path,
+        detail: String,
+    ): KeepDocument? {
+        unreadable += UnreadableFile(file.name, detail)
+        return null
+    }
 }
