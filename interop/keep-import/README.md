@@ -25,7 +25,7 @@ kotlinx.serialization and okio. Both libraries publish linuxX64 variants
 |---|---|
 | `KeepImporter` | `import(documents)`: imports a sequence of documents and returns a report |
 | `KeepDocument` | One file: a name for the report, and its text |
-| `KeepImportReport` | `imported`, `skipped`, `warnings` and `failures` |
+| `KeepImportReport` | `imported`, `skipped`, `warnings`, `failures`, and whether the run `stopped` early |
 | `KeepNoteRef` | A document's name and its note's id |
 | `KeepImportWarning` | Something left out of an imported note |
 | `KeepImportFailure` | A document that was not imported, and why |
@@ -68,10 +68,13 @@ new one.
 | A label `TagName` rejects | Imported without that tag, warning `INVALID_TAG` |
 | An attachment | Imported without it, warning `ATTACHMENT_DROPPED` |
 | The note has a history here, even a tombstone | Skipped, with no warnings: nothing was imported |
+| The database cannot store the note, such as tens of thousands of labels | Failure `STORAGE_ERROR`; its transaction rolls back and the run goes on |
+| The database stays locked | Failure `STORAGE_BUSY`, and the run stops |
 
-Each note is its own transaction. Only a database that stays locked stops a
-run, with `StorageBusyException`, since every later note would wait for the
-same lock; running it again skips what is already in.
+Each note is its own transaction. Only a database that stays locked ends a run
+early, since every later note would wait for the same lock. The report then has
+`stopped` set and lists everything up to that point, which matters because a
+later run skips those notes and does not report their warnings again.
 
 A failed `DUPLICATE_ID` depends on order: pass documents in a stable order so
 that a repeated run fails the same one. Two Keep notes created in the same

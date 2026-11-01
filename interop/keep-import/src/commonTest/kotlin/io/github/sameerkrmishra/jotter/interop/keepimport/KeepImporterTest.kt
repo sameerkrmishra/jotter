@@ -3,14 +3,18 @@ package io.github.sameerkrmishra.jotter.interop.keepimport
 import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.storage.ImportResult
+import io.github.sameerkrmishra.jotter.core.storage.ImportedNote
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import okio.FileSystem
 import okio.Path
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -351,6 +355,64 @@ class KeepImporterTest {
                 ).import(documents(takeout(fields = """"title":"a\ud83db"""")))
 
             assertEquals("a�b", store.notes.get(report.imported.single().id)?.title)
+        }
+
+    @Test
+    fun aNoteTheDatabaseCannotStoreFailsAloneAndLeavesNothingBehind() =
+        withStore { store ->
+            val labels = List(40_000) { index -> """{"name":"tag$index"}""" }
+            val tooMany = takeout(1_000_000, """"labels":[${labels.joinToString(",")}]""")
+
+            val report = KeepImporter(store.notes).import(documents(tooMany, takeout()))
+
+            assertEquals("note1.json", report.imported.single().source)
+            val failure = report.failures.single()
+            assertEquals("note0.json", failure.source)
+            assertEquals(KeepImportFailure.Kind.STORAGE_ERROR, failure.kind)
+            assertTrue(failure.detail.isNotEmpty())
+            assertFalse(report.stopped)
+            assertEquals(emptyList(), store.notes.history(keepNoteId(1_000_000)))
+        }
+
+    @Test
+    fun aLockedDatabaseStopsTheRunAndKeepsTheReportSoFar() {
+        val stored = mutableListOf<ImportedNote>()
+        val importer =
+            KeepImporter { note ->
+                if (stored.size == 1) throw StorageBusyException(IllegalStateException("locked"))
+                stored += note
+                ImportResult.IMPORTED
+            }
+        val attachment = """"attachments":[{"filePath":"a.png"}]"""
+        var documentsRead = 0
+        val documents =
+            documents(
+                takeout(1_000_000, attachment),
+                "not json",
+                takeout(2_000_000),
+                takeout(3_000_000),
+            ).onEach { documentsRead++ }
+
+        val report = importer.import(documents)
+
+        assertTrue(report.stopped)
+        assertEquals("note0.json", report.imported.single().source)
+        assertEquals("a.png", report.warnings.first().detail)
+        assertEquals(
+            listOf(
+                KeepImportFailure.Kind.MALFORMED_JSON,
+                KeepImportFailure.Kind.STORAGE_BUSY,
+            ),
+            report.failures.map(KeepImportFailure::kind),
+        )
+        assertEquals("note2.json", report.failures.last().source)
+        assertEquals(3, documentsRead)
+    }
+
+    @Test
+    fun aRunThatFinishesIsNotStopped() =
+        withStore { store ->
+            assertFalse(KeepImporter(store.notes).import(documents(takeout())).stopped)
         }
 
     @Test

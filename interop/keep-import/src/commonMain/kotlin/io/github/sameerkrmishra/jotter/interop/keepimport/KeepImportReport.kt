@@ -3,20 +3,23 @@ package io.github.sameerkrmishra.jotter.interop.keepimport
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 
 /**
- * What a [KeepImporter.import] run did. Every document ends up in exactly one of [imported],
- * [skipped] and [failures].
+ * What a [KeepImporter.import] run did. Every document it reached ends up in exactly one of
+ * [imported], [skipped] and [failures].
  *
  * @property imported The notes that were new and were stored.
  * @property skipped The notes that have a history here, possibly ending in deletion forever, and
  *   were left as they are. This includes newer Keep edits of a note imported before (ADR-0009).
  * @property warnings What was left out of the imported notes. Skipped and failed notes have none.
  * @property failures The documents that were not imported, and why.
+ * @property stopped Whether the database stayed locked, so the run ended at the last of [failures]
+ *   and the documents after it were not looked at. Running the import again finishes the job.
  */
 public data class KeepImportReport(
     val imported: List<KeepNoteRef>,
     val skipped: List<KeepNoteRef>,
     val warnings: List<KeepImportWarning>,
     val failures: List<KeepImportFailure>,
+    val stopped: Boolean,
 )
 
 /**
@@ -60,8 +63,8 @@ public data class KeepImportWarning(
  *
  * @property source The [KeepDocument.name].
  * @property kind What happened.
- * @property detail The parser's message, or for a duplicate the name of the first document with
- *   the id; empty for a missing time.
+ * @property detail The parser's or database's message, or for a duplicate the name of the first
+ *   document with the id; empty for a missing time.
  */
 public data class KeepImportFailure(
     val source: String,
@@ -81,5 +84,11 @@ public data class KeepImportFailure(
 
         /** An earlier document of this import has the same id, so the same created time. */
         DUPLICATE_ID,
+
+        /** Another process kept the database locked. This ends the run. */
+        STORAGE_BUSY,
+
+        /** The database could not store the note, for example because it has too many tags. */
+        STORAGE_ERROR,
     }
 }
