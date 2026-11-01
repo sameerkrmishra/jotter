@@ -7,6 +7,7 @@ import io.github.sameerkrmishra.jotter.core.sqlite.openSqliteDriver
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import okio.ByteString
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
@@ -31,6 +32,9 @@ internal class TempDatabaseDir : AutoCloseable {
     /** Whether the database file with this [suffix] (`""`, `"-wal"`, `"-shm"`) exists. */
     fun exists(suffix: String = ""): Boolean = FileSystem.SYSTEM.exists("$path$suffix".toPath())
 
+    /** The content of the database file. */
+    fun bytes(): ByteString = FileSystem.SYSTEM.read(path.toPath()) { readByteString() }
+
     override fun close() = FileSystem.SYSTEM.deleteRecursively(dir)
 }
 
@@ -40,7 +44,7 @@ internal inline fun <T> withTempDir(block: (TempDatabaseDir) -> T): T = TempData
 /** Runs [block] with a new, empty database and its driver, closing it afterwards. */
 internal inline fun <T> withDatabase(block: (JotterDatabase, SqlDriver) -> T): T =
     withTempDir { dir ->
-        openSqliteDriver(dir.path, JotterDatabase.Schema).use { driver ->
+        openSqliteDriver(dir.path, JotterDatabase.Schema, JOTTER_APPLICATION_ID).use { driver ->
             block(JotterDatabase(driver), driver)
         }
     }

@@ -22,8 +22,8 @@ class TwoConnectionTest {
     @Test
     fun secondWriterWaitsForTheFirstInsteadOfFailing() =
         withTempDir { dir ->
-            val first = NotesDatabase(openSqliteDriver(dir.path, NotesSchema))
-            val second = NotesDatabase(openSqliteDriver(dir.path, NotesSchema))
+            val first = NotesDatabase(openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID))
+            val second = NotesDatabase(openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID))
             try {
                 runBlocking {
                     val locked = CompletableDeferred<Unit>()

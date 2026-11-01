@@ -13,11 +13,15 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import okio.ByteString
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlin.random.Random
 import kotlin.time.Duration
+
+/** The application id of the tests' databases. */
+internal const val TEST_APPLICATION_ID = 0x54455354
 
 /** A fresh temporary directory for one test's database files, deleted again by [close]. */
 internal class TempDatabaseDir : AutoCloseable {
@@ -34,6 +38,9 @@ internal class TempDatabaseDir : AutoCloseable {
     /** Whether the database file with this [suffix] (`""`, `"-wal"`, `"-shm"`) exists. */
     fun exists(suffix: String = ""): Boolean = FileSystem.SYSTEM.exists("$path$suffix".toPath())
 
+    /** The content of the database file. */
+    fun bytes(): ByteString = FileSystem.SYSTEM.read(path.toPath()) { readByteString() }
+
     override fun close() = FileSystem.SYSTEM.deleteRecursively(dir)
 }
 
@@ -43,7 +50,9 @@ internal fun <T> withTempDir(block: (TempDatabaseDir) -> T): T = TempDatabaseDir
 /** Runs [block] with a driver for a new database with [NotesSchema], closing it afterwards. */
 internal fun <T> withNotesDatabase(block: (NotesDatabase) -> T): T =
     withTempDir { dir ->
-        openSqliteDriver(dir.path, NotesSchema).use { driver -> block(NotesDatabase(driver)) }
+        openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID).use { driver ->
+            block(NotesDatabase(driver))
+        }
     }
 
 /**

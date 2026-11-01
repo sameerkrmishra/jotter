@@ -54,10 +54,38 @@ class NoteStoreTest {
         }
 
     @Test
-    fun aDatabaseThatIsNotJottersIsRejectedAndClosed() =
+    fun aFileWithAnotherApplicationIdIsRejectedAndLeftUntouched() =
         withTempDir { dir ->
-            // Schema version 1, as Jotter's, but none of its tables.
-            openSqliteDriver(dir.path, EmptySchemaVersion1).use { }
+            openSqliteDriver(dir.path, EmptySchemaVersion1, applicationId = 1).use { }
+            val before = dir.bytes()
+
+            val error = assertFailsWith<IllegalStateException> { openStore(dir.path) }
+
+            assertContains(error.message.orEmpty(), "application id is 1,")
+            assertEquals(before, dir.bytes())
+        }
+
+    @Test
+    fun aSqliteFileWithTablesButNoVersionIsRejectedAndLeftUntouched() =
+        withTempDir { dir ->
+            // A mistyped path: a file of some other program, which uses neither pragma.
+            openSqliteDriver(dir.path, EmptySchemaVersion1, applicationId = 1).use { other ->
+                other.execute(null, "CREATE TABLE theirs(id INTEGER PRIMARY KEY)", 0)
+                other.execute(null, "PRAGMA application_id = 0", 0)
+                other.execute(null, "PRAGMA user_version = 0", 0)
+            }
+            val before = dir.bytes()
+
+            assertFailsWith<IllegalStateException> { openStore(dir.path) }
+
+            assertEquals(before, dir.bytes())
+            assertFalse(dir.exists("-wal"))
+        }
+
+    @Test
+    fun aDatabaseWithJottersIdButNoneOfItsTablesFailsAndIsClosed() =
+        withTempDir { dir ->
+            openSqliteDriver(dir.path, EmptySchemaVersion1, JOTTER_APPLICATION_ID).use { }
 
             val error = assertFailsWith<Exception> { openStore(dir.path) }
             assertContains(error.message.orEmpty(), "no such table: device")

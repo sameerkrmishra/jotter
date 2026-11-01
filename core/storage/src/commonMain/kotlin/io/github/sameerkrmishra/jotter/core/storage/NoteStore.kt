@@ -8,6 +8,12 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
 
 /**
+ * The `PRAGMA application_id` of a Jotter database, the letters "JOTR", so that opening any other
+ * SQLite file by mistake is refused instead of adding Jotter's tables to it.
+ */
+internal const val JOTTER_APPLICATION_ID = 0x4A4F5452
+
+/**
  * One device's local database of notes: a SQLite file that the desktop app and the CLI may have
  * open at the same time. The composition root opens it once, hands [notes] to whoever needs it,
  * and closes it on exit.
@@ -35,16 +41,16 @@ public class NoteStore private constructor(
          * Opens the database file at [path], or creates it with a new [deviceId] named
          * [deviceName] if it does not exist. Blocking: call it off the UI thread.
          *
-         * If the file cannot be opened, or is a SQLite database that is not Jotter's, this throws
-         * the SQLite driver's exception (androidx `SQLiteException`, which is not part of this
-         * module's API) and leaves nothing open.
+         * If the file cannot be opened, this throws the SQLite driver's exception (androidx
+         * `SQLiteException`, which is not part of this module's API) and leaves nothing open.
          *
          * @param path The database file, on a local file system (see core/sqlite).
          * @param deviceName A name for this device, such as "Laptop". Used only when the database
          *   is created.
          * @param queryContext Where observation flows run their queries, e.g. an IO dispatcher.
          * @param clock The wall clock that the hybrid logical clock follows.
-         * @throws IllegalStateException if the file was written by a newer version of Jotter.
+         * @throws IllegalStateException if the file was written by a newer version of Jotter, or
+         *   is a SQLite database that is not Jotter's, which is left untouched.
          */
         public fun open(
             path: String,
@@ -52,7 +58,7 @@ public class NoteStore private constructor(
             queryContext: CoroutineContext,
             clock: Clock = Clock.System,
         ): NoteStore {
-            val driver = openSqliteDriver(path, JotterDatabase.Schema)
+            val driver = openSqliteDriver(path, JotterDatabase.Schema, JOTTER_APPLICATION_ID)
             var opened = false
             try {
                 val database = JotterDatabase(driver)

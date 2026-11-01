@@ -72,6 +72,8 @@ Encoding:
   reference. `revision_by_note` indexes
   `(note_id, hlc_physical, hlc_counter, device_id, id)`, which serves both
   `history` in `Stamp` order and the `createdAt` minimum.
+- `PRAGMA application_id` is `JOTTER_APPLICATION_ID` ("JOTR"), so a path that
+  points at another SQLite file is refused and the file stays as it was.
 - `note.fts_rowid` exists only because an FTS5 index with external content
   needs an integer key.
 
