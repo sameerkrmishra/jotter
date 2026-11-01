@@ -419,4 +419,33 @@ class EditorLeavingTest : EditorTest() {
             assertEquals(NoteState.ACTIVE, notes.get(id)?.state)
             editor.close()
         }
+
+    @Test
+    fun aSecondBackDoesNotCloseAnEditorOpenedSince() =
+        test {
+            val note = notes.create("", "base")
+            val io = HeldDispatcher()
+            val held = AppViewModel(notes, scope, io)
+            held.openEditor(note)
+            val first = assertNotNull(held.editor)
+            first.body = "changed"
+            first.tagInput = "work"
+
+            // The first Back saves. The tag change then keeps the second Back waiting for the lock.
+            held.leaveEditor()
+            scope.launch { first.addTag() }
+            held.leaveEditor()
+            testScheduler.runCurrent()
+            io.release()
+            testScheduler.runCurrent()
+            assertNull(held.editor, "the first Back is done")
+            held.openEditor(null)
+            val opened = held.editor
+            io.release()
+            testScheduler.runCurrent()
+
+            assertNotNull(opened)
+            assertEquals(opened, held.editor)
+            opened.close()
+        }
 }

@@ -63,7 +63,10 @@ Markdown preview comes later.
   snapshot, kept for good, which is why it is not more frequent: a 20 kB note saved
   at every 10 s pause adds about 7 MB an hour.
   A note that this editor created and the user then emptied goes to the trash on
-  Back or on closing. An older note that is emptied stays, empty. Back and closing save
+  Back or on closing. If the user types during that trash write, the note is
+  restored. If restoring fails, the note stays in the trash with its text
+  recoverable there, and the restore is not retried. An older note that is emptied
+  stays, empty. Back and closing save
   until the draft is clean, so that text typed during the save is not lost with the
   editor, and "Saving…" shows meanwhile, up to 5 s if the database is locked. If
   saving fails, Back stays in the editor with the message showing, and closing asks

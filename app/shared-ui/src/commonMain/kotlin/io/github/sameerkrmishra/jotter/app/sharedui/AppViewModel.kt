@@ -70,8 +70,10 @@ public class AppViewModel(
 
     /** Saves and closes the editor. If saving fails, it stays open and keeps the text. */
     internal fun leaveEditor() {
+        val leaving = editor
         scope.launch {
-            if (editor?.finish() == true) discardEditor()
+            // A second Back may have closed it already, and another editor may be open by now.
+            if (leaving?.finish() == true && editor === leaving) discardEditor()
         }
     }
 
