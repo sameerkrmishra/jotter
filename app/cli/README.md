@@ -1,0 +1,103 @@
+# app:cli
+
+The `jotter` command: add, list, show and search notes from a terminal or a
+script, in the same database as the desktop app. It is a
+[Clikt](https://ajalt.github.io/clikt/) application on the JVM. The notes
+themselves are `core:storage`'s job; this module only parses arguments and
+prints.
+
+```
+./gradlew :app:cli:installDist
+app/cli/build/install/jotter/bin/jotter add "buy milk"
+```
+
+`java` comes from `JAVA_HOME`, or else from `PATH`, and must be version 21 or
+newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `jotter add TEXT` | Adds a note and prints its id. `--title TITLE`, `--tag TAG` (repeatable). `-` as `TEXT` reads the note from stdin as UTF-8, without its trailing newlines |
+| `jotter list` | Lists the active notes, pinned first, then the most recently updated. `--archived` or `--trash` lists those instead (the last one given wins), `--tag TAG` filters by a tag |
+| `jotter show ID` | Prints one note in any state |
+| `jotter search QUERY` | Searches the active notes, at most the best 100. QUERY is plain words, see `core:storage` |
+| `jotter tags` | Lists the tags of the notes outside the trash |
+
+An `ID` is a whole id or a start of one that only one note, in any state, has.
+Letter case and dashes do not matter. A prefix reads every note, because
+`NoteService` has no lookup by prefix; a whole id reads just the one.
+
+`import` and `export` come with `interop/*`.
+
+## Output
+
+Output on stdout is meant for pipes and stays the same in every locale, time
+zone and terminal width. It is UTF-8, with no colours and no wrapping. Times are
+UTC, to the second (`2026-11-01T15:04:27Z`). Empty output is a success: `list`
+and `search` print nothing when nothing matches.
+
+| Command | One line per note or tag, or the whole output |
+|---|---|
+| `add` | `ID` |
+| `list` | `ID`, tab, `UPDATED`, tab, `pinned` or `-`, tab, tags joined by `,` or `-`, tab, summary |
+| `search` | `ID`, tab, summary, tab, snippet |
+| `tags` | `TAG`, tab, count |
+| `show` | The headers `id:`, `title:`, `tags:`, `state:` (`active`, `archived`, `trash`), `pinned:` (`yes`, `no`), `created:`, `updated:`, a blank line, and the body as it is |
+
+The summary is the title, or else the first line of the body with text in it.
+Control characters in a summary, snippet or `show`'s title become spaces, so
+there is always exactly one line per note and tabs only between columns. A tag
+may itself contain a comma.
+
+## Errors
+
+A failure prints one line starting with `jotter: ` on stderr, nothing on stdout,
+no stack trace, and exits with status 1: a missing note or an ambiguous id, an
+empty note, a file that is not a Jotter database, a database from a newer version
+of Jotter, a directory that cannot be created, or a database that stayed locked.
+Clikt's usage errors also exit with status 1, and print the usage line first.
+
+A locked database means another process kept it for the whole 5 s busy timeout.
+Nothing was written, and the command may be tried again. `jotter add` then takes
+about 10 s to fail: closing the store waits for the lock once more for its WAL
+checkpoint (`core:sqlite`). The same checkpoint can hold up a command that worked
+by up to 5 s, while another process is reading or writing.
+
+## Database location
+
+The first of these that is set is used. The directory is created if needed.
+
+1. `--db FILE`, before the command: `jotter --db notes.db list`
+2. the environment variable `JOTTER_DB`
+3. `$XDG_DATA_HOME/jotter/jotter.db`, if `XDG_DATA_HOME` is an absolute path
+4. `~/.local/share/jotter/jotter.db`
+
+An empty value counts as not set. The file must be on a local file system
+(`core:sqlite`), and any command creates it if it is missing.
+
+## Design
+
+- **One composition root** ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)):
+  `JotterCommand` builds the subcommands and finds the database. `withNotes`
+  opens it for one command and closes it, and is the one place that turns
+  failures into messages. `Main.kt` holds only `main()`, excluded from the
+  coverage gate in `jotter.root`.
+- **`clikt-core`, not `clikt`.** The usual `CliktCommand` prints through the Mordant
+  terminal library, which expands tabs and so would break the columns above, and
+  brings JNA onto the classpath. `CoreCliktCommand` prints plain text. But by
+  default it reads no environment variables, prints errors on stdout and exits
+  with status 0 after a failure, so `main()` sets all three. Clikt's test support
+  replaces those same settings and hides any mistake in them, so `MainTest` checks
+  them in a real process, with a temporary `HOME`.
+- **Tests.** `CliTest` runs the commands through Clikt's `test` against a
+  temporary database, with the real `JotterCommand`. That helper needs the `clikt`
+  artifact, which is why it is a test dependency, and it records through Mordant,
+  so `CliTest` captures the text itself. The tests for a locked database wait out
+  the real timeouts, 15 s together.
+- **Locked while opening.** `NoteStore.open` lets SQLite's own exception through
+  (it has no `StorageBusyException`), so this module depends on `core:sqlite` for
+  `isSqliteBusy` and on `androidx.sqlite` for the exception's type.
+- **Arguments outside UTF-8 locales.** The JVM decodes arguments with the locale's
+  charset, which the start script cannot change, so under `LANG=C` non-ASCII text
+  in an argument is lost. Stdin and output are always UTF-8.

@@ -21,6 +21,7 @@ kover {
                 classes("*.db.*")
                 // Thin platform entry points (Activity, `main()`) are covered by manual and UI
                 // testing instead. Name them here as they are added, e.g. "*.MainKt".
+                classes("*.app.cli.MainKt")
             }
         }
         verify {

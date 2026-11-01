@@ -5,6 +5,7 @@ agp = "9.4.1"
 androidx-sqlite = "2.7.1"
 androidx-test-runner = "1.7.0"
 atomicfu = "0.33.0"
+clikt = "5.1.0"
 kotlin = "2.4.21"
 # detekt 1.23.x embeds Kotlin 2.0.21 and cannot analyse Kotlin 2.1+ sources. 2.0.0-alpha.6
 # embeds Kotlin 2.4.10, the only detekt release that matches our compiler.
@@ -29,6 +30,7 @@ ktlint-gradlePlugin = { module = "org.jlleitschuh.gradle:ktlint-gradle", version
 androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidx-sqlite" }
 androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "androidx-sqlite" }
 atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
+clikt-core = { module = "com.github.ajalt.clikt:clikt-core", version.ref = "clikt" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 sqldelight-coroutines-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
 # The SQL dialect of core/storage's .sq files. Both bundled SQLite builds are 3.50 (ADR-0002).
@@ -37,6 +39,8 @@ sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sq
 
 # Test libraries.
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test-runner" }
+# Clikt's test support. It is not in clikt-core, and it brings the Mordant terminal library.
+clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
 # runTest, to call Kotest's suspending property checks from kotlin.test.
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
