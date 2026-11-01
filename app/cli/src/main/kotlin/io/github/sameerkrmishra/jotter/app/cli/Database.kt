@@ -11,31 +11,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
 
-/** The environment variable that names the database file. */
-internal const val DATABASE_ENVVAR = "JOTTER_DB"
-
 /** Used only when the database is created. The file may be shared with the desktop app. */
 private const val DEVICE_NAME = "Linux"
-
-/**
- * Returns the database file: [option] (`--db` or `JOTTER_DB`), then `jotter/jotter.db` in
- * `$XDG_DATA_HOME`, then in `~/.local/share`. The XDG Base Directory specification says to ignore
- * an empty or relative `XDG_DATA_HOME`. An empty [option] counts as not given.
- *
- * @param readEnvvar Reads an environment variable.
- * @param userHome The home directory if `HOME` is not set.
- */
-internal fun databasePath(
-    option: String?,
-    readEnvvar: (String) -> String?,
-    userHome: String,
-): Path {
-    if (!option.isNullOrEmpty()) return Path.of(option)
-    val dataHome =
-        readEnvvar("XDG_DATA_HOME")?.let(Path::of)?.takeIf(Path::isAbsolute)
-            ?: Path.of(readEnvvar("HOME") ?: userHome, ".local", "share")
-    return dataHome.resolve("jotter").resolve("jotter.db")
-}
 
 /** The database file, which is known once the root command's options are parsed. */
 internal class DatabaseLocation {

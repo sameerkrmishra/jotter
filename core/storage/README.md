@@ -25,6 +25,7 @@ of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
 
 | Type | What it is |
 |---|---|
+| `linuxDatabasePath`, `DATABASE_ENVVAR` | Where the Linux apps keep the database, so the CLI and the desktop app agree. Plain strings, as this module has no file API |
 | `NoteStore` | Opens or creates the database file and this device's id. The composition root owns it and closes it |
 | `NoteService` | `create`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows |
 | `NoteFilter` | A state (active, archived or trash) and optionally a tag |

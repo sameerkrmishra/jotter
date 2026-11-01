@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.core.parse
 import com.github.ajalt.clikt.testing.test
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
+import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import java.nio.file.Files

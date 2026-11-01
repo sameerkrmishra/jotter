@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.app.cli
 
+import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import java.util.concurrent.TimeUnit
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path

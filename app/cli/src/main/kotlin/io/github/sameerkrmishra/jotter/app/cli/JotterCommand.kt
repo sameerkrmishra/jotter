@@ -4,7 +4,10 @@ import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.CoreCliktCommand
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.options.option
+import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
+import io.github.sameerkrmishra.jotter.core.storage.linuxDatabasePath
 import java.io.InputStream
+import java.nio.file.Path
 
 /**
  * The root command and the CLI's composition root (ADR-0005): it builds the subcommands and finds
@@ -41,6 +44,12 @@ internal class JotterCommand(
 
     override fun run() {
         location.path =
-            databasePath(databaseOption, currentContext.readEnvvar, System.getProperty("user.home"))
+            Path.of(
+                linuxDatabasePath(
+                    databaseOption,
+                    currentContext.readEnvvar,
+                    System.getProperty("user.home"),
+                ),
+            )
     }
 }

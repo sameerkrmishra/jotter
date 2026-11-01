@@ -74,7 +74,8 @@ The first of these that is set is used. The directory is created if needed.
 4. `~/.local/share/jotter/jotter.db`
 
 An empty value counts as not set. The file must be on a local file system
-(`core:sqlite`), and any command creates it if it is missing.
+(`core:sqlite`), and any command creates it if it is missing. The desktop app uses
+the same file: steps 2 to 4 are `linuxDatabasePath` in `core:storage`.
 
 ## Design
 
