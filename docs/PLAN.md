@@ -246,6 +246,11 @@ resolved. This is deterministic for a given set of heads but not independent
 of arrival order. Devices converge because they keep merging whatever heads are
 present until one remains. See ADR-0003.
 
+**Touching changes:** edits of adjacent lines merge, unlike in git and diff3,
+and identical insertions count as one. The merge rules and the diff's search
+limit are part of the sync format, because merged text is hashed. See
+[ADR-0011](adr/0011-touching-changes-and-merge-format.md).
+
 ---
 
 ## 6. Sync protocol
@@ -364,7 +369,9 @@ codec. Documented as ADR-0007 in M6.
   native-compatible shared modules (M1); 0007 encryption plan and
   0008 multi-user plan (both deferred features, documented in M6); 0009
   [import keeps source timestamps](adr/0009-import-preserves-source-timestamps.md)
-  (M2).
+  (M2); 0011
+  [touching changes and the merge format](adr/0011-touching-changes-and-merge-format.md)
+  (M3).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.
