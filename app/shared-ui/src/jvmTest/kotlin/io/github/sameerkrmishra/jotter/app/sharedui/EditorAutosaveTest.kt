@@ -134,4 +134,31 @@ class EditorAutosaveTest : EditorTest() {
             assertEquals(revisions, notes.history(note.id).size)
             assertEquals("mine and more", editor.body)
         }
+
+    @Test
+    fun textTypedDuringASlowAutosaveIsSavedByTheNextOne() =
+        test {
+            val note = notes.create("", "base")
+            val io = HeldDispatcher()
+            val editor = EditorViewModel(notes, scope, io, MutableStateFlow(0), note)
+
+            editor.body = "first"
+            testScheduler.advanceTimeBy(AUTOSAVE_IDLE_MS + 1)
+            assertTrue(editor.isSaving)
+            editor.body = "first and more"
+            io.release()
+            testScheduler.runCurrent()
+
+            assertEquals("first", notes.get(note.id)?.body)
+            assertEquals("first and more", editor.body)
+
+            testScheduler.advanceTimeBy(AUTOSAVE_IDLE_MS + 1)
+            io.release()
+            testScheduler.runCurrent()
+
+            assertEquals("first and more", notes.get(note.id)?.body)
+            assertFalse(editor.isDirty)
+            assertNull(editor.problem)
+            editor.close()
+        }
 }
