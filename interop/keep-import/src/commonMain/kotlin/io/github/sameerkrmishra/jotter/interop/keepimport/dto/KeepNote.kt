@@ -15,6 +15,7 @@ internal data class KeepNote(
     val labels: List<KeepLabel> = emptyList(),
     val attachments: List<KeepAttachment> = emptyList(),
     val annotations: List<KeepAnnotation> = emptyList(),
+    val sharees: List<KeepSharee> = emptyList(),
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
     val isTrashed: Boolean = false,
@@ -42,6 +43,13 @@ internal data class KeepAnnotation(
     val title: String = "",
     val url: String = "",
 )
+
+/**
+ * A person a Keep note is shared with, the owner included. No field is read, so no email address
+ * enters the import or its report: the importer only counts these.
+ */
+@Serializable
+internal class KeepSharee
 
 /** A file attached to a Keep note. Only its name is read, to report that it was dropped. */
 @Serializable

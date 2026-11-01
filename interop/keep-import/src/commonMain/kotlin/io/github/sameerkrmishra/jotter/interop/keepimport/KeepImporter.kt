@@ -109,7 +109,7 @@ public class KeepImporter internal constructor(
                 keepJson.decodeFromString<KeepNote>(document.json)
             } catch (e: IllegalArgumentException) {
                 // SerializationException is a subclass.
-                fail(document.name, KeepImportFailure.Kind.MALFORMED_JSON, e.message.orEmpty())
+                fail(document.name, KeepImportFailure.Kind.MALFORMED_JSON, parserMessage(e))
                 null
             }
 
@@ -165,11 +165,18 @@ public class KeepImporter internal constructor(
             note.attachments.forEach { attachment ->
                 warn(source, KeepImportWarning.Kind.ATTACHMENT_DROPPED, attachment.filePath)
             }
+            if (note.sharees.isNotEmpty()) {
+                warn(source, KeepImportWarning.Kind.SHARING_DROPPED, note.sharees.size.toString())
+            }
             invalidLabels.forEach { label ->
                 warn(source, KeepImportWarning.Kind.INVALID_TAG, label)
             }
             if (editedTimeIsMissing) warn(source, KeepImportWarning.Kind.MISSING_EDITED_TIME, "")
         }
+
+        /** The parser's message, without the excerpt of the file, which may hold personal data. */
+        private fun parserMessage(error: IllegalArgumentException): String =
+            error.message.orEmpty().substringBefore("\nJSON input:")
 
         private fun warn(
             source: String,

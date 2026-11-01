@@ -29,7 +29,7 @@ private fun takeout(
     fields: String = "",
 ): String {
     val extra = if (fields.isEmpty()) "" else ",$fields"
-    return """{"color":"DEFAULT","sharees":[{"isOwner":true}],""" +
+    return """{"color":"DEFAULT","isShared":false,""" +
         """"createdTimestampUsec":$createdUsec$extra}"""
 }
 
@@ -347,6 +347,46 @@ class KeepImporterTest {
                     .filter { it.kind == KeepImportWarning.Kind.ATTACHMENT_DROPPED }
                     .map(KeepImportWarning::detail),
             )
+        }
+
+    @Test
+    fun shareesAreCountedWithoutTheirAddresses() =
+        withStore { store ->
+            val fields =
+                """"sharees":[{"isOwner":true,"email":"owner@example.invalid"},""" +
+                    """{"isOwner":false,"type":"WRITER","email":"friend@example.invalid"}]"""
+
+            val report = KeepImporter(store.notes).import(documents(takeout(fields = fields)))
+
+            val warning =
+                report.warnings.first {
+                    it.kind == KeepImportWarning.Kind.SHARING_DROPPED
+                }
+            assertEquals("2", warning.detail)
+            assertFalse(report.toString().contains("example.invalid"))
+        }
+
+    @Test
+    fun aNoteWithAnEmptyShareeListHasNoSharingWarning() =
+        withStore { store ->
+            val report =
+                KeepImporter(
+                    store.notes,
+                ).import(documents(takeout(fields = """"sharees":[]""")))
+
+            assertTrue(report.warnings.none { it.kind == KeepImportWarning.Kind.SHARING_DROPPED })
+        }
+
+    @Test
+    fun aMalformedDocumentReportsNoneOfItsContent() =
+        withStore { store ->
+            val broken = """{"sharees":[{"email":"friend@example.invalid"}],"isPinned":"x"}"""
+            val truncated = """{"sharees":[{"email":"friend@example.invalid"""
+
+            val report = KeepImporter(store.notes).import(documents(broken, truncated))
+
+            assertEquals(2, report.failures.size)
+            assertFalse(report.toString().contains("example.invalid"))
         }
 
     @Test

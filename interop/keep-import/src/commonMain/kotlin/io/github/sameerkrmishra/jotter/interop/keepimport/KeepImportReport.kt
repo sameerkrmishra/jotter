@@ -38,7 +38,8 @@ public data class KeepNoteRef(
  *
  * @property source The [KeepDocument.name].
  * @property kind What happened.
- * @property detail The attachment's file path or the label; empty for a missing time.
+ * @property detail The attachment's file path, the label, or the number of sharees; empty for a
+ *   missing time.
  */
 public data class KeepImportWarning(
     val source: String,
@@ -49,6 +50,9 @@ public data class KeepImportWarning(
     public enum class Kind {
         /** The note had an attachment. Jotter v1 has no attachments, so only its text came in. */
         ATTACHMENT_DROPPED,
+
+        /** The note was shared. Jotter v1 has one user, so it came in as a private note. */
+        SHARING_DROPPED,
 
         /** A label is not a valid tag. The note came in without it. */
         INVALID_TAG,
@@ -63,8 +67,8 @@ public data class KeepImportWarning(
  *
  * @property source The [KeepDocument.name].
  * @property kind What happened.
- * @property detail The parser's or database's message, or for a duplicate the name of the first
- *   document with the id; empty for a missing time.
+ * @property detail The parser's message without any of the file, the database's message, or for
+ *   a duplicate the name of the first document with the id; empty for a missing time.
  */
 public data class KeepImportFailure(
     val source: String,

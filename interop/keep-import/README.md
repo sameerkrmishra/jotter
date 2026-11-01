@@ -39,6 +39,7 @@ kotlinx.serialization and okio. Both libraries publish linuxX64 variants
 | `listContent` | Body: a task list of `- [ ] text` and `- [x] text`, after `textContent` and a blank line if a note has both. Further lines of an item are indented by two spaces |
 | `annotations` of source `WEBLINK` | Body: one line each after the text, unless the text already contains the URL. `[title](url)` if the title is not empty, differs from the URL, and neither has a character that breaks a Markdown link; otherwise the bare URL |
 | `labels[].name` | Tags, through `TagName` |
+| `sharees` | Dropped, with a warning that has their number only. No field of a sharee is read, so no email address reaches the report |
 | `isPinned` | Pin |
 | `isTrashed`, `isArchived` | State; trashed wins over archived |
 | `createdTimestampUsec` | Time of the root revision, and the source of the note id |
@@ -68,6 +69,7 @@ new one.
 | Edited not later than created | Imported with one revision, no warning (ADR-0009) |
 | A label `TagName` rejects | Imported without that tag, warning `INVALID_TAG` |
 | An attachment | Imported without it, warning `ATTACHMENT_DROPPED` |
+| Sharees | Imported as a private note, warning `SHARING_DROPPED` with their number |
 | The note has a history here, even a tombstone | Skipped, with no warnings: nothing was imported |
 | The database cannot store the note, such as tens of thousands of labels | Failure `STORAGE_ERROR`; its transaction rolls back and the run goes on |
 | The database stays locked | Failure `STORAGE_BUSY`, and the run stops |
