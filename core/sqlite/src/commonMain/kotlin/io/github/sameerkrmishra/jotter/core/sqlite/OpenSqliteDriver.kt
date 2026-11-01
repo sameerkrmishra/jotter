@@ -66,7 +66,9 @@ public fun openSqliteDriver(
 ): SqlDriver {
     require(applicationId != 0) { "0 is the application id of a database that has none" }
     val driver =
-        openConnectionDriver(path) { connection -> checkOwnership(connection, applicationId) }
+        openConnectionDriver(path) { connection ->
+            checkOpenable(connection, applicationId, schema.version)
+        }
     cleanUpOnFailure(cleanUp = driver::close) {
         createOrMigrate(driver, schema, applicationId, callbacks)
     }
@@ -94,15 +96,17 @@ internal fun openConnectionDriver(
 }
 
 /**
- * Throws unless the database is new or was created with [applicationId]. It only reads: switching
- * to WAL rewrites the file header, so this has to run first to leave a rejected file untouched.
+ * Throws unless the database is new or was created with [applicationId], at no newer version than
+ * [schemaVersion]. It only reads: switching to WAL rewrites the file header, so this has to run
+ * first to leave a rejected file untouched.
  *
  * All of it is read by one statement, so from one snapshot. Read separately, a new file that
  * another process is creating could show up with its schema version but not yet its id.
  */
-private fun checkOwnership(
+private fun checkOpenable(
     connection: SQLiteConnection,
     applicationId: Int,
+    schemaVersion: Long,
 ) {
     connection.prepare(READ_OWNERSHIP).use { statement ->
         statement.step()
@@ -115,6 +119,7 @@ private fun checkOwnership(
             "Not a database of this application: its application id is $found, its schema " +
                 "version $version, and it has $objects schema objects"
         }
+        checkNotNewer(version, schemaVersion)
     }
 }
 

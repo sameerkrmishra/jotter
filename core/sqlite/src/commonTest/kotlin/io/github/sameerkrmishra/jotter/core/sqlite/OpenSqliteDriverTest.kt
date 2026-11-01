@@ -115,6 +115,30 @@ class OpenSqliteDriverTest {
         }
 
     @Test
+    fun newerDatabaseInRollbackModeIsRejectedBeforeWalRewritesItsHeader() =
+        rejectedAndLeftUntouched(
+            "schema version 3, newer than this app's 1",
+            "PRAGMA application_id = $TEST_APPLICATION_ID",
+            "PRAGMA user_version = 3",
+            "CREATE TABLE item(id INTEGER PRIMARY KEY)",
+        )
+
+    @Test
+    fun aDatabaseUpgradedAfterTheFirstCheckIsRejectedToo() =
+        withTempDir { dir ->
+            openSqliteDriver(dir.path, RecordingSchema(version = 3), TEST_APPLICATION_ID).close()
+            val schema = RecordingSchema(version = 2)
+            openConnectionDriver(dir.path).use { driver ->
+                val error =
+                    assertFailsWith<IllegalStateException> {
+                        createOrMigrate(driver, schema, TEST_APPLICATION_ID, emptyArray())
+                    }
+                assertContains(error.message.orEmpty(), "newer than this app's 2")
+            }
+            assertEquals(emptyList(), schema.calls)
+        }
+
+    @Test
     fun failedCreateIsRolledBackSoTheNextOpenCreatesAgain() =
         withTempDir { dir ->
             assertFailsWith<SQLiteException> {
@@ -361,26 +385,31 @@ class OpenSqliteDriverTest {
             openSqliteDriver(dir.path, schema, TEST_APPLICATION_ID).close()
         }
 
-    /** A file that plain SQLite set up with [setup], so still in its default journal mode. */
     private fun foreignFileIsRejected(vararg setup: String) =
-        withTempDir { dir ->
-            val raw = openRawConnection(dir.path)
-            setup.forEach(raw::execSQL)
-            raw.close()
-            val before = dir.bytes()
+        rejectedAndLeftUntouched("Not a database of this application", *setup)
 
-            val schema = RecordingSchema(version = 1)
-            val error =
-                assertFailsWith<IllegalStateException> {
-                    openSqliteDriver(dir.path, schema, TEST_APPLICATION_ID)
-                }
+    /** A file that plain SQLite set up with [setup], so still in its default journal mode. */
+    private fun rejectedAndLeftUntouched(
+        message: String,
+        vararg setup: String,
+    ) = withTempDir { dir ->
+        val raw = openRawConnection(dir.path)
+        setup.forEach(raw::execSQL)
+        raw.close()
+        val before = dir.bytes()
 
-            assertContains(error.message.orEmpty(), "Not a database of this application")
-            assertEquals(emptyList(), schema.calls)
-            assertEquals(before, dir.bytes())
-            assertFalse(dir.exists("-wal"))
-            assertFalse(dir.exists("-shm"))
-        }
+        val schema = RecordingSchema(version = 1)
+        val error =
+            assertFailsWith<IllegalStateException> {
+                openSqliteDriver(dir.path, schema, TEST_APPLICATION_ID)
+            }
+
+        assertContains(error.message.orEmpty(), message)
+        assertEquals(emptyList(), schema.calls)
+        assertEquals(before, dir.bytes())
+        assertFalse(dir.exists("-wal"))
+        assertFalse(dir.exists("-shm"))
+    }
 
     /**
      * Creates `item(id)`, optionally followed by an invalid statement; records every call and runs

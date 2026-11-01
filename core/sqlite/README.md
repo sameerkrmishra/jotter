@@ -21,7 +21,8 @@ atomicfu. No other Jotter module.
 - Opens (or creates) the file and sets `busy_timeout = 5000`.
 - Rejects a database of another application and leaves it untouched: one whose
   `PRAGMA application_id` is not the caller's, or one at `user_version` 0 that
-  has tables. Only a new, empty database has neither. This runs first because
+  has tables. Only a new, empty database has neither. A database with a newer
+  version than the schema is rejected the same way. This runs first because
   the next step already rewrites the file header. It reads everything in one
   statement, so it cannot see half of another process's create. The exception:
   a foreign file in WAL mode with an unfinished `-wal` is checkpointed when the
@@ -32,8 +33,7 @@ atomicfu. No other Jotter module.
   so it is retried for as long as `busy_timeout`, then fails with the last
   error.
 - Creates or migrates the schema inside one `BEGIN IMMEDIATE` transaction,
-  using `PRAGMA user_version`; creating also sets `application_id`. A database
-  with a newer version than the schema is rejected and left untouched.
+  using `PRAGMA user_version`; creating also sets `application_id`.
 - Runs a migration (not a create) by SQLite's procedure for schema changes:
   `foreign_keys = OFF` before `BEGIN IMMEDIATE`, since it cannot change inside
   a transaction, then the migration, then `PRAGMA foreign_key_check`, which

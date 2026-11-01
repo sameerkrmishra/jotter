@@ -81,15 +81,23 @@ private fun checkForeignKeys(driver: SqlDriver) {
     check(violation == null) { "The migration left a dangling foreign key: $violation" }
 }
 
+/** Another process with a newer schema may have migrated the file since it was first checked. */
 private fun readCheckedVersion(
     driver: SqlDriver,
     schema: SqlSchema<QueryResult.Value<Unit>>,
 ): Long {
     val version = readUserVersion(driver)
-    check(version <= schema.version) {
-        "The database has schema version $version, newer than this app's ${schema.version}"
-    }
+    checkNotNewer(version, schema.version)
     return version
+}
+
+internal fun checkNotNewer(
+    version: Long,
+    schemaVersion: Long,
+) {
+    check(version <= schemaVersion) {
+        "The database has schema version $version, newer than this app's $schemaVersion"
+    }
 }
 
 private fun readUserVersion(driver: SqlDriver): Long {
