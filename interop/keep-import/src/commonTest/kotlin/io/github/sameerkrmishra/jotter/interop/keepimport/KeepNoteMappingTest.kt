@@ -83,10 +83,19 @@ class KeepNoteMappingTest {
 
     @Test
     fun aTitleThatWouldBreakTheLinkIsLeftOut() {
-        assertEquals(URL, linkNote("a [b] c").markdownBody())
-        val url = "https://example.org/a_(b)"
-        val note = KeepNote(annotations = listOf(KeepAnnotation("WEBLINK", "Site", url)))
-        assertEquals(url, note.markdownBody())
+        listOf("[", "]", "(", ")", "\\", "\r", "\n").forEach { breaker ->
+            assertEquals(URL, linkNote("a${breaker}b").markdownBody())
+        }
+    }
+
+    @Test
+    fun aUrlThatWouldBreakTheLinkStaysBare() {
+        listOf("(", ")", "\\").forEach { breaker ->
+            val url = "https://example.org/a${breaker}b"
+            val note = KeepNote(annotations = listOf(KeepAnnotation("WEBLINK", "Site", url)))
+
+            assertEquals(url, note.markdownBody())
+        }
     }
 
     @Test
