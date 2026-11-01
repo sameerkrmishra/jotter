@@ -190,7 +190,8 @@ internal class EditorViewModel(
     suspend fun finish(): Boolean = saveAll() && trashIfEmptied()
 
     private suspend fun trashIfEmptied(): Boolean {
-        val id = base?.id?.takeIf { createdHere && title.isBlank() && body.isBlank() } ?: return true
+        val id =
+            base?.id?.takeIf { createdHere && title.isBlank() && body.isBlank() } ?: return true
         return saving.withLock {
             guarded(keepsProblem = true) {
                 withContext(io) {

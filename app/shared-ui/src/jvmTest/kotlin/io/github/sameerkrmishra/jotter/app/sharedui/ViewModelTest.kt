@@ -13,7 +13,8 @@ import kotlin.test.AfterTest
 
 /**
  * Runs view models against a real temporary store. Everything, the "UI thread" and the "IO
- * dispatcher" alike, runs on the test's dispatcher, on virtual time, so [Fixture.settle] waits for all of it and for an autosave.
+ * dispatcher" alike, runs on the test's dispatcher, on virtual time, so [Fixture.settle] waits for
+ * all of it and for an autosave.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 open class ViewModelTest {
@@ -25,7 +26,7 @@ open class ViewModelTest {
     }
 
     /** What a test works with. */
-    protected inner class Fixture(
+    internal inner class Fixture(
         private val test: TestScope,
     ) {
         val testScheduler get() = test.testScheduler
@@ -50,7 +51,7 @@ open class ViewModelTest {
         }
     }
 
-    protected fun test(block: suspend Fixture.() -> Unit) =
+    internal fun test(block: suspend Fixture.() -> Unit) =
         runTest {
             val fixture = Fixture(this)
             try {

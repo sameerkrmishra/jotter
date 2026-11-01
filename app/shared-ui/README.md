@@ -82,8 +82,8 @@ Markdown preview comes later.
 ## Tests
 
 All tests are in `jvmTest`, on a real store in a temporary directory.
-`NotesViewModelTest` and `EditorViewModelTest` run everything on one test
-dispatcher; `JotterAppTest` runs the real screens with `runComposeUiTest`, which
+`NotesViewModelTest` and the `Editor*Test` classes run everything on one test
+dispatcher, on virtual time; `JotterAppTest` runs the real screens with `runComposeUiTest`, which
 needs no display, and real IO threads, including the stale edit. The tests for a
 locked database hold a real lock, so each waits out the 5 s busy timeout. Android
 host tests are disabled, as in `core:storage`.
