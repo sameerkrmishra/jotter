@@ -64,8 +64,10 @@ A locked database means another process kept it for the whole 5 s busy timeout.
 Nothing was written, and the command may be tried again.
 
 A failure to write to stdout also exits with status 1, so `jotter list > /dev/full`
-does not pass for a success. For the same reason, `jotter list | head -1` can print
-`cannot write to stdout` if the list is too long for the pipe.
+does not pass for a success. A reader that leaves, as in `jotter list | head -1`,
+is not a failure: as for any Unix filter, SIGPIPE ends the process silently, with
+status 141. `main()` restores that default, which the JVM turns off, through
+`sun.misc.Signal`.
 
 ## Database location
 

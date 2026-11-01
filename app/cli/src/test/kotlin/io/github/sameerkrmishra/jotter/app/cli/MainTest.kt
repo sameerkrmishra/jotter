@@ -39,6 +39,7 @@ class MainTest {
         vararg args: String,
         environment: Map<String, String> = emptyMap(),
         stdout: ProcessBuilder.Redirect = ProcessBuilder.Redirect.PIPE,
+        closeStdout: Boolean = false,
     ): Exit {
         val javaBinary = Path(System.getProperty("java.home"), "bin", "java").toString()
         val command = listOf(javaBinary, "-cp", System.getProperty("java.class.path"), MAIN_CLASS)
@@ -52,7 +53,9 @@ class MainTest {
         // In a file, as a full pipe would block a process that fails with a lot to say.
         val stderr = directory.resolve("stderr")
         val process = builder.redirectOutput(stdout).redirectError(stderr.toFile()).start()
-        val output = process.inputStream.bufferedReader().readText()
+        // Closed before the JVM is up, so its first write finds that nobody is reading.
+        if (closeStdout) process.inputStream.close()
+        val output = if (closeStdout) "" else process.inputStream.bufferedReader().readText()
         assertTrue(process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS), "jotter did not exit")
         return Exit(process.exitValue(), output, stderr.readText())
     }
@@ -107,6 +110,17 @@ class MainTest {
     }
 
     @Test
+    fun aReaderThatLeftEndsTheProcessLikeAnyUnixFilter() {
+        val database = mapOf(DATABASE_ENVVAR to directory.resolve("n.db").toString())
+        assertEquals(0, jotter("add", "x", environment = database).status)
+
+        val exit = jotter("list", environment = database, closeStdout = true)
+
+        assertEquals(SIGPIPE_STATUS, exit.status)
+        assertEquals("", exit.stderr)
+    }
+
+    @Test
     fun aUsageErrorIsNonZero() {
         val exit = jotter("nonsense")
 
@@ -117,6 +131,9 @@ class MainTest {
     private companion object {
         const val MAIN_CLASS = "io.github.sameerkrmishra.jotter.app.cli.MainKt"
         const val TIMEOUT_SECONDS = 60L
+
+        /** 128 + 13, as a shell reports it. */
+        const val SIGPIPE_STATUS = 141
 
         /** A canonical id and a newline. */
         const val ID_LINE_LENGTH = 37

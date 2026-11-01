@@ -2,6 +2,8 @@ package io.github.sameerkrmishra.jotter.app.cli
 
 import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.core.main
+import sun.misc.Signal
+import sun.misc.SignalHandler
 import kotlin.system.exitProcess as exitJvm
 
 /**
@@ -13,6 +15,8 @@ import kotlin.system.exitProcess as exitJvm
  * checked at the end: a script must not take lost output for a success.
  */
 public fun main(args: Array<String>) {
+    // The JVM ignores SIGPIPE. A reader that left, as in `jotter list | head -1`, is not a failure.
+    Signal.handle(Signal("PIPE"), SignalHandler.SIG_DFL)
     JotterCommand(System.`in`)
         .context {
             readEnvvar = System::getenv
