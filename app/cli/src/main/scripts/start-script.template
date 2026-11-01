@@ -39,7 +39,9 @@ esac
 # a file without it, or an archive of other jars or another JDK build: it would stay slow for good.
 archive_is_current() {
     [ -s "\$archive" ] || return 1
-    [ "\$(od -An -tx1 -N4 -- "\$archive")" = " a8 ab 0b f0" ] || return 1
+    if command -v od >/dev/null 2>&1; then
+        [ "\$(od -An -tx1 -N4 -- "\$archive" 2>/dev/null)" = " a8 ab 0b f0" ] || return 1
+    fi
     for file in "\$APP_HOME"/lib/* "\$jdk/lib/modules"; do
         if [ "\$file" -nt "\$archive" ]; then return 1; fi
     done
