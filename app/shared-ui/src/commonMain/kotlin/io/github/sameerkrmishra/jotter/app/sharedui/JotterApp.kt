@@ -1,7 +1,11 @@
 package io.github.sameerkrmishra.jotter.app.sharedui
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -28,6 +32,32 @@ public fun JotterApp(viewModel: AppViewModel) {
             }
             if (viewModel.pendingExit != null) {
                 ConfirmExit(viewModel)
+            }
+        }
+    }
+}
+
+/**
+ * What a window shows instead of [JotterApp] when the notes could not be opened. An app started
+ * from a menu has no terminal, so this is the only place the user can see why.
+ *
+ * @param reason What went wrong.
+ * @param onClose Closes the app.
+ */
+@Composable
+public fun CannotOpenNotes(
+    reason: String,
+    onClose: () -> Unit,
+) {
+    MaterialTheme {
+        Surface(Modifier.fillMaxSize()) {
+            Column(
+                Modifier.fillMaxSize().padding(spacing),
+                verticalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                Text("Jotter cannot open your notes", style = MaterialTheme.typography.titleLarge)
+                Text(reason)
+                Button(onClick = onClose) { Text("Close") }
             }
         }
     }

@@ -23,6 +23,7 @@ scope.coroutineContext.job.cancelAndJoin() // before store.close()
 |---|---|
 | `AppViewModel` | The one public class: the list, the open editor, `refresh` and `requestExit`. Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
 | `JotterApp` | The one public composable, which calls `refresh` whenever its window gains focus |
+| `CannotOpenNotes` | What an app shows instead if the database could not be opened |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
 | `EditorViewModel`, `EditorScreen` | The plain text editor, and adding and removing tags |
 

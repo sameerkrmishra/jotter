@@ -543,6 +543,19 @@ class JotterAppTest {
     }
 
     @Test
+    fun aDatabaseThatCannotBeOpenedShowsWhyAndCanBeClosed() =
+        runComposeUiTest {
+            var closed = false
+            setContent { CannotOpenNotes("/a/notes.db is locked") { closed = true } }
+
+            onNodeWithText("/a/notes.db is locked").assertExists()
+            click("Close")
+
+            waitForIdle()
+            assertTrue(closed)
+        }
+
+    @Test
     fun gainingFocusRefreshes() =
         runComposeUiTest {
             var focused by mutableStateOf(false)
