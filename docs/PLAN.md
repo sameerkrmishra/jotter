@@ -223,8 +223,8 @@ tiebreaker. The one exception to a fresh timestamp is an imported note, whose
 revisions carry the source times. Two imports give two roots. When two parents
 have no common ancestor, then for each of `body` and `title` separately, if all
 roots among the ancestors of the two parents being merged have the same value,
-that value is the base; otherwise the base is empty. Parents with a common
-ancestor use it as usual
+that value is the base; otherwise the base is empty. A parent counts as its own
+ancestor. Parents with a common ancestor use it as usual
 ([ADR-0009](adr/0009-import-preserves-source-timestamps.md)).
 
 **On conflict:** only `body` and `title` conflict. The device still writes a

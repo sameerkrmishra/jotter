@@ -38,7 +38,9 @@ for different content, which `RevisionStore.insert` rejects.
   and `title` separately, if all roots among the ancestors of the two parents
   being merged have the same value, that value is the base; otherwise the base
   is empty. The rule depends only on the two parents, as ADR-0003 requires of
-  an automatic merge, so devices that know of different roots still agree. An
+  an automatic merge, so devices that know of different roots still agree. A
+  parent counts as its own ancestor, so a root that is itself a parent is one
+  of these roots. An
   empty base alone would conflict on all the text as soon as one device edits
   its copy, although the other changed nothing. Two parents with a common
   ancestor use it as usual, so a note with one root is unaffected.
