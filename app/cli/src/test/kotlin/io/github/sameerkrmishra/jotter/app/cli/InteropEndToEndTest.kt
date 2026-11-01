@@ -1,14 +1,12 @@
 package io.github.sameerkrmishra.jotter.app.cli
 
 import java.nio.file.Path
-import java.util.concurrent.TimeUnit
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.listDirectoryEntries
-import kotlin.io.path.readText
 import kotlin.io.path.writeText
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -30,12 +28,6 @@ class InteropEndToEndTest {
         directory.deleteRecursively()
     }
 
-    private class Exit(
-        val status: Int,
-        val stdout: String,
-        val stderr: String,
-    )
-
     private fun jotter(vararg args: String): Exit {
         val javaBinary = Path(System.getProperty("java.home"), "bin", "java").toString()
         val command = listOf(javaBinary, "-cp", System.getProperty("java.class.path"), MAIN_CLASS)
@@ -45,14 +37,7 @@ class InteropEndToEndTest {
             put("HOME", directory.resolve("home").toString())
             put(DATABASE_ENVVAR, directory.resolve("notes.db").toString())
         }
-        // In files: reading a pipe here would block until end of file, past any timeout.
-        val stdout = directory.resolve("stdout")
-        val stderr = directory.resolve("stderr")
-        val process = builder.redirectOutput(stdout.toFile()).redirectError(stderr.toFile()).start()
-        val exited = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        if (!exited) process.destroyForcibly()
-        assertTrue(exited, "jotter did not exit")
-        return Exit(process.exitValue(), stdout.readText(), stderr.readText())
+        return JotterProcess(builder, directory).finish(TIMEOUT_SECONDS)
     }
 
     private fun assertSucceeds(

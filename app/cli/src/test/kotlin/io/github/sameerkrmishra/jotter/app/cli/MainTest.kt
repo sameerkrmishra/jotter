@@ -1,13 +1,11 @@
 package io.github.sameerkrmishra.jotter.app.cli
 
 import java.io.File
-import java.util.concurrent.TimeUnit
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.Path
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
 import kotlin.io.path.exists
-import kotlin.io.path.readText
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -29,16 +27,10 @@ class MainTest {
         directory.deleteRecursively()
     }
 
-    private class Exit(
-        val status: Int,
-        val stdout: String,
-        val stderr: String,
-    )
-
     private fun jotter(
         vararg args: String,
         environment: Map<String, String> = emptyMap(),
-        stdout: ProcessBuilder.Redirect = ProcessBuilder.Redirect.PIPE,
+        stdout: ProcessBuilder.Redirect? = null,
         closeStdout: Boolean = false,
     ): Exit {
         val javaBinary = Path(System.getProperty("java.home"), "bin", "java").toString()
@@ -50,14 +42,11 @@ class MainTest {
             put("HOME", home.toString())
             putAll(environment)
         }
-        // In a file, as a full pipe would block a process that fails with a lot to say.
-        val stderr = directory.resolve("stderr")
-        val process = builder.redirectOutput(stdout).redirectError(stderr.toFile()).start()
+        val redirect = if (closeStdout) ProcessBuilder.Redirect.PIPE else stdout
+        val jotter = JotterProcess(builder, directory, redirect)
         // Closed before the JVM is up, so its first write finds that nobody is reading.
-        if (closeStdout) process.inputStream.close()
-        val output = if (closeStdout) "" else process.inputStream.bufferedReader().readText()
-        assertTrue(process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS), "jotter did not exit")
-        return Exit(process.exitValue(), output, stderr.readText())
+        if (closeStdout) jotter.process.inputStream.close()
+        return jotter.finish(TIMEOUT_SECONDS)
     }
 
     @Test
