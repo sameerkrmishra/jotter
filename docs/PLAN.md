@@ -182,10 +182,12 @@ Local SQLite tables (simplified; the schema is in `core/storage`):
   logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
 - `backend`: configured backends and their settings.
-- `sync_cursor`: per backend, per remote device: the last segment applied.
+- `sync_cursor`: per backend, per remote device: the last segment processed,
+  with `sync_gap` for numbers below it that were not applied.
+- `sync_segment`, `backend_revision`: this device's segments on each backend, and
+  the revisions known to be there.
 
-Schema version 1 (M1) has no `conflict`, `backend` or `sync_cursor` table.
-M3 and M4, which need them, add them with schema migrations.
+Schema version 2 (M3) adds these, except `backend`, which M4 adds.
 
 "Delete forever" from trash writes a tombstone revision so the deletion syncs.
 Tombstones stay until log compaction (deferred).
@@ -245,7 +247,11 @@ id (byte order), merging two at a time. Each step is a real automatic merge.
 The fold stops at the first conflict; remaining heads stay heads until it is
 resolved. This is deterministic for a given set of heads but not independent
 of arrival order. Devices converge because they keep merging whatever heads are
-present until one remains. See ADR-0003.
+present until one live head remains. A merge head whose user revisions another
+head also has is covered and does not count; without that, devices out of step
+would merge each other's merges for ever. When several best common ancestors
+exist, the one with the highest stamp is the base. See ADR-0003 and
+[ADR-0013](adr/0013-merge-base-and-covered-heads.md).
 
 **Touching changes:** edits of adjacent lines merge, unlike in git and diff3,
 and identical insertions count as one. The merge rules and the diff's search
@@ -308,7 +314,8 @@ sequentially per device.
    cursor.
 3. **Apply:** insert revisions (idempotent by revision id), recompute heads,
    merge (§5), update the `note` table and FTS, advance cursors. All in one
-   database transaction.
+   database transaction. What goes wrong with one segment stays with that segment
+   ([ADR-0014](adr/0014-sync-failure-handling.md)).
 
 Sync runs on app start, after edits (debounced), and periodically: on Android
 via WorkManager (15 min minimum, network-constrained), on desktop via a
@@ -379,7 +386,9 @@ codec. Documented as ADR-0007 in M6.
   [import keeps source timestamps](adr/0009-import-preserves-source-timestamps.md)
   (M2); 0011
   [touching changes and the merge format](adr/0011-touching-changes-and-merge-format.md)
-  (M3).
+  (M3); 0013
+  [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
+  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.
