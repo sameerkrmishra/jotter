@@ -7,6 +7,7 @@ dependencies {
     kover(projects.app.cli)
     kover(projects.app.desktop)
     kover(projects.app.sharedUi)
+    kover(projects.backend.api)
     kover(projects.core.model)
     kover(projects.core.sqlite)
     kover(projects.core.storage)
