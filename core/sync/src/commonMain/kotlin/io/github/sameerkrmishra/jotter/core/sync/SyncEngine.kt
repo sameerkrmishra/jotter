@@ -6,6 +6,7 @@ import io.github.sameerkrmishra.jotter.backend.api.BlobNotFoundException
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
+import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.sync.dto.DeviceDto
 import io.github.sameerkrmishra.jotter.core.sync.dto.FormatDto
@@ -112,12 +113,31 @@ public class SyncEngine internal constructor(
                 SyncResult.Incompatible(problem)
             } else {
                 val folders = BackendLayout.segments(listDevices(blobs))
+                forgetLostSegments(target.id, folders)
                 pusher.push(folders[store.deviceId]?.keys.orEmpty())
                 puller.pull(folders - store.deviceId)
                 SyncResult.Completed(report())
             }
         } catch (failure: BlobStoreException) {
             SyncResult.Interrupted(failure, report())
+        }
+    }
+
+    /**
+     * A segment read from another device that is gone from the backend took its revisions along,
+     * and its writer may be gone too. They count as not on the backend again, so this device
+     * pushes them. A live writer repairs the segment as well, which only costs a duplicate.
+     */
+    private fun forgetLostSegments(
+        targetId: String,
+        folders: Map<DeviceId, Map<Long, BlobInfo>>,
+    ) {
+        store.sync.write {
+            store.sync.pulledSegments(targetId).forEach { (device, number) ->
+                if (folders[device]?.containsKey(number) != true) {
+                    store.sync.forgetPulledSegment(targetId, device, number)
+                }
+            }
         }
     }
 

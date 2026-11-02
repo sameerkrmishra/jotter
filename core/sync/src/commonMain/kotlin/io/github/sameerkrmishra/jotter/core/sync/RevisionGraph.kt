@@ -16,6 +16,7 @@ internal class RevisionGraph(
     private val byId = revisions.associateBy { it.id }
     private val parentsSeen = revisions.flatMapTo(HashSet()) { it.parents }
     private val userRevisionsOf = HashMap<RevisionId, Set<RevisionId>>()
+    private val settled = revisions.mapNotNullTo(HashSet()) { it.resolves }
 
     /** The revisions nothing is built on, sorted by id: the order of the fold. */
     val heads: List<Revision> = revisions.filter { it.id !in parentsSeen }.sortedBy { it.id }
@@ -66,9 +67,10 @@ internal class RevisionGraph(
         (ancestors(a) + ancestors(b)).mapNotNull(byId::get).filter { it.parents.isEmpty() }
 
     /**
-     * The conflicted merges nothing has closed, by id. A resolution closes the merge it names.
-     * So does a tombstone that descends from it: nothing is left to show or to resolve, and a
-     * deleted note must not hold back the heads next to it.
+     * The conflicted merges nothing has closed, by id. A resolution closes the merge it names. A
+     * tombstone that descends from it closes it only if no head with text descends from it too,
+     * other than through a tombstone: else an edit made beside the deletion goes on from the
+     * conflict, and the text that lost would be shown nowhere.
      */
     val openConflicts: List<Revision> = findOpenConflicts()
 
@@ -77,11 +79,24 @@ internal class RevisionGraph(
     /**
      * The [heads] that still count: all but the covered ones. An automatic merge adds nothing of
      * its own, so a merge head whose user revisions another head also has is covered and needs no
-     * further merge. Of heads with the same user revisions the lowest id stays. A head that
+     * further merge. Of heads with the same user revisions one with text stays, then the lowest
+     * id. A head that
      * descends from an open conflict stays too, as a resolution builds on it. ADR-0013 explains
-     * why: without this rule, devices that sync out of step make new merges for ever.
+     * why: without this rule, devices that sync out of step make new merges for ever. A head that
+     * a resolution names does not count either: the user has dealt with it (ADR-0014).
      */
-    val liveHeads: List<Revision> = heads.filterNot(::isCovered)
+    val liveHeads: List<Revision> = heads.filterNot { it.id in settled || isCovered(it) }
+
+    /**
+     * The live heads with text that the note does not show. A merge is waiting for an open
+     * conflict or a missing ancestor, and until then these are surfaced, so that an edit is never
+     * hidden in silence (ADR-0014).
+     */
+    val hiddenHeads: List<Revision>
+        get() {
+            val shown = shownHead()?.id
+            return liveHeads.filter { it.content is RevisionContent.Snapshot && it.id != shown }
+        }
 
     /** Whether [revision] came from the user revisions of [other] alone. */
     fun isCoveredBy(
@@ -116,14 +131,21 @@ internal class RevisionGraph(
         }
     }
 
-    /** Whether [other] has the same user revisions as the merge [head], and the lower id. */
+    /**
+     * Whether [other] has the same user revisions as the merge [head] and goes first: the one with
+     * text, as an edit beats a deletion, and otherwise the lower id.
+     */
     private fun isTwinOf(
         head: Revision,
         other: Revision,
-    ): Boolean =
-        head.kind != RevisionKind.User &&
-            other.id < head.id &&
+    ): Boolean {
+        val headHasText = head.content is RevisionContent.Snapshot
+        val otherHasText = other.content is RevisionContent.Snapshot
+        val goesFirst = if (headHasText == otherHasText) other.id < head.id else otherHasText
+        return head.kind != RevisionKind.User &&
+            goesFirst &&
             userRevisions(head) == userRevisions(other)
+    }
 
     private fun userRevisions(revision: Revision): Set<RevisionId> =
         userRevisionsOf.getOrPut(revision.id) {
@@ -135,21 +157,33 @@ internal class RevisionGraph(
         heads.filter { id in ancestors(it.id) }.sortedByDescending { it.stamp }
 
     private fun findOpenConflicts(): List<Revision> {
-        val closed = byId.values.mapNotNullTo(HashSet()) { it.resolves }
-        val conflicted = byId.values.filter { it.isConflictedMerge() && it.id !in closed }
+        val conflicted = byId.values.filter { it.isConflictedMerge() && it.id !in settled }
         if (conflicted.isEmpty()) return emptyList()
         val tombstones = byId.values.filter { it.content is RevisionContent.Tombstone }
         val deleted = reachableFrom(tombstones.map { it.id })
-        return conflicted.filter { it.id !in deleted }.sortedBy { it.id }
+        val alive = heads.filter { it.content is RevisionContent.Snapshot }
+        val withText = reachableFrom(alive.map { it.id }, throughTombstones = false)
+        return conflicted.filter { it.id !in deleted || it.id in withText }.sortedBy { it.id }
     }
 
-    /** Depth-first without recursion: a note's history can be far deeper than the stack. */
-    private fun reachableFrom(starts: List<RevisionId>): Set<RevisionId> {
+    /**
+     * Depth-first without recursion: a note's history can be far deeper than the stack. Without
+     * [throughTombstones] a walk stops at a tombstone: an edit merged with a deletion descends
+     * from what was deleted, but holds nothing of it.
+     */
+    private fun reachableFrom(
+        starts: List<RevisionId>,
+        throughTombstones: Boolean = true,
+    ): Set<RevisionId> {
         val seen = HashSet<RevisionId>()
         val stack = ArrayDeque(starts)
         while (stack.isNotEmpty()) {
             val id = stack.removeLast()
-            if (seen.add(id)) byId[id]?.let { stack.addAll(it.parents) }
+            if (seen.add(id)) {
+                byId[id]
+                    ?.takeIf { throughTombstones || it.content is RevisionContent.Snapshot }
+                    ?.let { stack.addAll(it.parents) }
+            }
         }
         return seen
     }

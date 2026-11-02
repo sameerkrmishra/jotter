@@ -4,8 +4,11 @@ import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.Revision
+import io.github.sameerkrmishra.jotter.core.model.RevisionContent
+import io.github.sameerkrmishra.jotter.core.model.RevisionId
 import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
 import io.github.sameerkrmishra.jotter.core.storage.ImportedNote
 import io.github.sameerkrmishra.jotter.core.storage.NoSuchNoteException
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
@@ -90,7 +93,11 @@ internal data class SimOutcome(
  * platform: the ids, the clocks, the faults and the choices all come from one generator.
  *
  * Random phase: devices edit offline, sync partially with one backend at a time, crash, restart,
- * and lose files. Then every fault stops and devices sync until nothing changes.
+ * die for good, forget a backend and add it again, and lose files, and strangers plant damaged
+ * files and forged merges. Then every fault stops and the living sync until nothing changes.
+ *
+ * Every line is unique, so that the simulator can follow it: a line somebody wrote and nobody
+ * removed must stay in a note's text, an open conflict or a hidden head.
  */
 @Suppress("TooManyFunctions") // One function per thing that can happen in the world.
 internal class Simulation(
@@ -106,6 +113,20 @@ internal class Simulation(
     private var crashes = 0
     private var conflictsSeen = 0
     private var merges = 0
+    private var lines = 0
+
+    /** The devices that still run. Device 0, the relay, never dies. */
+    private val alive = devices.toMutableList()
+
+    /** Every line written, and those a person removed: by editing, deleting or resolving. */
+    private val written = HashSet<String>()
+    private val removed = HashSet<String>()
+
+    /** Forged merges planted, none of which may ever be stored. */
+    private val forged = HashSet<RevisionId>()
+
+    /** Links whose next sync must see the whole folder, after a backend was added again. */
+    private val readded = HashSet<FlakyLink>()
 
     /** What the calm syncs of the last round still reported, for the failure message. */
     private val lastIssues = mutableListOf<SyncIssue>()
@@ -117,8 +138,10 @@ internal class Simulation(
             heal()
             settle()
             val first = assertConverged()
+            assertTextSurvives()
             resolveEverything()
             assertSingleHeads()
+            assertTextSurvives()
             return SimOutcome(digest(), first, conflictsSeen, crashes, merges)
         } finally {
             devices.forEach(SimDevice::close)
@@ -150,8 +173,9 @@ internal class Simulation(
 
     private fun sharedNoteId(index: Int): NoteId = SimIds(Random(seed + index)).newNoteId()
 
+    @Suppress("CyclomaticComplexMethod") // A plain table of what can happen.
     private suspend fun step() {
-        val device = devices.random(random)
+        val device = alive.random(random)
         device.advanceClock(random.nextLong(1, MAX_CLOCK_STEP))
         when (random.nextInt(ACTIONS)) {
             0, 1, 2, 3, 4, 5 -> edit(device)
@@ -164,8 +188,46 @@ internal class Simulation(
             17 -> loseSegment()
             18 -> flipBackend()
             19 -> plantBadFile()
+            20 -> plantForgedMerge(device)
+            21 -> forgetBackend(device)
+            22 -> kill(device)
             else -> device.restart()
         }
+    }
+
+    private fun newLine(): String {
+        val line = "- [ ] item ${random.nextInt(WORDS)} #${lines++}"
+        written += line
+        return line
+    }
+
+    private fun linesOf(text: String): Set<String> =
+        text.split('\n').filterTo(HashSet(), String::isNotEmpty)
+
+    /** A device that never comes back, with whatever it did not push. Its files stay. */
+    private fun kill(device: SimDevice) {
+        if (device.index != 0 && random.nextInt(KILL_ODDS) == 0) alive -= device
+    }
+
+    /** Removes a backend and adds it again, which keeps its files (PLAN.md §6.5). */
+    private suspend fun forgetBackend(device: SimDevice) {
+        val backend = device.links.keys.random(random)
+        device.engine.forget("backend-$backend")
+        readded += device.links.getValue(backend)
+    }
+
+    /** Copies a merge under another device: the hash is right, and the parents disagree. */
+    private suspend fun plantForgedMerge(device: SimDevice) {
+        val backend = backends.random(random)
+        val merge =
+            revisions(device).filter { it.kind != RevisionKind.User }.randomOrNull(random) ?: return
+        if (!backend.reachable) return
+        val stranger = SimIds(random).newDeviceId()
+        val changed = merge.copy(deviceId = stranger)
+        val fake = changed.copy(id = mergeRevisionId(changed))
+        forged += fake.id
+        val segment = Segment(stranger, 1, listOf(fake))
+        backend.plant(BackendLayout.segmentPath(stranger, 1), JsonGzipCodec().encode(segment))
     }
 
     private fun allNotes(device: SimDevice): List<Note> =
@@ -182,6 +244,7 @@ internal class Simulation(
             } else {
                 note.title
             }
+        removed += linesOf(note.body) - linesOf(body)
         try {
             device.store.notes.edit(note.id, note.revisionId, title, body)
         } catch (_: StaleEditException) {
@@ -191,7 +254,7 @@ internal class Simulation(
 
     private fun editedBody(body: String): String {
         val lines = if (body.isEmpty()) mutableListOf() else body.split('\n').toMutableList()
-        val word = "- [ ] item ${random.nextInt(WORDS)}"
+        val word = newLine()
         when {
             lines.isEmpty() -> lines += word
             random.nextBoolean() -> lines[random.nextInt(lines.size)] = word
@@ -202,7 +265,7 @@ internal class Simulation(
     }
 
     private fun create(device: SimDevice) {
-        val lines = List(random.nextInt(1, MAX_LINES)) { "- [ ] item $it" }
+        val lines = List(random.nextInt(1, MAX_LINES)) { newLine() }
         device.store.notes.create("t${random.nextInt(WORDS)}", lines.joinToString("\n"))
     }
 
@@ -242,6 +305,7 @@ internal class Simulation(
     private fun delete(device: SimDevice) {
         val note = allNotes(device).randomOrNull(random) ?: return
         val notes = device.store.notes
+        removed += linesOf(note.body)
         notes.setState(note.id, NoteState.TRASHED)
         try {
             notes.deleteForever(note.id)
@@ -255,10 +319,11 @@ internal class Simulation(
         backend: Int,
     ) {
         val link = device.links.getValue(backend)
-        link.calm = !faulty
+        link.calm = !faulty || link in readded
         try {
             when (val result = device.engine.sync(SyncTarget("backend-$backend", link))) {
                 is SyncResult.Completed -> {
+                    readded -= link
                     merges += result.report.merges
                     if (!faulty) lastIssues += result.report.issues
                     result.report.issues.forEach { issue ->
@@ -284,19 +349,36 @@ internal class Simulation(
     private fun resolveOne(device: SimDevice) {
         val conflict = device.conflicts.open().randomOrNull(random) ?: return
         conflictsSeen++
-        val resolution =
-            when (random.nextInt(RESOLUTIONS)) {
-                0 -> ConflictResolution.KeepShown
-                1 -> ConflictResolution.KeepLosing
-                2 -> ConflictResolution.KeepBoth
-                else ->
-                    ConflictResolution.Edited(
-                        "resolved",
-                        "merged by hand ${random.nextInt(WORDS)}",
-                    )
-            }
+        val shown = device.conflicts.details(conflict.mergeId)?.shownBody ?: return
+        val resolution = randomResolution(shown, conflict.losingBody)
         device.conflicts.resolve(conflict.mergeId, resolution)
     }
+
+    /** A random answer, with the lines it gives up noted down. */
+    private fun randomResolution(
+        shown: String,
+        losing: String,
+    ): ConflictResolution =
+        when (random.nextInt(RESOLUTIONS)) {
+            0 -> {
+                removed += linesOf(losing) - linesOf(shown)
+                ConflictResolution.KeepShown
+            }
+
+            1 -> {
+                removed += linesOf(shown) - linesOf(losing)
+                ConflictResolution.KeepLosing
+            }
+
+            2 -> {
+                ConflictResolution.KeepBoth
+            }
+
+            else -> {
+                removed += linesOf(shown) + linesOf(losing)
+                ConflictResolution.Edited("resolved", newLine())
+            }
+        }
 
     /** A power cut on a backend takes a published segment with it. Its writer must notice. */
     private suspend fun loseSegment() {
@@ -337,22 +419,22 @@ internal class Simulation(
         var previous = -1
         repeat(MAX_ROUNDS) {
             lastIssues.clear()
-            devices.forEach { device ->
+            alive.forEach { device ->
                 device.links.keys.forEach { backend -> syncOnce(device, backend) }
             }
-            val held = devices.map(::revisions)
+            val held = alive.map(::revisions)
             val total = held.sumOf { revisionSet -> revisionSet.size }
             val isSame = held.distinct().size == 1
             if (isSame && total == previous) return
             previous = total
         }
-        val sizes = devices.map { revisions(it).size }
+        val sizes = alive.map { revisions(it).size }
         error("Seed $seed did not settle in $MAX_ROUNDS rounds: $sizes, $lastIssues")
     }
 
     /** Every note any device has heard of. No backend has this name, so nothing is pushed there. */
     private fun knownNotes(): Set<NoteId> =
-        devices.flatMapTo(HashSet()) { device ->
+        alive.flatMapTo(HashSet()) { device ->
             device.store.sync
                 .unpushed("no such backend")
                 .mapNotNull {
@@ -366,9 +448,10 @@ internal class Simulation(
         knownNotes().flatMapTo(HashSet()) { device.store.sync.revisions(it) }
 
     private fun assertConverged(): Int {
-        val reference = devices.first()
+        val reference = alive.first()
         val expected = revisions(reference)
-        devices.drop(1).forEach { device ->
+        check(expected.none { it.id in forged }) { "Seed $seed: a forged merge was stored" }
+        alive.drop(1).forEach { device ->
             check(revisions(device) == expected) {
                 "Seed $seed: device ${device.index} has other revisions than device 0"
             }
@@ -379,10 +462,118 @@ internal class Simulation(
         }
         expected.groupBy { it.noteId }.forEach { (noteId, revisions) ->
             val graph = RevisionGraph(revisions)
-            check(graph.isComplete) { "Seed $seed: $noteId lacks an ancestor" }
-            revisions.filter { it.kind != RevisionKind.User }.forEach { assertRederives(graph, it) }
+            // Only a dead writer can leave a hole: a live one repairs what was lost.
+            val mayLack = alive.size < devices.size
+            check(graph.isComplete || mayLack) { "Seed $seed: $noteId lacks an ancestor" }
+            if (graph.isComplete) {
+                val automatic = revisions.filter { it.kind != RevisionKind.User }
+                automatic.forEach { assertRederives(graph, it) }
+            }
         }
         return expected.size
+    }
+
+    /**
+     * Nothing a person wrote and nobody removed may vanish: each such line that reached the living
+     * is in a note's text, in the text of an open conflict, or in a hidden head. A note whose every
+     * head is a tombstone is gone on purpose, with a conflict it may have had. A deletion counts
+     * for no other line, so that a conflict's losing text must outlive a deletion beside an edit.
+     */
+    private fun assertTextSurvives() {
+        val device = alive.first()
+        val everWritten =
+            revisions(device)
+                .groupBy { it.noteId }
+                .values
+                .filter { note ->
+                    RevisionGraph(note).heads.any { it.content is RevisionContent.Snapshot }
+                }.flatten()
+                .mapNotNull { it.content as? RevisionContent.Snapshot }
+                .flatMapTo(HashSet()) { linesOf(it.body) }
+        val findable = HashSet<String>()
+        allNotes(device).forEach { findable += linesOf(it.body) }
+        device.conflicts.open().forEach { findable += linesOf(it.losingBody) }
+        device.conflicts.hidden().forEach { findable += linesOf(it.body) }
+        val given = linesGivenUpByDeleting(device)
+        val lost =
+            (written - removed).filter { it in everWritten && it !in findable && it !in given }
+        check(lost.isEmpty()) { "Seed $seed: text was lost: $lost\n${histories(device, lost)}" }
+    }
+
+    /**
+     * The text that lost a conflict, where a user deleted the note on top of that conflict and no
+     * edit went on from it: they gave that text up, even if another branch brings the note back.
+     * Worked out here from the DAG alone, not with the code under test, so that a wrong rule for
+     * closing conflicts shows as lost text.
+     */
+    private fun linesGivenUpByDeleting(device: SimDevice): Set<String> {
+        val given = HashSet<String>()
+        revisions(device).groupBy { it.noteId }.values.forEach { note ->
+            val byId = note.associateBy { it.id }
+            val children = HashMap<RevisionId, MutableList<Revision>>()
+            note.forEach { child ->
+                child.parents.forEach { children.getOrPut(it) { mutableListOf() } += child }
+            }
+            note.filter { it.isConflictedMerge() }.forEach { conflict ->
+                if (isOnlyDeletedOnTop(conflict, children)) {
+                    val loser = (conflict.kind as RevisionKind.AutomaticMerge).losingParent
+                    val text = byId[loser]?.content as? RevisionContent.Snapshot
+                    given += linesOf(text?.body.orEmpty())
+                }
+            }
+        }
+        return given
+    }
+
+    /** Whether every way up from [conflict] ends in a tombstone, and there is at least one way. */
+    private fun isOnlyDeletedOnTop(
+        conflict: Revision,
+        children: Map<RevisionId, List<Revision>>,
+    ): Boolean {
+        val stack = ArrayDeque(children[conflict.id].orEmpty())
+        var isDeleted = stack.isNotEmpty()
+        val seen = HashSet<RevisionId>()
+        while (stack.isNotEmpty()) {
+            val revision = stack.removeLast()
+            val above = children[revision.id].orEmpty()
+            val hasText = revision.content is RevisionContent.Snapshot
+            if (hasText && above.isEmpty()) isDeleted = false
+            if (seen.add(revision.id) && hasText) stack.addAll(above)
+        }
+        return isDeleted
+    }
+
+    /** The notes that hold [lines], revision by revision, for the failure message. */
+    private fun histories(
+        device: SimDevice,
+        lines: List<String>,
+    ): String {
+        val all = revisions(device)
+        val notes =
+            all
+                .filter { revision ->
+                    val body = (revision.content as? RevisionContent.Snapshot)?.body.orEmpty()
+                    lines.any { line -> line in linesOf(body) }
+                }.map { it.noteId }
+                .toSet()
+        return notes.joinToString("\n") { noteId ->
+            val revisions = all.filter { it.noteId == noteId }.sortedBy { it.stamp }
+            val graph = RevisionGraph(revisions)
+            val heads = graph.heads.map(::shortId)
+            val live = graph.liveHeads.map(::shortId)
+            val top = "$noteId heads=$heads live=$live open=${graph.openConflicts.map(::shortId)}"
+            top + revisions.joinToString("") { "\n  ${describe(it)}" }
+        }
+    }
+
+    private fun shortId(revision: Revision): String = revision.id.toString().take(SHORT_ID)
+
+    private fun describe(revision: Revision): String {
+        val snapshot = revision.content as? RevisionContent.Snapshot
+        val text = snapshot?.body?.replace('\n', '|')?.replace("- [ ] item ", "")
+        val parents = revision.parents.map { it.toString().take(SHORT_ID) }
+        return "${shortId(revision)} ${revision.kind} p=$parents res=${revision.resolves} " +
+            "${snapshot?.state?.value} $text"
     }
 
     /**
@@ -406,19 +597,26 @@ internal class Simulation(
                 device.store.notes.get(id),
                 RevisionGraph(device.store.sync.revisions(id)).liveHeads.map { it.id },
             )
-        } + listOf(device.conflicts.open())
+        } + listOf(device.conflicts.open(), device.conflicts.hidden())
 
-    /** The last word: with every conflict answered, each note has one head everywhere. */
+    /** The last word: with everything answered, each note has one head everywhere. */
     private suspend fun resolveEverything() {
+        val resolver = alive.first().conflicts
         repeat(MAX_ROUNDS) {
-            val open = devices.first().conflicts.open()
-            if (open.isEmpty()) return
+            val open = resolver.open()
+            val waiting =
+                resolver.hidden().filter { head -> head.reason == HiddenReason.MISSING_ANCESTOR }
+            if (open.isEmpty() && waiting.isEmpty()) return
             conflictsSeen += open.size
             open.forEach { conflict ->
-                if (devices.first().conflicts.details(conflict.mergeId) != null) {
-                    val resolver = devices.first().conflicts
+                resolver.details(conflict.mergeId)?.let { details ->
+                    removed += linesOf(conflict.losingBody) - linesOf(details.shownBody)
                     resolver.resolve(conflict.mergeId, ConflictResolution.KeepShown)
                 }
+            }
+            // A resolution above can have merged these away. KeepBoth loses no line.
+            resolver.hidden().filter { head -> head in waiting }.forEach { head ->
+                resolver.settleHidden(head.revisionId, ConflictResolution.KeepBoth)
             }
             settle()
             assertConverged()
@@ -427,15 +625,23 @@ internal class Simulation(
     }
 
     private fun assertSingleHeads() {
-        val device = devices.first()
+        val device = alive.first()
         check(device.conflicts.open().isEmpty()) { "Seed $seed: conflicts stayed open" }
+        check(device.conflicts.hidden().isEmpty()) { "Seed $seed: heads stayed hidden" }
         knownNotes().forEach { id ->
             val revisions = device.store.sync.revisions(id)
             if (revisions.isNotEmpty()) {
                 val graph = RevisionGraph(revisions)
-                check(graph.liveHeads.size == 1) { "Seed $seed: note $id has ${graph.liveHeads}" }
+                // Beside a missing ancestor a tombstone cannot merge, and it hides no text.
+                val live =
+                    graph.liveHeads.filter {
+                        graph.isComplete || it.content is RevisionContent.Snapshot
+                    }
+                check(live.size == 1 || (live.isEmpty() && !graph.isComplete)) {
+                    "Seed $seed: note $id has $live"
+                }
                 val shown = device.store.notes.get(id)
-                check(shown?.revisionId == graph.liveHeads.single().id || shown == null) {
+                check(shown == null || shown.revisionId == live.single().id) {
                     "Seed $seed: note $id does not show its head"
                 }
             }
@@ -467,7 +673,9 @@ internal class Simulation(
         const val MAX_DEVICES = 5
         const val MIN_STEPS = 30
         const val MAX_STEPS = 140
-        const val ACTIONS = 21
+        const val ACTIONS = 24
+        const val KILL_ODDS = 3
+        const val SHORT_ID = 6
         const val SOURCE_NOTES = 3
         const val START_MILLIS = 1_800_000_000_000L
         const val IMPORT_MILLIS = 1_500_000_000_000L

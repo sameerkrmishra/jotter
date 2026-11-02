@@ -9,6 +9,7 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionId
 import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
 import io.github.sameerkrmishra.jotter.core.storage.isStorableText
 
 /**
@@ -88,7 +89,8 @@ private fun mergeSnapshots(
     val title = mergeText(graph.baseText(a, b) { it.title }, first.title, second.title)
     val body = mergeText(graph.baseText(a, b) { it.body }, first.body, second.body)
     val higher = if (a.stamp > b.stamp) first else second
-    val isConflicted = title == null || body == null
+    // A clean merge of two notes under the cap can pass it, and the cap is what makes it sync.
+    val isConflicted = title == null || body == null || title.length + body.length > MAX_NOTE_CHARS
     val content =
         RevisionContent.Snapshot(
             title = title.takeUnless { isConflicted } ?: higher.title,

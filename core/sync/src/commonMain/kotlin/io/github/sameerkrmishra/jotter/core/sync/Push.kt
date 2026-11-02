@@ -114,17 +114,26 @@ internal class Pusher(
         }
         val (segments, tooLarge) = batches.split(unpushedRevisions())
         tooLarge.forEach { issues += SyncIssue.RevisionTooLarge(it.id) }
+        val highestListed = listed.maxOrNull() ?: 0
         for (revisions in segments) {
-            if (!publish(record(revisions))) return
+            if (!publish(record(revisions, highestListed))) return
         }
     }
 
     private fun unpushedRevisions(): List<Revision> =
         store.unpushed(backendId).map { id -> checkNotNull(store.revision(id)) { "$id is gone" } }
 
-    private fun record(revisions: List<Revision>): Long =
+    /**
+     * Numbers the new segment above both what this device ever used and what the folder holds. A
+     * backend that was forgotten and added again keeps its files (PLAN.md §6.5), and those numbers
+     * are taken. A number is never used twice, even if its file is gone: a reader may be past it.
+     */
+    private fun record(
+        revisions: List<Revision>,
+        highestListed: Long,
+    ): Long =
         store.write {
-            val number = (store.ownSegments(backendId).keys.maxOrNull() ?: 0) + 1
+            val number = maxOf(store.lastSegmentNumber(backendId), highestListed) + 1
             store.recordSegment(backendId, number, revisions.map { it.id })
             number
         }

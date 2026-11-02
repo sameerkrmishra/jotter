@@ -6,6 +6,9 @@ plugins {
 
 kotlin {
     sourceSets {
+        all {
+            languageSettings.optIn("io.github.sameerkrmishra.jotter.core.storage.SyncStoreApi")
+        }
         commonMain.dependencies {
             api(projects.backend.api)
             api(projects.core.merge)

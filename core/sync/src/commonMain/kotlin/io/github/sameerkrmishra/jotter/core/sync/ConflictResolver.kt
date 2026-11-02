@@ -7,8 +7,10 @@ import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.RevisionId
+import io.github.sameerkrmishra.jotter.core.storage.HiddenHead
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.OpenConflict
+import io.github.sameerkrmishra.jotter.core.storage.requireNoteSize
 import io.github.sameerkrmishra.jotter.core.storage.toStorableText
 import kotlinx.coroutines.flow.Flow
 
@@ -71,8 +73,15 @@ public class ConflictResolver(
     public fun details(mergeId: RevisionId): ConflictDetails? {
         val conflict = store.sync.conflict(mergeId) ?: return null
         val graph = RevisionGraph(store.sync.revisions(conflict.noteId))
-        val shown = graph.snapshotOfHead(mergeId)
-        val (loser, winner) = graph.parentsOf(mergeId, conflict.losingRevisionId)
+        return if (graph.isOpen(mergeId)) detailsOf(conflict, graph) else null
+    }
+
+    private fun detailsOf(
+        conflict: OpenConflict,
+        graph: RevisionGraph,
+    ): ConflictDetails {
+        val shown = graph.snapshotOfHead(conflict.mergeId)
+        val (loser, winner) = graph.parentsOf(conflict.mergeId, conflict.losingRevisionId)
         val title = graph.baseText(winner, loser) { it.title }
         val body = graph.baseText(winner, loser) { it.body }
         return ConflictDetails(
@@ -97,33 +106,77 @@ public class ConflictResolver(
     ): Note? =
         store.sync.write {
             val conflict = store.sync.conflict(mergeId) ?: throw NoSuchConflictException(mergeId)
-            val noteId = conflict.noteId
-            val graph = RevisionGraph(store.sync.revisions(noteId))
-            val shown = graph.snapshotOfHead(mergeId)
-            val content =
-                when (resolution) {
-                    ConflictResolution.KeepShown -> {
-                        shown
-                    }
-
-                    ConflictResolution.KeepLosing -> {
-                        shown.copy(title = conflict.losingTitle, body = conflict.losingBody)
-                    }
-
-                    ConflictResolution.KeepBoth -> {
-                        store.notes.create(conflict.losingTitle, conflict.losingBody, shown.tags)
-                        shown
-                    }
-
-                    is ConflictResolution.Edited -> {
-                        val title = resolution.title.toStorableText()
-                        shown.copy(title = title, body = resolution.body.toStorableText())
-                    }
-                }
-            store.sync.insertResolution(graph.headOf(mergeId), content, mergeId)
-            reconcile(store.sync, noteId)
-            store.notes.get(noteId)
+            val graph = RevisionGraph(store.sync.revisions(conflict.noteId))
+            if (graph.isOpen(mergeId)) {
+                val losing = LosingText(conflict.losingTitle, conflict.losingBody)
+                settle(graph.headOf(mergeId), mergeId, losing, resolution)
+            } else {
+                // A deletion closed it, and the row waits for the next sync. Tidy up now.
+                reconcile(store.sync, conflict.noteId)
+                store.notes.get(conflict.noteId)
+            }
         }
+
+    /** Returns the heads that a note does not show until a merge can run, by note. */
+    public fun hidden(): List<HiddenHead> = store.sync.hiddenHeads()
+
+    /** Emits [hidden] now and again whenever it changes. */
+    public fun observeHidden(): Flow<List<HiddenHead>> = store.sync.observeHiddenHeads()
+
+    /**
+     * Deals with the hidden head [headId], with no merge: [ConflictResolution.KeepLosing] takes its
+     * text in place of the shown text, and the others work as in [resolve]. This is the way out
+     * when a missing ancestor will never come (ADR-0014). Other devices stop counting that head,
+     * and the note merges as far as it can.
+     *
+     * @throws NoSuchHiddenHeadException if [headId] is not hidden.
+     */
+    public fun settleHidden(
+        headId: RevisionId,
+        resolution: ConflictResolution,
+    ): Note? =
+        store.sync.write {
+            val hidden =
+                store.sync.hiddenHeads().firstOrNull { it.revisionId == headId }
+                    ?: throw NoSuchHiddenHeadException(headId)
+            val graph = RevisionGraph(store.sync.revisions(hidden.noteId))
+            val parent = checkNotNull(graph.shownHead()) { "A hidden head has a shown one" }
+            settle(parent, headId, LosingText(hidden.title, hidden.body), resolution)
+        }
+
+    /** Writes the user revision on [parent] that names [closed]. Part of a transaction. */
+    private fun settle(
+        parent: Revision,
+        closed: RevisionId,
+        losing: LosingText,
+        resolution: ConflictResolution,
+    ): Note? {
+        val shown = parent.content as RevisionContent.Snapshot
+        val content =
+            when (resolution) {
+                ConflictResolution.KeepShown -> {
+                    shown
+                }
+
+                ConflictResolution.KeepLosing -> {
+                    shown.copy(title = losing.title, body = losing.body)
+                }
+
+                ConflictResolution.KeepBoth -> {
+                    store.notes.create(losing.title, losing.body, shown.tags)
+                    shown
+                }
+
+                is ConflictResolution.Edited -> {
+                    requireNoteSize(resolution.title, resolution.body)
+                    val title = resolution.title.toStorableText()
+                    shown.copy(title = title, body = resolution.body.toStorableText())
+                }
+            }
+        store.sync.insertResolution(parent, content, closed)
+        reconcile(store.sync, parent.noteId)
+        return store.notes.get(parent.noteId)
+    }
 
     private fun marked(
         base: String,
@@ -149,6 +202,24 @@ public class ConflictResolver(
 public class NoSuchConflictException(
     public val mergeId: RevisionId,
 ) : IllegalArgumentException("Merge $mergeId has no open conflict")
+
+/**
+ * The revision [headId] is not a hidden head: it was merged or settled, or never was one.
+ *
+ * @property headId The revision.
+ */
+public class NoSuchHiddenHeadException(
+    public val headId: RevisionId,
+) : IllegalArgumentException("Revision $headId is not a hidden head")
+
+private class LosingText(
+    val title: String,
+    val body: String,
+)
+
+/** Whether the revisions say the conflict is open. The `conflict` row can lag behind a deletion. */
+private fun RevisionGraph.isOpen(mergeId: RevisionId): Boolean =
+    openConflicts.any { it.id == mergeId }
 
 /** The head a resolution of [mergeId] builds on. An open conflict always has one with text. */
 private fun RevisionGraph.headOf(mergeId: RevisionId): Revision =

@@ -1,0 +1,402 @@
+package io.github.sameerkrmishra.jotter.core.sync
+
+import io.github.sameerkrmishra.jotter.backend.api.BlobStore
+import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
+import io.github.sameerkrmishra.jotter.core.model.DeviceId
+import io.github.sameerkrmishra.jotter.core.model.NoteId
+import io.github.sameerkrmishra.jotter.core.model.NoteState
+import io.github.sameerkrmishra.jotter.core.model.Revision
+import io.github.sameerkrmishra.jotter.core.model.RevisionContent
+import io.github.sameerkrmishra.jotter.core.model.RevisionId
+import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
+import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
+import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
+import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestResult
+import kotlinx.coroutines.test.runTest
+import okio.FileSystem
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.random.Random
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/** What happens around lost, forged and oversized history. Each test came from a review finding. */
+class LostHistoryTest {
+    private val dir =
+        FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "jotter-lost-test-${Random.nextLong().toULong()}"
+    private val stores = mutableListOf<NoteStore>()
+
+    init {
+        FileSystem.SYSTEM.createDirectories(dir)
+    }
+
+    @AfterTest
+    fun cleanUp() {
+        stores.forEach(NoteStore::close)
+        FileSystem.SYSTEM.deleteRecursively(dir)
+    }
+
+    private fun device(name: String): NoteStore =
+        NoteStore
+            .open((dir / "$name.db").toString(), name, EmptyCoroutineContext)
+            .also { stores += it }
+
+    private suspend fun NoteStore.sync(
+        blobs: BlobStore,
+        target: String = "b",
+    ): SyncReport {
+        val engine = SyncEngine(this, DeviceInfo("d", "test"), EmptyCoroutineContext)
+        val result = engine.sync(SyncTarget(target, blobs))
+        return assertIs<SyncResult.Completed>(result, "$result").report
+    }
+
+    private fun NoteStore.live(noteId: NoteId) = RevisionGraph(sync.revisions(noteId)).liveHeads
+
+    /** A reader that holds an edit, while the parent of what a dead writer wrote is lost. */
+    private inner class DeadWriter {
+        val writer = device("writer")
+        val reader = device("reader")
+        val blobs = LossyBlobStore()
+        val note = writer.notes.create("", "a\nb\n")
+
+        suspend fun run() {
+            writer.sync(blobs)
+            reader.sync(blobs)
+            val first = writer.notes.edit(note.id, note.revisionId, "", "writer 1\nb\n")
+            writer.sync(blobs)
+            writer.notes.edit(note.id, first.revisionId, "", "writer 2\nb\n")
+            writer.sync(blobs)
+            blobs.lose(BackendLayout.segmentPath(writer.deviceId, 2))
+            reader.notes.edit(note.id, note.revisionId, "", "a\nreader\n")
+            reader.sync(blobs)
+        }
+    }
+
+    @Test
+    fun aTombstoneBesideASurvivingEditLeavesTheConflictOpen() {
+        val root = textRevision(1, 10, "line")
+        val win = textRevision(2, 30, "winner", root)
+        val lose = textRevision(3, 20, "loser", root)
+        val conflict = mergeRevisions(RevisionGraph(listOf(root, win, lose)), win, lose)
+        val deleted = userRevision(4, 40, conflict) { RevisionContent.Tombstone }
+        val edit = textRevision(5, 50, "winner more", conflict)
+        val all = listOf(root, win, lose, conflict, deleted, edit)
+        assertEquals(listOf(conflict), RevisionGraph(all).openConflicts)
+        assertTrue(foldHeads(all).isEmpty())
+        assertEquals(edit, RevisionGraph(all).shownHead())
+        assertEquals(deleted.id, RevisionGraph(all - edit).heads.single().id)
+        assertTrue(RevisionGraph(all - edit).openConflicts.isEmpty())
+    }
+
+    /** Found by the simulator, seed 715: a tombstone twin with the lower id hid the text. */
+    @Test
+    fun ofTwinsTheOneWithTextGoesFirstWhateverItsId() {
+        val root = textRevision(1, 10, "line")
+        val edit = textRevision(2, 20, "kept", root)
+        val deleted = userRevision(3, 30, root) { RevisionContent.Tombstone }
+        val other = userRevision(4, 40, root, DEVICE_B) { RevisionContent.Tombstone }
+        val edits = listOf(root, edit, deleted, other)
+        val withText = mergeRevisions(RevisionGraph(edits), edit, other)
+        val textTwin = mergeRevisions(RevisionGraph(edits + withText), withText, deleted)
+        val bothDeleted = mergeRevisions(RevisionGraph(edits), deleted, other)
+        // A tombstone merge of the same edits, with the lowest id there is.
+        val lowest = RevisionId.fromMergeHash(ByteArray(RevisionId.MERGE_HASH_SIZE))
+        val tombstoneTwin = bothDeleted.copy(id = lowest, parents = setOf(deleted.id, withText.id))
+        val graph = RevisionGraph(edits + listOf(withText, textTwin, bothDeleted, tombstoneTwin))
+        assertEquals(listOf(textTwin), graph.liveHeads)
+    }
+
+    @Test
+    fun aConflictClosedByADeletionBesideAnotherHeadIsNotResolvedAgain(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val third = device("third")
+            val blobs = InMemoryBlobStore()
+            val note = phone.notes.create("", "line\nother\n")
+            listOf(phone, pc, third).forEach { store -> store.sync(blobs) }
+            phone.notes.edit(note.id, note.revisionId, "", "phone\nother\n")
+            pc.notes.edit(note.id, note.revisionId, "", "pc\nother\n")
+            repeat(2) { listOf(phone, pc).forEach { store -> store.sync(blobs) } }
+            third.notes.edit(note.id, note.revisionId, "", "line\nthird\n")
+            third.sync(blobs)
+            phone.sync(blobs)
+            val resolver = ConflictResolver(phone)
+            val mergeId = resolver.open().single().mergeId
+            phone.notes.setState(note.id, NoteState.TRASHED)
+            phone.notes.deleteForever(note.id)
+
+            assertNull(resolver.details(mergeId))
+            resolver.resolve(mergeId, ConflictResolution.KeepShown)
+
+            assertTrue(resolver.open().isEmpty())
+            assertEquals(
+                "line\nthird\n",
+                resolver.hidden().singleOrNull()?.body ?: phone.notes.get(note.id)?.body,
+            )
+        }
+
+    @Test
+    fun aForgedMergeIsRefusedWhicheverArrivesFirst(): TestResult =
+        runTest {
+            val root = textRevision(1, 10, "a\nb\n")
+            val one = textRevision(2, 20, "A\nb\n", root)
+            val two = textRevision(3, 30, "a\nB\n", root, device = DEVICE_B)
+            val honest = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
+            val wrong = honest.copy(deviceId = DEVICE_A)
+            val forged = wrong.copy(id = mergeRevisionId(wrong))
+
+            suspend fun heads(
+                name: String,
+                order: List<List<Revision>>,
+            ): Pair<Boolean, Set<Revision>> {
+                val store = device(name)
+                val blobs = InMemoryBlobStore()
+                order.forEach { revisions ->
+                    val folder = DeviceId.generate()
+                    val segment = Segment(folder, 1, revisions)
+                    val file = JsonGzipCodec().encode(segment)
+                    blobs.writeNew(BackendLayout.segmentPath(folder, 1), file)
+                    store.sync(blobs)
+                }
+                store.sync(blobs)
+                return (store.sync.revision(forged.id) != null) to
+                    RevisionGraph(store.sync.revisions(root.noteId)).heads.toSet()
+            }
+
+            val parentsFirst = heads("first", listOf(listOf(root, one, two), listOf(forged)))
+            val forgedFirst = heads("second", listOf(listOf(forged), listOf(root, one, two)))
+            assertEquals(false, parentsFirst.first)
+            assertEquals(parentsFirst, forgedFirst)
+        }
+
+    @Test
+    fun aMergeInTheSameBatchAsItsParentsGoesIn(): TestResult =
+        runTest {
+            val pc = device("pc")
+            val blobs = InMemoryBlobStore()
+            val root = textRevision(1, 10, "a\nb\n")
+            val one = textRevision(2, 20, "A\nb\n", root)
+            val two = textRevision(3, 30, "a\nB\n", root)
+            val merge = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
+            val low = DeviceId.parse("00000000-0000-4000-8000-000000000001")
+            val high = DeviceId.parse("ffffffff-0000-4000-8000-000000000001")
+            val mergeFile = JsonGzipCodec().encode(Segment(low, 1, listOf(merge)))
+            val parentsFile = JsonGzipCodec().encode(Segment(high, 1, listOf(root, one, two)))
+            blobs.writeNew(BackendLayout.segmentPath(low, 1), mergeFile)
+            blobs.writeNew(BackendLayout.segmentPath(high, 1), parentsFile)
+            assertTrue(pc.sync(blobs).issues.isEmpty())
+            assertNotNull(pc.sync.revision(merge.id))
+        }
+
+    @Test
+    fun aMergeWithoutItsParentsWaitsAndTheRestOfItsSegmentGoesIn(): TestResult =
+        runTest {
+            val pc = device("pc")
+            val blobs = InMemoryBlobStore()
+            val root = textRevision(1, 10, "a\nb\n")
+            val one = textRevision(2, 20, "A\nb\n", root)
+            val two = textRevision(3, 30, "a\nB\n", root)
+            val merge = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
+            val folder = DeviceId.generate()
+            val segment = Segment(folder, 1, listOf(one, merge))
+            blobs.writeNew(BackendLayout.segmentPath(folder, 1), JsonGzipCodec().encode(segment))
+            val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
+            assertEquals(SegmentProblem.WAITING, issue.problem)
+            assertNotNull(pc.sync.revision(one.id))
+            assertNull(pc.sync.revision(merge.id))
+            val rest = Segment(folder, 2, listOf(root, two))
+            blobs.writeNew(BackendLayout.segmentPath(folder, 2), JsonGzipCodec().encode(rest))
+            pc.sync(blobs)
+            pc.sync(blobs)
+            assertNotNull(pc.sync.revision(merge.id))
+            assertTrue(pc.sync.gaps("b", folder).isEmpty())
+        }
+
+    @Test
+    fun aBackendAddedAgainTakesNumbersAboveItsFiles(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val blobs = InMemoryBlobStore()
+            phone.notes.create("t", "one")
+            phone.sync(blobs)
+            pc.sync(blobs)
+            SyncEngine(phone, DeviceInfo("d", "test"), EmptyCoroutineContext).forget("b")
+            val second = phone.notes.create("t", "two")
+            val report = phone.sync(blobs)
+            assertTrue(report.issues.isEmpty(), "${report.issues}")
+            assertEquals(setOf(2L), phone.sync.ownSegments("b").keys)
+            pc.sync(blobs)
+            assertNotNull(pc.notes.get(second.id))
+        }
+
+    @Test
+    fun aStoreAddedUnderANewIdTakesNumbersAboveItsFiles(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val blobs = InMemoryBlobStore()
+            phone.notes.create("t", "one")
+            phone.sync(blobs, target = "old")
+            phone.notes.create("t", "two")
+            val report = phone.sync(blobs, target = "new")
+            assertTrue(report.issues.isEmpty(), "${report.issues}")
+            assertEquals(setOf(2L), phone.sync.ownSegments("new").keys)
+        }
+
+    @Test
+    fun aNumberIsNotUsedAgainAfterItsFileWasLostAndTheBackendForgotten(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val blobs = LossyBlobStore()
+            phone.notes.create("t", "one")
+            phone.sync(blobs)
+            pc.sync(blobs)
+            blobs.lose(BackendLayout.segmentPath(phone.deviceId, 1))
+            SyncEngine(phone, DeviceInfo("d", "test"), EmptyCoroutineContext).forget("b")
+            val second = phone.notes.create("t", "two")
+            phone.sync(blobs)
+            pc.sync(blobs)
+            assertNotNull(pc.notes.get(second.id))
+        }
+
+    @Test
+    fun aReaderPublishesWhatADeadWritersLostSegmentHeld(): TestResult =
+        runTest {
+            val writer = device("writer")
+            val reader = device("reader")
+            val late = device("late")
+            val blobs = LossyBlobStore()
+            val note = writer.notes.create("t", "body")
+            writer.sync(blobs)
+            reader.sync(blobs)
+            blobs.lose(BackendLayout.segmentPath(writer.deviceId, 1))
+            assertEquals(1, reader.sync(blobs).pushedSegments)
+            late.sync(blobs)
+            assertEquals("body", late.notes.get(note.id)?.body)
+        }
+
+    @Test
+    fun anEditBesideAMissingAncestorIsSurfacedAndStaysSo(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val reader = world.reader
+            val resolver = ConflictResolver(reader)
+            repeat(2) {
+                val hidden = resolver.hidden().single()
+                assertEquals(HiddenReason.MISSING_ANCESTOR, hidden.reason)
+                assertEquals(hidden, resolver.observeHidden().first().single())
+                val shown = reader.notes.get(world.note.id)?.body
+                assertEquals(setOf("writer 2\nb\n", "a\nreader\n"), setOf(shown, hidden.body))
+                val issues = reader.sync(world.blobs).issues
+                assertTrue(
+                    issues.any { issue -> (issue as? SyncIssue.SegmentNotApplied)?.number == 2L },
+                    "$issues",
+                )
+            }
+        }
+
+    @Test
+    fun theUserCanSettleAHeadWhoseAncestorWillNeverCome(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val reader = world.reader
+            val resolver = ConflictResolver(reader)
+            val hidden = resolver.hidden().single()
+            resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepBoth)
+            assertTrue(resolver.hidden().isEmpty())
+            assertEquals(1, reader.live(world.note.id).size)
+            assertTrue(reader.notes.list().any { it.body == hidden.body })
+            reader.sync(world.blobs)
+            assertTrue(resolver.hidden().isEmpty())
+            assertFailsWith<NoSuchHiddenHeadException> {
+                resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepShown)
+            }
+        }
+
+    @Test
+    fun theIssueEndsWhenTheAncestorComes(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val resolver = ConflictResolver(world.reader)
+            assertEquals(1, resolver.hidden().size)
+            world.writer.sync(world.blobs)
+            world.reader.sync(world.blobs)
+            assertTrue(resolver.hidden().isEmpty())
+            assertEquals(
+                "writer 2\nreader\n",
+                world.reader.notes
+                    .get(world.note.id)
+                    ?.body,
+            )
+        }
+
+    @Test
+    fun aHeadBesideAnOpenConflictIsSurfaced(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val third = device("third")
+            val blobs = InMemoryBlobStore()
+            val note = phone.notes.create("", "line\nother\n")
+            listOf(phone, pc, third).forEach { store -> store.sync(blobs) }
+            phone.notes.edit(note.id, note.revisionId, "", "phone\nother\n")
+            pc.notes.edit(note.id, note.revisionId, "", "pc\nother\n")
+            repeat(2) { listOf(phone, pc).forEach { store -> store.sync(blobs) } }
+            third.notes.edit(note.id, note.revisionId, "", "line\nthird\n")
+            third.sync(blobs)
+            phone.sync(blobs)
+            val hidden = ConflictResolver(phone).hidden().single()
+            assertEquals(HiddenReason.OPEN_CONFLICT, hidden.reason)
+            assertEquals("line\nthird\n", hidden.body)
+        }
+
+    @Test
+    fun aMergePastTheCapIsAConflict(): TestResult =
+        runTest {
+            // Long lines, so that the diff stays quick on the Native debug binary.
+            val large = "x".repeat(MAX_NOTE_CHARS * 2 / 3)
+            val root = textRevision(1, 10, "line\n")
+            val one = textRevision(2, 20, "${large}a\nline\n", root)
+            val two = textRevision(3, 30, "line\n${large}b\n", root)
+            val merge = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
+            assertTrue(merge.isConflictedMerge())
+            assertEquals(two.text.body, merge.text.body)
+        }
+
+    @Test
+    fun aNoteAtTheCapFitsASegment(): TestResult =
+        runTest {
+            val note = textRevision(1, 10, "x".repeat(MAX_NOTE_CHARS))
+            val (batches, tooLarge) = SegmentBatches(MAX_SEGMENT_BYTES).split(listOf(note))
+            assertEquals(1, batches.size)
+            assertTrue(tooLarge.isEmpty())
+        }
+
+    @Test
+    fun aNoteOverTheCapFromBeforeItBlocksNoOtherNote(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val blobs = InMemoryBlobStore()
+            val oversized = textRevision(1, 10, "x".repeat(MAX_NOTE_CHARS * 2))
+            phone.sync.write { phone.sync.insert(oversized) }
+            val other = phone.notes.create("t", "small")
+            val report = phone.sync(blobs)
+            assertEquals(listOf<SyncIssue>(SyncIssue.RevisionTooLarge(oversized.id)), report.issues)
+            pc.sync(blobs)
+            assertNotNull(pc.notes.get(other.id))
+            assertEquals(1, pc.notes.list(NoteFilter(state = NoteState.ACTIVE)).size)
+        }
+}

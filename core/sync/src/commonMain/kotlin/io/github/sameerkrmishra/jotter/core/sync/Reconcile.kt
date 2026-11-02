@@ -4,6 +4,8 @@ import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.RevisionKind
+import io.github.sameerkrmishra.jotter.core.storage.HiddenHead
+import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
 import io.github.sameerkrmishra.jotter.core.storage.OpenConflict
 import io.github.sameerkrmishra.jotter.core.storage.SyncStore
 
@@ -48,8 +50,18 @@ internal fun reconcile(
     merges.forEach(store::insert)
     val graph = RevisionGraph(stored + merges)
     store.replaceConflicts(noteId, graph.openConflicts.mapNotNull { openConflict(graph, it) })
+    store.replaceHiddenHeads(noteId, graph.hiddenHeads.map { hiddenHead(graph, it) })
     graph.shownHead()?.let(store::materialise)
     return merges
+}
+
+private fun hiddenHead(
+    graph: RevisionGraph,
+    head: Revision,
+): HiddenHead {
+    val text = head.content as RevisionContent.Snapshot
+    val reason = if (graph.isComplete) HiddenReason.OPEN_CONFLICT else HiddenReason.MISSING_ANCESTOR
+    return HiddenHead(head.id, head.noteId, text.title, text.body, reason)
 }
 
 /** The conflict table's row for [merge], or null while its losing parent has not arrived. */

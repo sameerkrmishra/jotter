@@ -69,6 +69,9 @@ public enum class SegmentProblem {
     /** Valid alone, but it contradicts the revisions here, for example by reusing an id. */
     REJECTED,
 
+    /** A merge in it waits for its parents. The rest of the segment was applied. */
+    WAITING,
+
     /** The backend listed it but could not give it. */
     UNREADABLE,
 

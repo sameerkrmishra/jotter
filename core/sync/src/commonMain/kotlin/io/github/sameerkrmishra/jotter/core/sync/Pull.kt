@@ -77,6 +77,10 @@ internal class Puller(
     ) {
         val cursor = store.cursor(backendId, device)
         val gaps = store.gaps(backendId, device)
+        (gaps - files.keys).forEach { number ->
+            val detail = "Still not on the backend"
+            problems += SyncIssue.SegmentNotApplied(device, number, SegmentProblem.MISSING, detail)
+        }
         var last = cursor
         for (number in files.keys.filter { it > cursor || it in gaps }.sorted()) {
             if (number - last > MAX_SEGMENT_SKIP) {
@@ -134,7 +138,7 @@ internal class Puller(
         store.write {
             val touched = LinkedHashSet<NoteId>()
             val inserted = mutableListOf<Revision>()
-            fetched.forEach { applySegment(it, touched, inserted) }
+            applySegments(fetched, touched, inserted)
             advanceCursors(fetched)
             seams.probe.at(SyncPoint.REVISIONS_INSERTED)
             store.observe(inserted.map { it.timestamp }).forEach {
@@ -146,39 +150,86 @@ internal class Puller(
         }
     }
 
-    private fun applySegment(
-        fetched: Fetched,
+    /**
+     * Applies [fetched]. A merge is stored only with both parents here, so that it is judged the
+     * same whatever came first: the others go in at once, and the merges follow as far as their
+     * parents allow, also from a later segment of the batch. A segment with a merge left over
+     * stays a gap, and the merge is tried again on the next cycle.
+     */
+    private fun applySegments(
+        fetched: List<Fetched>,
         touched: MutableSet<NoteId>,
         inserted: MutableList<Revision>,
     ) {
-        val segment = fetched.segment
-        if (segment == null) {
-            store.addGap(backendId, fetched.device, fetched.number)
-            return
+        val accepted = fetched.filter { acceptSegment(it) }
+        val waiting = mutableListOf<Pair<Fetched, Revision>>()
+        accepted.forEach { item ->
+            val (merges, others) =
+                checkNotNull(item.segment).revisions.partition { it.kind != RevisionKind.User }
+            others.forEach { store(item, it, touched, inserted) }
+            merges.forEach { waiting += item to it }
         }
-        val rejection = rejectionOf(store, segment)
-        if (rejection != null) {
-            store.addGap(backendId, fetched.device, fetched.number)
-            problems +=
-                SyncIssue.SegmentNotApplied(
-                    fetched.device,
-                    fetched.number,
-                    SegmentProblem.REJECTED,
-                    rejection,
-                )
-            return
-        }
-        segment.revisions.forEach { revision ->
-            if (store.revision(revision.id) == null) {
-                store.insert(revision)
-                inserted += revision
-                newRevisions++
+        val refused = HashSet<Fetched>()
+        do {
+            val ready =
+                waiting.filter { (_, merge) ->
+                    merge.parents.all {
+                        store.revision(it) !=
+                            null
+                    }
+                }
+            ready.forEach { (item, merge) ->
+                val problem = mergeProblem(merge, merge.parents.mapNotNull(store::revision))
+                if (problem == null) {
+                    store(item, merge, touched, inserted)
+                } else {
+                    report(item, SegmentProblem.REJECTED, problem)
+                    refused += item
+                }
             }
-            store.markOnBackend(backendId, revision.id)
-            touched += revision.noteId
+            waiting -= ready.toSet()
+        } while (ready.isNotEmpty())
+        waiting.forEach { (item, merge) ->
+            report(item, SegmentProblem.WAITING, "Merge ${merge.id} waits for its parents")
         }
-        store.removeGap(backendId, fetched.device, fetched.number)
-        applied++
+        val unfinished = refused + waiting.map { it.first }
+        accepted.filter { it !in unfinished }.forEach { item ->
+            store.removeGap(backendId, item.device, item.number)
+            applied++
+        }
+        unfinished.forEach { store.addGap(backendId, it.device, it.number) }
+    }
+
+    /** Whether the segment of [item] can go in. If not, it becomes a gap and leaves no trace. */
+    private fun acceptSegment(item: Fetched): Boolean {
+        val rejection = item.segment?.let { rejectionOf(store, it) }
+        if (rejection != null) report(item, SegmentProblem.REJECTED, rejection)
+        val isAccepted = item.segment != null && rejection == null
+        if (!isAccepted) store.addGap(backendId, item.device, item.number)
+        return isAccepted
+    }
+
+    private fun report(
+        item: Fetched,
+        problem: SegmentProblem,
+        detail: String,
+    ) {
+        problems += SyncIssue.SegmentNotApplied(item.device, item.number, problem, detail)
+    }
+
+    private fun store(
+        item: Fetched,
+        revision: Revision,
+        touched: MutableSet<NoteId>,
+        inserted: MutableList<Revision>,
+    ) {
+        if (store.revision(revision.id) == null) {
+            store.insert(revision)
+            inserted += revision
+            newRevisions++
+        }
+        store.markOnBackend(backendId, revision.id, item.device, item.number)
+        touched += revision.noteId
     }
 
     /** Moves each cursor past what was processed; numbers it skips become gaps. */
@@ -216,11 +267,11 @@ private fun Segment.weight(): Long =
 private const val REVISION_WEIGHT = 1024L
 
 /**
- * Returns why [segment] contradicts the stored revisions, or null. The order of arrival must not
- * matter, so each rule is checked from both ends of an edge: a revision against the parents known
- * so far, and against the children that came first. It runs before anything is written, so a
- * rejected segment leaves no trace. The rules also keep cycles out of the graph, as a child must
- * not be stamped below its parent.
+ * Returns why [segment] contradicts the stored revisions, or null. It runs before anything is
+ * written, so a rejected segment leaves no trace. A user revision can arrive before its parent,
+ * so its rules are checked from both ends of an edge, against the parents known so far and the
+ * children that came first. They also keep cycles out of the graph, as a child must not be stamped
+ * below its parent. Merges wait for their parents, and [mergeProblem] judges them one by one.
  */
 internal fun rejectionOf(
     store: SyncStore,
@@ -236,11 +287,14 @@ internal fun rejectionOf(
         if (stored != null && stored != revision) {
             "Revision ${revision.id} is stored with other content"
         } else {
-            val parents = revision.parents.mapNotNull { incoming[it] ?: store.revision(it) }
+            val parents =
+                revision.parents
+                    .mapNotNull { incoming[it] ?: store.revision(it) }
+                    .takeIf { revision.kind == RevisionKind.User }
+                    .orEmpty()
             val children = store.childrenOf(revision.id).mapNotNull(store::revision)
             parents.firstNotNullOfOrNull { edgeProblem(it, revision) }
                 ?: children.firstNotNullOfOrNull { edgeProblem(revision, it) }
-                ?: mergeProblem(revision, parents)
         }
     }
 }
@@ -267,18 +321,18 @@ private fun edgeProblem(
         }
     }
 
-/** Once both parents are known, a merge's stamp and loser must be the ones they decide. */
+/** With both [parents] here, a merge must be of their note, with their stamp and loser. */
 private fun mergeProblem(
     revision: Revision,
     parents: List<Revision>,
 ): String? {
-    val merge = revision.kind as? RevisionKind.AutomaticMerge
-    if (merge == null || parents.size != revision.parents.size) return null
+    val merge = revision.kind as RevisionKind.AutomaticMerge
     val higher = parents.maxBy { it.stamp }
     val lower = parents.minBy { it.stamp }
     val isWellFormed =
         revision.timestamp == higher.timestamp &&
             revision.deviceId == higher.deviceId &&
             (merge.losingParent == null || merge.losingParent == lower.id)
-    return "Merge ${revision.id} does not follow from its parents".takeUnless { isWellFormed }
+    return parents.firstNotNullOfOrNull { edgeProblem(it, revision) }
+        ?: "Merge ${revision.id} does not follow from its parents".takeUnless { isWellFormed }
 }

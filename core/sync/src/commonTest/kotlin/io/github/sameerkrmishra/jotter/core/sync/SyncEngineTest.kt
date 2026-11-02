@@ -401,12 +401,15 @@ class SyncEngineTest {
     fun anotherFileAtOurPathIsReportedAndNothingIsOverwritten(): TestResult =
         runTest {
             val phone = device("phone")
-            val blobs = InMemoryBlobStore()
+            val blobs = ScriptedStore()
+            phone.sync(blobs)
             phone.notes.create("t", "body")
+            blobs.writeFailureBefore = BlobStoreFailureException("disk full")
+            assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
             val path = BackendLayout.segmentPath(phone.deviceId, 1)
             val foreign = textRevision(9, 10, "a copied database wrote this")
             val bytes = JsonGzipCodec().encode(Segment(phone.deviceId, 1, listOf(foreign)))
-            blobs.writeNew(path, bytes)
+            blobs.inner.writeNew(path, bytes)
             val report = phone.sync(blobs)
             assertEquals(listOf<SyncIssue>(SyncIssue.SegmentCollision(1)), report.issues)
             assertTrue(blobs.read(path).contentEquals(bytes))
@@ -417,9 +420,12 @@ class SyncEngineTest {
     fun aDamagedFileAtOurPathIsACollisionToo(): TestResult =
         runTest {
             val phone = device("phone")
-            val blobs = InMemoryBlobStore()
+            val blobs = ScriptedStore()
+            phone.sync(blobs)
             phone.notes.create("t", "body")
-            blobs.writeNew(BackendLayout.segmentPath(phone.deviceId, 1), ByteArray(3))
+            blobs.writeFailureBefore = BlobStoreFailureException("disk full")
+            assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
+            blobs.inner.writeNew(BackendLayout.segmentPath(phone.deviceId, 1), ByteArray(3))
             assertIs<SyncIssue.SegmentCollision>(phone.sync(blobs).issues.single())
         }
 
