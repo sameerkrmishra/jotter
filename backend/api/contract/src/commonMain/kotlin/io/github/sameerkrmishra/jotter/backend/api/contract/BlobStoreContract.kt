@@ -130,7 +130,7 @@ public abstract class BlobStoreContract {
     public fun listReturnsEveryFileWithItsSizeInPathOrder(): TestResult =
         contractTest {
             val store = newStore()
-            // Written out of order. "." sorts before "/", so a directory walk alone gets this wrong.
+            // Written out of order. "." sorts before "/", so a directory walk alone gets it wrong.
             store.writeNew("z", ByteArray(3))
             store.writeNew("a/b/c", ByteArray(1))
             store.writeNew("a/a", ByteArray(0))
