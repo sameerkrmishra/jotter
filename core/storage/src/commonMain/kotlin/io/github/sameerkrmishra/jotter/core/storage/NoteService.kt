@@ -62,6 +62,7 @@ public class NoteService internal constructor(
     /**
      * Creates an active note and returns it.
      *
+     * @throws NoteTooLargeException if the text is over [MAX_NOTE_CHARS].
      * @throws StorageBusyException if another process kept the database locked.
      */
     public fun create(
@@ -71,6 +72,7 @@ public class NoteService internal constructor(
         pinned: Boolean = false,
     ): Note =
         write { hlc ->
+            requireNoteSize(title, body)
             val stamp = nextStamp(hlc, after = null)
             val content =
                 RevisionContent.Snapshot(
@@ -109,6 +111,8 @@ public class NoteService internal constructor(
         write { _ ->
             if (revisions.forNote(note.id).isNotEmpty()) {
                 ImportResult.SKIPPED
+            } else if (note.title.length.toLong() + note.body.length > MAX_NOTE_CHARS) {
+                ImportResult.TOO_LARGE
             } else {
                 val createdMillis = note.createdAt.toEpochMilliseconds()
                 val editedMillis = note.editedAt.toEpochMilliseconds()
@@ -180,6 +184,7 @@ public class NoteService internal constructor(
      * @param basedOn The [Note.revisionId] the editor showed when the user started editing.
      * @throws StaleEditException if the text changes and [basedOn] is not a revision of this note,
      *   or its title or body differ from the current ones.
+     * @throws NoteTooLargeException if the new text is over [MAX_NOTE_CHARS].
      * @throws NoSuchNoteException if there is no note [id].
      * @throws StorageBusyException if another process kept the database locked.
      */
@@ -192,11 +197,9 @@ public class NoteService internal constructor(
         change(id, basedOn) { current ->
             val newTitle = title.toStorableText()
             val newBody = body.toStorableText()
-            if (newTitle == current.title && newBody == current.body) {
-                null
-            } else {
-                { _ -> current.copy(title = newTitle, body = newBody) }
-            }
+            val isSame = newTitle == current.title && newBody == current.body
+            if (!isSame) requireNoteSize(newTitle, newBody)
+            if (isSame) null else { _ -> current.copy(title = newTitle, body = newBody) }
         }
 
     /**
@@ -282,9 +285,11 @@ public class NoteService internal constructor(
             }
             val stamp = nextStamp(hlc, after = current.updatedAt)
             store(userRevision(stamp, current.id, current.revisionId, RevisionContent.Tombstone))
-            // A tombstone closes the conflicts behind it. One beside it comes back with the next
-            // sync, which rebuilds a note's conflicts whenever the note has another head.
-            database.syncQueries.deleteConflictsOfNote(id.toString())
+            // The only head is now a tombstone, which closes what is behind it. With other heads
+            // the next sync decides, and until then the note's rows stand.
+            if (id !in revisions.notesWithSeveralHeads()) {
+                database.syncQueries.deleteConflictsOfNote(id.toString())
+            }
         }
     }
 

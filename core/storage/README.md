@@ -28,7 +28,9 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 |---|---|
 | `linuxDatabasePath`, `DATABASE_ENVVAR` | Where the Linux apps keep the database, so the CLI and the desktop app agree. Plain strings, as this module has no file API |
 | `NoteStore` | Opens or creates the database file and this device's id. The composition root owns it and closes it |
-| `SyncStore`, `OpenConflict` | The tables behind sync, for `core:sync` only |
+| `SyncStore`, `SyncStoreApi` | The tables behind sync. An opt-in at error level keeps it to `core:sync`, as Kotlin has no friend modules |
+| `OpenConflict`, `HiddenHead`, `HiddenReason` | What the conflict screen lists |
+| `MAX_NOTE_CHARS`, `requireNoteSize`, `NoteTooLargeException` | The cap on a note's text, which keeps every note small enough to sync ([ADR-0014](../../docs/adr/0014-sync-failure-handling.md)) |
 | `IdSource`, `RandomIds` | Where new ids come from, so that a simulation can replay |
 | `NoteService` | `create`, `importNote`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows |
 | `ImportedNote`, `ImportResult` | What `importNote` takes, and whether it imported the note or skipped it |
@@ -54,7 +56,8 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 
 | `sync_cursor`, `sync_gap` | Per backend and device, the last segment processed, and numbers below it that were not applied |
 | `sync_segment`, `backend_revision` | This device's segments on each backend, and what is known to be there |
-| `conflict` | Open conflicts with the text that lost: a cache of what the revisions say, kept by `core:sync` |
+| `conflict`, `hidden_head` | Open conflicts with the text that lost, and heads a note does not show: caches of what the revisions say, kept by `core:sync` |
+| `sync_last_number` | The last segment number used on a backend. It survives forgetting the backend, so a number is never used twice |
 
 `backend` (PLAN.md §4) comes with M4, as a migration.
 

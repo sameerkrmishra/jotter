@@ -13,7 +13,7 @@ package io.github.sameerkrmishra.jotter.core.model
  *   loser and carries a [RevisionContent.Snapshot], whose text is the one shown.
  * - A revision is not its own parent, and a tombstone has a parent: only an existing note can
  *   be deleted.
- * - Only a user revision with a [RevisionContent.Snapshot] has [resolves], and it names a merge.
+ * - Only a user revision with a [RevisionContent.Snapshot] has [resolves].
  *
  * Rules that need other revisions, such as a user revision's timestamp being greater than its
  * parents', are the job of the code that creates and applies revisions.
@@ -29,8 +29,8 @@ package io.github.sameerkrmishra.jotter.core.model
  *   recorded, so every device computes the same revision.
  * @property kind Whether a person or the merge code made this revision.
  * @property content The note's content as of this revision, or a tombstone.
- * @property resolves For a conflict resolution, the conflicted merge it closes (ADR-0003). Apart
- *   from this, a resolution is an ordinary user revision on a head that descends from that merge.
+ * @property resolves For a resolution, the conflicted merge it closes (ADR-0003), or the hidden
+ *   head the user has dealt with (ADR-0014). Apart from this, it is an ordinary user revision.
  */
 public data class Revision(
     val id: RevisionId,
@@ -51,7 +51,6 @@ public data class Revision(
             require(kind == RevisionKind.User && content is RevisionContent.Snapshot) {
                 "Only a user revision with a snapshot can resolve a conflict"
             }
-            require(resolves.isMergeHash) { "Only a merge can be resolved, not $resolves" }
         }
         when (kind) {
             RevisionKind.User -> {

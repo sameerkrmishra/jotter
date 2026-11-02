@@ -34,12 +34,49 @@ public data class OpenConflict(
     val losingBody: String,
 )
 
+/** Why a [HiddenHead] waits. */
+public enum class HiddenReason {
+    /** An ancestor has not arrived, and may never. The user can settle the head. */
+    MISSING_ANCESTOR,
+
+    /** An open conflict holds merging back. The head merges once that is resolved. */
+    OPEN_CONFLICT,
+}
+
+/**
+ * A head with text that its note does not show until a merge can run (ADR-0014).
+ *
+ * @property revisionId The head.
+ * @property noteId Its note.
+ * @property title Its title.
+ * @property body Its body.
+ * @property reason Why it waits.
+ */
+public data class HiddenHead(
+    val revisionId: RevisionId,
+    val noteId: NoteId,
+    val title: String,
+    val body: String,
+    val reason: HiddenReason,
+)
+
+/**
+ * Marks what is for `core:sync` alone. Kotlin has no friend modules, so [SyncStore] cannot be
+ * `internal` to `core:storage` and still reach `core:sync`. No app needs it: this opt-in makes any
+ * other use a compile error.
+ */
+@RequiresOptIn("Only core:sync may use SyncStore", RequiresOptIn.Level.ERROR)
+@Retention(AnnotationRetention.BINARY)
+@Target(AnnotationTarget.CLASS, AnnotationTarget.PROPERTY)
+public annotation class SyncStoreApi
+
 /**
  * The tables behind sync, for `core:sync`, which owns every rule about them: this class stores
  * and reads, and decides nothing. See PLAN.md §6 and ADR-0004.
  *
  * Functions that write belong in one [write]. All of them block on database I/O.
  */
+@SyncStoreApi
 @Suppress("TooManyFunctions") // One small function per query, kept together on purpose.
 public class SyncStore internal constructor(
     private val database: JotterDatabase,
@@ -184,8 +221,13 @@ public class SyncStore internal constructor(
         revisionIds: List<RevisionId>,
     ) {
         queries.insertOwnSegment(backend, number)
+        queries.upsertLastNumber(backend, number)
         revisionIds.forEach { queries.insertPushedRevision(backend, it.toString(), number) }
     }
+
+    /** Returns the highest number this device ever gave a segment on [backend], or 0. */
+    public fun lastSegmentNumber(backend: String): Long =
+        queries.selectLastNumber(backend).executeAsOneOrNull() ?: 0
 
     /** Records that segment [number] of this device is on [backend]. */
     public fun markSegmentPublished(
@@ -209,15 +251,35 @@ public class SyncStore internal constructor(
     public fun unpushed(backend: String): List<RevisionId> =
         queries.selectUnpushed(backend).executeAsList().map(RevisionId::parse)
 
-    /** Records that the stored revision [id] was found on [backend]. */
+    /** Records that the stored revision [id] was found on [backend], in a segment of [device]. */
     public fun markOnBackend(
         backend: String,
         id: RevisionId,
+        device: DeviceId,
+        number: Long,
     ) {
-        queries.insertPulledRevision(backend, id.toString())
+        queries.insertPulledRevision(backend, id.toString(), device.toString(), number)
     }
 
-    /** Forgets everything about [backend] (PLAN.md §6.5), in one transaction. */
+    /** Returns the segments of other devices that revisions were recorded from on [backend]. */
+    public fun pulledSegments(backend: String): List<Pair<DeviceId, Long>> =
+        queries.selectPulledSegments(backend).executeAsList().map { row ->
+            DeviceId.parse(checkNotNull(row.source_device)) to checkNotNull(row.source_segment)
+        }
+
+    /** Stops counting the revisions read from segment [number] of [device] as on [backend]. */
+    public fun forgetPulledSegment(
+        backend: String,
+        device: DeviceId,
+        number: Long,
+    ) {
+        queries.deleteRevisionsOfPulledSegment(backend, device.toString(), number)
+    }
+
+    /**
+     * Forgets [backend] (PLAN.md §6.5), in one transaction, but for the last number used: others
+     * may have read it, so it can never be given to other content.
+     */
     public fun forgetBackend(backend: String) {
         write {
             queries.deleteBackendCursors(backend)
@@ -243,6 +305,35 @@ public class SyncStore internal constructor(
             )
         }
     }
+
+    /** Replaces the hidden heads of the note [noteId] with [heads]. */
+    public fun replaceHiddenHeads(
+        noteId: NoteId,
+        heads: List<HiddenHead>,
+    ) {
+        queries.deleteHiddenHeadsOfNote(noteId.toString())
+        heads.forEach { head ->
+            queries.insertHiddenHead(
+                head.revisionId.toString(),
+                head.noteId.toString(),
+                head.title,
+                head.body,
+                head.reason == HiddenReason.MISSING_ANCESTOR,
+            )
+        }
+    }
+
+    /** Returns every hidden head, by note. */
+    public fun hiddenHeads(): List<HiddenHead> =
+        queries.selectHiddenHeads(::hiddenHeadOfRow).executeAsList()
+
+    /** Emits [hiddenHeads] now and again whenever they change. */
+    public fun observeHiddenHeads(): Flow<List<HiddenHead>> =
+        queries
+            .selectHiddenHeads(::hiddenHeadOfRow)
+            .asFlow()
+            .mapToList(queryContext)
+            .distinctUntilChanged()
 
     /** Returns every open conflict, by note. */
     public fun conflicts(): List<OpenConflict> =
@@ -276,6 +367,21 @@ public class SyncStore internal constructor(
             result
         }
 }
+
+private fun hiddenHeadOfRow(
+    revisionId: String,
+    noteId: String,
+    title: String,
+    body: String,
+    isIncomplete: Boolean,
+): HiddenHead =
+    HiddenHead(
+        revisionId = RevisionId.parse(revisionId),
+        noteId = NoteId.parse(noteId),
+        title = title,
+        body = body,
+        reason = if (isIncomplete) HiddenReason.MISSING_ANCESTOR else HiddenReason.OPEN_CONFLICT,
+    )
 
 private fun conflictOfRow(
     mergeId: String,

@@ -22,14 +22,32 @@ CREATE TABLE sync_segment (
   PRIMARY KEY (backend_id, number)
 ) WITHOUT ROWID;
 
+CREATE TABLE sync_last_number (
+  backend_id TEXT NOT NULL PRIMARY KEY,
+  last_number INTEGER NOT NULL
+) WITHOUT ROWID;
+
 CREATE TABLE backend_revision (
   backend_id TEXT NOT NULL,
   revision_id TEXT NOT NULL REFERENCES revision(id),
   segment INTEGER,
+  source_device TEXT,
+  source_segment INTEGER,
   PRIMARY KEY (backend_id, revision_id)
 ) WITHOUT ROWID;
 
 CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
+CREATE INDEX backend_revision_by_source ON backend_revision(backend_id, source_device, source_segment);
+
+CREATE TABLE hidden_head (
+  revision_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_incomplete INTEGER AS kotlin.Boolean NOT NULL CHECK (is_incomplete IN (0, 1))
+) WITHOUT ROWID;
+
+CREATE INDEX hidden_head_by_note ON hidden_head(note_id);
 
 CREATE TABLE conflict (
   merge_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),

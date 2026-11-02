@@ -30,16 +30,40 @@ CREATE TABLE sync_segment (
   PRIMARY KEY (backend_id, number)
 ) WITHOUT ROWID;
 
+-- The highest number this device ever gave a segment on a backend. It survives forgetting the
+-- backend: a number may have been read by others and lost since, so it can never be used again.
+CREATE TABLE sync_last_number (
+  backend_id TEXT NOT NULL PRIMARY KEY,
+  last_number INTEGER NOT NULL
+) WITHOUT ROWID;
+
 -- The revisions known to be on a backend. segment is this device's own segment that holds the
--- revision, or NULL if the revision was found there in another device's segment.
+-- revision. Otherwise source_device and source_segment say which segment it was read from, so that
+-- it counts as gone when that segment does.
 CREATE TABLE backend_revision (
   backend_id TEXT NOT NULL,
   revision_id TEXT NOT NULL REFERENCES revision(id),
   segment INTEGER,
+  source_device TEXT,
+  source_segment INTEGER,
   PRIMARY KEY (backend_id, revision_id)
 ) WITHOUT ROWID;
 
 CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
+CREATE INDEX backend_revision_by_source ON backend_revision(backend_id, source_device, source_segment);
+
+-- The heads with text that a note does not show until a merge can run, with their text. A cache of
+-- what the revisions say, like conflict. is_incomplete: a parent is missing, which may never
+-- change. Otherwise an open conflict holds the merge back.
+CREATE TABLE hidden_head (
+  revision_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_incomplete INTEGER AS kotlin.Boolean NOT NULL CHECK (is_incomplete IN (0, 1))
+) WITHOUT ROWID;
+
+CREATE INDEX hidden_head_by_note ON hidden_head(note_id);
 
 -- The open conflicts: conflicted merges that nothing closed, with the text that lost. A cache of
 -- what the revisions say, rewritten whenever a note's revisions change. A row needs the losing
@@ -75,6 +99,13 @@ deleteGap:
 DELETE FROM sync_gap
 WHERE backend_id = :backendId AND device_id = :deviceId AND number = :number;
 
+selectLastNumber:
+SELECT last_number FROM sync_last_number WHERE backend_id = :backendId;
+
+upsertLastNumber:
+INSERT INTO sync_last_number(backend_id, last_number) VALUES (:backendId, :lastNumber)
+ON CONFLICT (backend_id) DO UPDATE SET last_number = excluded.last_number;
+
 selectOwnSegments:
 SELECT number, is_published FROM sync_segment WHERE backend_id = :backendId ORDER BY number;
 
@@ -101,8 +132,27 @@ INSERT INTO backend_revision(backend_id, revision_id, segment)
 VALUES (:backendId, :revisionId, :segment);
 
 insertPulledRevision:
-INSERT OR IGNORE INTO backend_revision(backend_id, revision_id, segment)
-VALUES (:backendId, :revisionId, NULL);
+INSERT OR IGNORE INTO backend_revision(
+  backend_id, revision_id, segment, source_device, source_segment
+) VALUES (:backendId, :revisionId, NULL, :sourceDevice, :sourceSegment);
+
+selectPulledSegments:
+SELECT DISTINCT source_device, source_segment FROM backend_revision
+WHERE backend_id = :backendId AND source_device IS NOT NULL AND source_segment IS NOT NULL;
+
+deleteRevisionsOfPulledSegment:
+DELETE FROM backend_revision
+WHERE backend_id = :backendId AND source_device = :sourceDevice AND source_segment = :sourceSegment;
+
+deleteHiddenHeadsOfNote:
+DELETE FROM hidden_head WHERE note_id = :noteId;
+
+insertHiddenHead:
+INSERT INTO hidden_head(revision_id, note_id, title, body, is_incomplete)
+VALUES (:revisionId, :noteId, :title, :body, :isIncomplete);
+
+selectHiddenHeads:
+SELECT * FROM hidden_head ORDER BY note_id, revision_id;
 
 deleteBackendCursors:
 DELETE FROM sync_cursor WHERE backend_id = :backendId;

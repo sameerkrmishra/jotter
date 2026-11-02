@@ -73,6 +73,7 @@ new one.
 | Sharees | Imported as a private note, warning `SHARING_DROPPED` with their number |
 | The note has a history here, even a tombstone | Skipped, with no warnings: nothing was imported |
 | The database cannot store the note, such as tens of thousands of labels | Failure `STORAGE_ERROR` with a fixed detail, as storage messages can quote a note; its transaction rolls back and the run goes on |
+| The note is over `MAX_NOTE_CHARS` | Failure `NOTE_TOO_LARGE`, and the run goes on: such a note could never sync |
 | The database stays locked | Failure `STORAGE_BUSY`, and the run stops |
 
 Each note is its own transaction. Only a database that stays locked ends a run

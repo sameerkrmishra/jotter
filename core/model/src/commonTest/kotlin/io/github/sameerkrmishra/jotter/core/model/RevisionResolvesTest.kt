@@ -40,8 +40,8 @@ class RevisionResolvesTest {
     }
 
     @Test
-    fun onlyAMergeCanBeResolved() {
-        assertFailsWith<IllegalArgumentException> { revision(parent) }
+    fun aHiddenUserRevisionCanBeNamedToo() {
+        assertEquals(parent, revision(parent).resolves)
     }
 
     @Test

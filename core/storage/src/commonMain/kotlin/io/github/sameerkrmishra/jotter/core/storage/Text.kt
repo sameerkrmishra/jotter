@@ -1,5 +1,28 @@
 package io.github.sameerkrmishra.jotter.core.storage
 
+/**
+ * The most UTF-16 units a note's title and body can hold together. It sits below what a sync
+ * segment can carry, so a note that can be written can sync (ADR-0014). A note above it from
+ * before the cap stays readable, and its tags, pin and state still change, but its text cannot grow
+ * or be saved unless it comes under the cap.
+ */
+public const val MAX_NOTE_CHARS: Int = 5_000_000
+
+/** The title and body together are over [MAX_NOTE_CHARS]. */
+public class NoteTooLargeException(
+    /** Their size in UTF-16 units. */
+    public val chars: Long,
+) : IllegalArgumentException("A note can hold $MAX_NOTE_CHARS characters, not $chars")
+
+/** Refuses a text that is over [MAX_NOTE_CHARS], with a [NoteTooLargeException]. */
+public fun requireNoteSize(
+    title: String,
+    body: String,
+) {
+    val chars = title.length.toLong() + body.length
+    if (chars > MAX_NOTE_CHARS) throw NoteTooLargeException(chars)
+}
+
 /** What [toStorableText] puts in place of a character that cannot be stored. */
 private const val REPLACEMENT_CHARACTER = '\uFFFD'
 

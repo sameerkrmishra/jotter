@@ -98,5 +98,8 @@ public data class KeepImportFailure(
 
         /** The database could not store the note, for example because it has too many tags. */
         STORAGE_ERROR,
+
+        /** The note is over the size limit of a note, so it was not imported. */
+        NOTE_TOO_LARGE,
     }
 }

@@ -22,14 +22,15 @@ internal const val JOTTER_APPLICATION_ID = 0x4A4F5452
  *
  * @property deviceId This installation's identity, created with the database and kept for good.
  * @property notes Creates, changes, lists, observes and searches the notes.
- * @property sync What `core:sync` reads and writes. Nothing else should use it.
+ * @property sync What `core:sync` reads and writes. Nothing else can use it (see [SyncStoreApi]).
  */
+@OptIn(SyncStoreApi::class)
 public class NoteStore private constructor(
     internal val driver: SqlDriver,
     internal val database: JotterDatabase,
     public val deviceId: DeviceId,
     public val notes: NoteService,
-    public val sync: SyncStore,
+    @property:SyncStoreApi public val sync: SyncStore,
 ) : AutoCloseable {
     /**
      * Closes the database. Waits for a write running on another thread to finish. The store and

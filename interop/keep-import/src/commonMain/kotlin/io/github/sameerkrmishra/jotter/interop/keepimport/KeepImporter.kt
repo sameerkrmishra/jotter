@@ -25,6 +25,8 @@ private val keepJson: Json =
 private const val MALFORMED_DETAIL = "Not a valid Keep note"
 
 /** The fixed detail of a [KeepImportFailure.Kind.STORAGE_ERROR] failure. */
+private const val TOO_LARGE_DETAIL = "The note is larger than a note can be, and was not imported."
+
 private const val STORAGE_ERROR_DETAIL = "The database could not store this note"
 
 /**
@@ -135,6 +137,10 @@ public class KeepImporter internal constructor(
             when (storeNote(source, imported)) {
                 ImportResult.SKIPPED -> {
                     skipped += ref
+                }
+
+                ImportResult.TOO_LARGE -> {
+                    fail(source, KeepImportFailure.Kind.NOTE_TOO_LARGE, TOO_LARGE_DETAIL)
                 }
 
                 ImportResult.IMPORTED -> {
