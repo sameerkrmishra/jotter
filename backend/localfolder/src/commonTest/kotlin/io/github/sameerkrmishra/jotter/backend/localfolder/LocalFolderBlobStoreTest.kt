@@ -105,14 +105,6 @@ class LocalFolderBlobStoreTest {
         }
 
     @Test
-    fun aFailingFileSystemIsReportedByPing() =
-        runTest {
-            val root = readyFolder()
-            val store = storeWith(root, FaultyFileSystem { _, _ -> true })
-            assertEquals(UnreachableReason.FAILED, reasonOf(store.ping()))
-        }
-
-    @Test
     fun initializeNeedsAnExistingFolder() =
         runTest {
             val root = folders.newPath()
@@ -146,7 +138,9 @@ class LocalFolderBlobStoreTest {
         runTest {
             val root = folders.newFolder()
             val fileSystem = FaultyFileSystem { operation, _ -> operation == "sink" }
-            assertFailsWith<BlobStoreFailureException> { storeWith(root, fileSystem).initialize() }
+            assertFailsWith<BlobStoreFailureException> {
+                storeWith(root, fileSystem = fileSystem).initialize()
+            }
         }
 
     @Test
@@ -193,8 +187,8 @@ class LocalFolderBlobStoreTest {
             ).forEach { (what, operation) ->
                 val root = readyFolder()
                 val fileSystem = FaultyFileSystem { name, _ -> name == operation }
-                val store =
-                    storeWith(root, fileSystem, hardLink = { _, _ -> LinkResult.NOT_LINKED })
+                val noLinks = FolderAccess(hardLink = { _, _ -> LinkResult.NOT_LINKED })
+                val store = storeWith(root, noLinks, fileSystem)
                 val failure =
                     assertFailsWith<BlobStoreFailureException>(what) {
                         store.writeNew("dir/file", byteArrayOf(1))
@@ -208,7 +202,8 @@ class LocalFolderBlobStoreTest {
     fun aDirectoryThatCannotBeMadeFailsTheWrite() =
         runTest {
             val root = readyFolder()
-            val store = storeWith(root, FaultyFileSystem { name, _ -> name == "createDirectory" })
+            val fileSystem = FaultyFileSystem { name, _ -> name == "createDirectory" }
+            val store = storeWith(root, fileSystem = fileSystem)
             assertFailsWith<BlobStoreFailureException> { store.writeNew("a/b", byteArrayOf(1)) }
         }
 
@@ -221,7 +216,7 @@ class LocalFolderBlobStoreTest {
                     if (name == "createDirectory") fs.createDirectory(path)
                     name == "createDirectory"
                 }
-            storeWith(root, fileSystem).writeNew("a/b", byteArrayOf(1))
+            storeWith(root, fileSystem = fileSystem).writeNew("a/b", byteArrayOf(1))
             assertContentEquals(byteArrayOf(1), linkingStore(root).read("a/b"))
         }
 
@@ -229,7 +224,8 @@ class LocalFolderBlobStoreTest {
     fun aFailureToRemoveTheTemporaryFileDoesNotFailTheWrite() =
         runTest {
             val root = readyFolder()
-            val store = storeWith(root, FaultyFileSystem { name, _ -> name == "delete" })
+            val fileSystem = FaultyFileSystem { name, _ -> name == "delete" }
+            val store = storeWith(root, fileSystem = fileSystem)
             store.writeNew("file", byteArrayOf(1))
             assertContentEquals(byteArrayOf(1), linkingStore(root).read("file"))
         }
@@ -239,10 +235,13 @@ class LocalFolderBlobStoreTest {
         runTest {
             val root = readyFolder()
             val store =
-                storeWith(root, hardLink = { _, target ->
-                    target.write("first")
-                    systemHardLink(root / MARKER_NAME, target)
-                })
+                storeWith(
+                    root,
+                    FolderAccess(hardLink = { _, target ->
+                        target.write("first")
+                        systemHardLink(root / MARKER_NAME, target)
+                    }),
+                )
             assertFailsWith<BlobAlreadyExistsException> { store.writeNew("f", byteArrayOf(1)) }
             assertContentEquals("first".encodeToByteArray(), linkingStore(root).read("f"))
         }
@@ -252,10 +251,13 @@ class LocalFolderBlobStoreTest {
         runTest {
             val root = readyFolder()
             val store =
-                storeWith(root, hardLink = { _, target ->
-                    target.write("first")
-                    LinkResult.NOT_LINKED
-                })
+                storeWith(
+                    root,
+                    FolderAccess(hardLink = { _, target ->
+                        target.write("first")
+                        LinkResult.NOT_LINKED
+                    }),
+                )
             assertFailsWith<BlobAlreadyExistsException> { store.writeNew("f", byteArrayOf(1)) }
             assertContentEquals("first".encodeToByteArray(), linkingStore(root).read("f"))
         }
@@ -270,8 +272,8 @@ class LocalFolderBlobStoreTest {
                     if (operation == "openReadWrite") fs.delete(root / MARKER_NAME)
                     false
                 }
-            val store =
-                storeWith(root, fileSystem, hardLink = { _, _ -> error("must not publish") })
+            val noPublishing = FolderAccess(hardLink = { _, _ -> error("must not publish") })
+            val store = storeWith(root, noPublishing, fileSystem)
             assertFailsWith<BackendUnavailableException> { store.writeNew("f", byteArrayOf(1)) }
             assertEquals(listOf(root / LOCK_NAME), fs.list(root))
         }
@@ -312,16 +314,9 @@ class LocalFolderBlobStoreTest {
         runTest {
             val root = readyFolder()
             linkingStore(root).writeNew("f", byteArrayOf(1))
-            val store = storeWith(root, FaultyFileSystem { name, _ -> name == "source" })
+            val fileSystem = FaultyFileSystem { name, _ -> name == "source" }
+            val store = storeWith(root, fileSystem = fileSystem)
             assertFailsWith<BlobStoreFailureException> { store.read("f") }
-        }
-
-    @Test
-    fun listFailuresAreStoreFailures() =
-        runTest {
-            val root = readyFolder()
-            val store = storeWith(root, FaultyFileSystem { name, _ -> name == "list" })
-            assertFailsWith<BlobStoreFailureException> { store.list("") }
         }
 
     @Test

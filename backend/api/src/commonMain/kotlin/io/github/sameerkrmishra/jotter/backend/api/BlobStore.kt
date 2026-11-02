@@ -48,9 +48,17 @@ public interface BlobStore {
      * Creates the file at [path] with the content [bytes], and any directories above it. Files are
      * immutable once written. When several writers race for one path, through this object or any
      * other, exactly one succeeds. A reader sees no file or the whole file, never a part of it, and
-     * a failure or crash leaves no file at [path].
+     * a failure or crash never leaves a part of a file at [path].
      *
      * WebDAV implements this with `PUT` plus `If-None-Match: *`.
+     *
+     * A failure does not say that nothing was written. The whole file can have appeared without
+     * the store being sure that it lasts, for example if a power cut could still lose it. It then
+     * stays in place, because a reader may have seen it. So the caller retries with the same [path]
+     * and [bytes]. If the retry succeeds, the file is there. If it throws
+     * [BlobAlreadyExistsException], a file is there and the store has made sure that it stays, and
+     * the caller compares it with what it meant to write (ADR-0004). If it fails again, nothing
+     * has changed.
      *
      * @throws InvalidBlobPathException if [path] is not valid.
      * @throws BlobAlreadyExistsException if [path] exists, as a file or as a directory.

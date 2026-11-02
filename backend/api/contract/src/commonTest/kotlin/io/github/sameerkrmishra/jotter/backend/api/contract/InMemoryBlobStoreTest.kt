@@ -16,6 +16,10 @@ class InMemoryBlobStoreTest : BlobStoreContract() {
 
     override suspend fun unreachableStore(): BlobStore = unreachable()
 
+    override suspend fun takeAway(store: BlobStore) {
+        (store as? InMemoryBlobStore)?.reachable = false
+    }
+
     companion object {
         /** The suite with [store] for both factories. */
         fun against(store: () -> BlobStore) =

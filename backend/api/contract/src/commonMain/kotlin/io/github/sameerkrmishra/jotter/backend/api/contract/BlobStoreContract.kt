@@ -29,7 +29,7 @@ import kotlin.time.Duration.Companion.minutes
 
 /**
  * What every [BlobStore] must do. A backend's tests subclass this, in each target's test source
- * set they want it to run on, and implement the two factories. A backend is done when it passes.
+ * set they want it to run on, and implement its abstract methods. A backend is done when it passes.
  *
  * The tests use real concurrency on `Dispatchers.Default`, so that a store which only looks atomic
  * loses a race here. A store that loses one only sometimes makes the test flaky rather than red:
@@ -41,6 +41,9 @@ public abstract class BlobStoreContract {
 
     /** Returns a store that cannot be reached, for example one whose location is gone. */
     protected abstract suspend fun unreachableStore(): BlobStore
+
+    /** Makes [store], which came from [newStore], unreachable, as an unplugged drive would be. */
+    protected abstract suspend fun takeAway(store: BlobStore)
 
     private fun contractTest(body: suspend () -> Unit): TestResult =
         runTest(timeout = TIMEOUT_MINUTES.minutes) { body() }
@@ -325,6 +328,20 @@ public abstract class BlobStoreContract {
             assertFailsWith<BackendUnavailableException> { store.list("a/b") }
             assertFailsWith<BackendUnavailableException> { store.read("a") }
             assertFailsWith<BackendUnavailableException> { store.writeNew("a", byteArrayOf(1)) }
+        }
+
+    @Test
+    public fun aStoreThatGoesAwayNeverLooksEmptyOrMissing(): TestResult =
+        contractTest {
+            val store = newStore()
+            store.writeNew("a/file", byteArrayOf(1))
+            takeAway(store)
+            assertIs<Reachability.Unreachable>(store.ping())
+            assertFailsWith<BackendUnavailableException> { store.list("") }
+            assertFailsWith<BackendUnavailableException> { store.list("a") }
+            assertFailsWith<BackendUnavailableException> { store.read("a/file") }
+            assertFailsWith<BackendUnavailableException> { store.read("a/missing") }
+            assertFailsWith<BackendUnavailableException> { store.writeNew("b", byteArrayOf(1)) }
         }
 
     @Test

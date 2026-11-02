@@ -8,6 +8,7 @@ store. A new backend is done when it passes
 class WebDavContractTest : BlobStoreContract() {
     override suspend fun newStore(): BlobStore = ... // new, empty, reachable
     override suspend fun unreachableStore(): BlobStore = ... // for example, nothing listening
+    override suspend fun takeAway(store: BlobStore) { ... } // for example, stop the server
 }
 ```
 

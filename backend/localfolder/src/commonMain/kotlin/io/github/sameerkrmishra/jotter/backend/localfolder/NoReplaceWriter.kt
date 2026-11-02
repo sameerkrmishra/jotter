@@ -45,15 +45,18 @@ private val publishTurn = reentrantLock()
 internal class NoReplaceWriter(
     private val root: Path,
     private val fileSystem: FileSystem,
-    private val hardLink: (source: Path, target: Path) -> LinkResult,
+    private val access: FolderAccess,
 ) {
     /**
      * Creates the file [segments] below [root], and the directories above it, with the content
      * [bytes]. A symbolic link above it counts as a file. [beforePublishing] runs as the last step
      * before the file appears, and may stop that by throwing.
      *
+     * A failure after the file has appeared leaves it in place. It is complete and immutable, and
+     * a reader may have seen it, so removing it would be worse. See [syncAbove].
+     *
      * @throws BlobAlreadyExistsException if the path exists.
-     * @throws IOException if the file system fails.
+     * @throws IOException if the file system fails, possibly after the file has appeared.
      */
     fun write(
         segments: List<String>,
@@ -66,24 +69,38 @@ internal class NoReplaceWriter(
         try {
             writeDurably(temporary, bytes)
             publishTurn.withLock {
-                withProcessFileLock(root / LOCK_NAME) {
+                access.lock(root / LOCK_NAME) { lockFailure ->
                     beforePublishing()
-                    publish(temporary, target, segments.joinToString("/"))
+                    publish(temporary, target, segments.joinToString("/"), lockFailure)
                 }
             }
         } finally {
             deleteQuietly(temporary)
         }
-        syncDirectoriesUpToRoot(parent)
+        syncAbove(segments)
+    }
+
+    /**
+     * Makes the entries that lead to the file [segments] durable, from its directory up to [root].
+     * A write that failed here left its file in place, so a retry of the write comes here too.
+     *
+     * @throws IOException if the file system fails.
+     */
+    fun syncAbove(segments: List<String>) {
+        segments
+            .dropLast(1)
+            .runningFold(root) { directory, segment -> directory / segment }
+            .asReversed()
+            .forEach(access.syncDirectory)
     }
 
     private fun createDirectories(segments: List<String>): Path =
         segments.fold(root) { directory, segment ->
             val next = directory / segment
-            val metadata = fileSystem.metadataOrNull(next)
+            val entry = access.stat(next)
             when {
-                metadata == null -> createDirectory(next)
-                !metadata.isDirectory -> throw IOException("$next is not a directory")
+                entry == null -> createDirectory(next)
+                !entry.isDirectory -> throw IOException("$next is not a directory")
             }
             next
         }
@@ -93,7 +110,7 @@ internal class NoReplaceWriter(
             fileSystem.createDirectory(directory, mustCreate = false)
         } catch (e: IOException) {
             // On Native okio fails if a concurrent writer has just made it, despite mustCreate.
-            if (fileSystem.metadataOrNull(directory)?.isDirectory != true) throw e
+            if (access.stat(directory)?.isDirectory != true) throw e
         }
     }
 
@@ -111,21 +128,34 @@ internal class NoReplaceWriter(
         }
     }
 
-    // A hard link never replaces anything by itself. Without hard links (FAT, exFAT, Android's app
-    // storage) the check and the rename are safe because every writer holds the lock here.
+    // A hard link never replaces anything by itself, so it needs no lock. Without hard links (FAT,
+    // exFAT, Android's app storage) the check and the rename are safe only because every writer
+    // holds the lock here, so without the lock they must not happen. The check must be strict: a
+    // lookup that fails must never read as a free name, or the rename replaces a file.
     private fun publish(
         temporary: Path,
         target: Path,
         path: String,
+        lockFailure: IOException?,
     ) {
-        when (hardLink(temporary, target)) {
+        when (access.hardLink(temporary, target)) {
             LinkResult.LINKED -> Unit
             LinkResult.TARGET_EXISTS -> throw BlobAlreadyExistsException(path)
-            LinkResult.NOT_LINKED -> {
-                if (fileSystem.exists(target)) throw BlobAlreadyExistsException(path)
-                fileSystem.atomicMove(temporary, target)
-            }
+            LinkResult.NOT_LINKED -> publishByRename(temporary, target, path, lockFailure)
         }
+    }
+
+    private fun publishByRename(
+        temporary: Path,
+        target: Path,
+        path: String,
+        lockFailure: IOException?,
+    ) {
+        if (lockFailure != null) {
+            throw IOException("No hard link and no lock: ${lockFailure.message}")
+        }
+        if (access.stat(target) != null) throw BlobAlreadyExistsException(path)
+        fileSystem.atomicMove(temporary, target)
     }
 
     // After a hard link the temporary name is left over. After a failure this must not replace the
@@ -136,12 +166,5 @@ internal class NoReplaceWriter(
         } catch (_: IOException) {
             // Nothing to do; see above.
         }
-    }
-
-    private fun syncDirectoriesUpToRoot(parent: Path) {
-        generateSequence(parent) { it.parent }
-            .takeWhile { it != root }
-            .plus(root)
-            .forEach(::syncDirectoryBestEffort)
     }
 }

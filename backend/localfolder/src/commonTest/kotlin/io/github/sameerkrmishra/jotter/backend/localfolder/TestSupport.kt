@@ -36,15 +36,24 @@ internal fun linkingStore(root: Path) = LocalFolderBlobStore(root)
 
 /** A store on the real file system, as on one without hard links, such as a FAT USB stick. */
 internal fun renamingStore(root: Path) =
-    storeWith(root, hardLink = { _, _ -> LinkResult.NOT_LINKED })
+    storeWith(root, FolderAccess(hardLink = { _, _ -> LinkResult.NOT_LINKED }))
+
+/** A store where the lock cannot be taken, as on storage without `fcntl` locks. */
+internal fun locklessStore(root: Path) = storeWith(root, FolderAccess(lock = ::failToLock))
+
+/** A lock that is never taken. */
+internal fun failToLock(
+    file: Path,
+    block: (IOException?) -> Unit,
+) = block(IOException("simulated: no locks on $file"))
 
 /** A store with the given parts replaced. */
 @Suppress("InjectDispatcher") // Tests choose their threads directly.
 internal fun storeWith(
     root: Path,
+    access: FolderAccess = FolderAccess(),
     fileSystem: FileSystem = FileSystem.SYSTEM,
-    hardLink: (Path, Path) -> LinkResult = ::systemHardLink,
-) = LocalFolderBlobStore(root, fileSystem, hardLink, Dispatchers.Default)
+) = LocalFolderBlobStore(root, fileSystem, access, Dispatchers.Default)
 
 /** A file system where [failing], given an operation's name and path, makes the operation fail. */
 internal class FaultyFileSystem(

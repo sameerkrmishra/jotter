@@ -32,17 +32,19 @@ internal const val MARKER_NAME: String = "${RESERVED_SEGMENT_PREFIX}store"
  * Inside a store symbolic links are not followed: [list] and [read] act as if they were not there,
  * and [writeNew] refuses a path through one. [root] itself may be one. Files that this store cannot
  * name, such as one with a colon in its name, are ignored in the same way.
+ *
+ * Only a real file path works, so this does not cover an Android `content://` folder.
  */
 public class LocalFolderBlobStore internal constructor(
     private val root: Path,
     private val fileSystem: FileSystem,
-    hardLink: (source: Path, target: Path) -> LinkResult,
+    private val access: FolderAccess,
     private val dispatcher: CoroutineDispatcher,
 ) : BlobStore {
     /** Creates a store over the directory [root]. This touches nothing on disk. */
-    public constructor(root: Path) : this(root, systemFileSystem, ::systemHardLink, ioDispatcher)
+    public constructor(root: Path) : this(root, systemFileSystem, FolderAccess(), ioDispatcher)
 
-    private val writer = NoReplaceWriter(root, fileSystem, hardLink)
+    private val writer = NoReplaceWriter(root, fileSystem, access)
     private val missing = Reachability.Unreachable(UnreachableReason.MISSING, "$root is missing")
 
     /**
@@ -54,12 +56,12 @@ public class LocalFolderBlobStore internal constructor(
      * @throws BlobStoreFailureException if the file system fails.
      */
     public suspend fun initialize(): Unit =
-        io("initialize") {
-            if (fileSystem.metadataOrNull(root) == null) throw BackendUnavailableException(missing)
-            if (!fileSystem.exists(root / MARKER_NAME)) {
+        io("initialize", checkStoreOnFailure = false) {
+            if (access.stat(root) == null) throw BackendUnavailableException(missing)
+            if (access.stat(root / MARKER_NAME) == null) {
                 // Not mustCreate: a concurrent initialize has the same aim.
                 fileSystem.write(root / MARKER_NAME, mustCreate = false) { }
-                syncDirectoryBestEffort(root)
+                access.syncDirectory(root)
             }
         }
 
@@ -72,23 +74,26 @@ public class LocalFolderBlobStore internal constructor(
             if (directory != null && (prefix.isEmpty() || isDirectory(directory))) {
                 collectFiles(directory, prefix, found)
             }
+            // What was found says nothing if the store went away during the walk.
+            requireReachable()
             found.sortedBy { it.path }
         }
     }
 
-    private fun isDirectory(path: Path): Boolean = fileSystem.metadata(path).isDirectory
+    private fun isDirectory(path: Path): Boolean = access.stat(path)?.isDirectory == true
 
     private fun collectFiles(
         directory: Path,
         directoryPath: String,
         into: MutableList<BlobInfo>,
     ) {
-        fileSystem.list(directory).filter { isValidBlobSegment(it.name) }.forEach { child ->
-            val path = if (directoryPath.isEmpty()) child.name else "$directoryPath/${child.name}"
-            val metadata = fileSystem.metadata(child)
+        access.listNames(directory).filter(::isValidBlobSegment).forEach { name ->
+            val path = if (directoryPath.isEmpty()) name else "$directoryPath/$name"
+            val entry = access.stat(directory / name)
             when {
-                metadata.isDirectory -> collectFiles(child, path, into)
-                metadata.isRegularFile -> into += BlobInfo(path, metadata.size ?: 0L)
+                entry == null -> Unit // The check at the end of list tells what this means.
+                entry.isDirectory -> collectFiles(directory / name, path, into)
+                entry.isRegularFile -> into += BlobInfo(path, entry.size)
             }
         }
     }
@@ -98,7 +103,9 @@ public class LocalFolderBlobStore internal constructor(
         return io("read \"$path\"") {
             requireReachable()
             val file = entryOrNull(path)
-            if (file == null || !fileSystem.metadata(file).isRegularFile) {
+            if (file == null || access.stat(file)?.isRegularFile != true) {
+                // Not found, unless the store has gone away since the first check.
+                requireReachable()
                 throw BlobNotFoundException(path)
             }
             fileSystem.read(file) { readByteArray() }
@@ -112,29 +119,36 @@ public class LocalFolderBlobStore internal constructor(
         requireValidBlobPath(path)
         io("write \"$path\"") {
             requireReachable()
-            // A cheap answer for the common case, before writing anything. Not the real check.
-            if (entryOrNull(path) != null) throw BlobAlreadyExistsException(path)
-            // The drive may have gone while a large file was being written.
-            writer.write(path.split('/'), bytes, beforePublishing = ::requireReachable)
+            val segments = path.split('/')
+            try {
+                // A cheap answer for the common case, before writing. Not the real check.
+                if (entryOrNull(path) != null) throw BlobAlreadyExistsException(path)
+                // The drive may have gone while a large file was being written.
+                writer.write(segments, bytes, beforePublishing = ::requireReachable)
+            } catch (e: BlobAlreadyExistsException) {
+                // This may be the retry of a write that failed to sync, which relies on this
+                // answer to mean that the file is there for good. See BlobStore.writeNew.
+                writer.syncAbove(segments)
+                throw e
+            }
         }
     }
 
-    override suspend fun ping(): Reachability =
-        try {
-            withContext(dispatcher) { reachability() }
-        } catch (e: IOException) {
-            Reachability.Unreachable(UnreachableReason.FAILED, "$root: ${e.message}")
-        }
+    override suspend fun ping(): Reachability = withContext(dispatcher) { reachability() }
 
     private fun reachability(): Reachability =
-        when {
-            fileSystem.exists(root / MARKER_NAME) -> Reachability.Reachable
-            fileSystem.metadataOrNull(root) == null -> missing
-            else ->
-                Reachability.Unreachable(
-                    UnreachableReason.NOT_INITIALIZED,
-                    "$root is not set up as a store, or its drive is not mounted",
-                )
+        try {
+            when {
+                access.stat(root / MARKER_NAME) != null -> Reachability.Reachable
+                access.stat(root) == null -> missing
+                else ->
+                    Reachability.Unreachable(
+                        UnreachableReason.NOT_INITIALIZED,
+                        "$root is not set up as a store, or its drive is not mounted",
+                    )
+            }
+        } catch (e: IOException) {
+            Reachability.Unreachable(UnreachableReason.FAILED, "$root: ${e.message}")
         }
 
     private fun requireReachable() {
@@ -153,15 +167,14 @@ public class LocalFolderBlobStore internal constructor(
         val segments = path.split('/')
         val parent =
             segments.dropLast(1).fold(root as Path?) { directory, segment ->
-                directory?.div(segment)?.takeIf {
-                    fileSystem.metadataOrNull(it)?.isDirectory == true
-                }
+                directory?.div(segment)?.takeIf(::isDirectory)
             }
-        return parent?.div(segments.last())?.takeIf { fileSystem.metadataOrNull(it) != null }
+        return parent?.div(segments.last())?.takeIf { access.stat(it) != null }
     }
 
     private suspend fun <T> io(
         action: String,
+        checkStoreOnFailure: Boolean = true,
         block: () -> T,
     ): T =
         try {
@@ -169,6 +182,8 @@ public class LocalFolderBlobStore internal constructor(
         } catch (e: BlobStoreException) {
             throw e
         } catch (e: IOException) {
+            // An error from a store that has gone away is that, not a fault of this one call.
+            if (checkStoreOnFailure) withContext(dispatcher) { requireReachable() }
             throw BlobStoreFailureException("Cannot $action in $root: ${e.message}", e)
         }
 }
