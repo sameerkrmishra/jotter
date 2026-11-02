@@ -8,6 +8,8 @@ dependencies {
     kover(projects.app.desktop)
     kover(projects.app.sharedUi)
     kover(projects.core.merge)
+    kover(projects.backend.api)
+    kover(projects.backend.localfolder)
     kover(projects.core.model)
     kover(projects.core.sqlite)
     kover(projects.core.storage)
