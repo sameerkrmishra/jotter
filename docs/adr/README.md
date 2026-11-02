@@ -42,7 +42,7 @@ write a new ADR and mark the old one as amended or superseded.
 | [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted, amended by 0010 |
 | [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
 | [0010](0010-compose-ui-outside-linuxx64-rule.md) | Compose UI stays outside the linuxX64 rule | Accepted |
-| [0011](0011-touching-changes-and-merge-format.md) | Touching changes merge, and the merge rules are part of the sync format | Accepted |
+| [0011](0011-touching-changes-and-merge-format.md) | Touching changes merge, and the merge rules are part of the sync format | Accepted, amended by 0013 |
 | [0012](0012-local-folder-publishing.md) | Publishing files in a local folder, and telling a store from a mount point | Proposed |
 | [0013](0013-merge-base-and-covered-heads.md) | The merge base, covered heads and the canonical form of a merge | Proposed |
 | [0014](0014-sync-failure-handling.md) | Gaps, repairs and limits in the sync cycle | Proposed |

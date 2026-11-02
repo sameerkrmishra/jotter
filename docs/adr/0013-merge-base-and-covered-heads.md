@@ -19,7 +19,9 @@ devices never settled, although nobody was editing. Each merge counted as news.
 
 ## Decision
 
-This amends ADR-0003. All of it is part of the sync format.
+This amends ADR-0003, and ADR-0011, whose "each merge reduces the number of heads" does
+not hold: a merge of two heads out of step is one more head for the others. What ends
+the merging is the rule on covered heads below. All of it is part of the sync format.
 
 **The merge base.** To merge `a` and `b`:
 
@@ -39,7 +41,8 @@ ancestors of `a` and `b`, so devices that know different things agree. The order
 **Covered heads.** Let `U(r)` be the user revisions among the ancestors of `r`. A
 head counts as *live* unless it is an automatic merge that does not descend from an
 open conflict, and another head `g` has `U(r)` as a proper subset of `U(g)`, or has
-`U(r) = U(g)` and a lower id. Only live heads are folded, shown or merged. A head the
+`U(r) = U(g)` and goes first: the one with text before a tombstone, as an edit beats a
+deletion, and otherwise the lower id. Only live heads are folded, shown or merged. A head the
 fold has come to cover on the way is passed over. A covered head stays in the DAG
 and no revision is written about it.
 
@@ -54,10 +57,14 @@ from an open conflict if there are any, the one with the highest stamp. A tombst
 only if no live head has text.
 
 **Conflicts.** `Revision.resolves` holds the conflicted merge a user revision closes.
-A conflict is open if no stored revision names it and no tombstone descends from it:
-a deleted note has nothing left to resolve. Any open conflict pauses the fold of the
-whole note, also for heads that do not descend from it, as ADR-0003 says. So does a
-parent that has not arrived.
+A conflict is open unless a stored revision names it, or a tombstone descends from it
+and no head with text does, other than through a tombstone. With an edit beside the
+deletion the conflict stays open, as the text that lost would otherwise be shown
+nowhere. A merge of the tombstone with an unrelated edit descends from the conflict
+only through the tombstone, holds nothing of it, and leaves it closed. Any open
+conflict pauses the fold of the whole note, also
+for heads that do not descend from it, as ADR-0003 says. So does a parent that has not
+arrived. A head named by `resolves` is not live ([ADR-0014](0014-sync-failure-handling.md)).
 
 **Field rules made exact.**
 
@@ -71,7 +78,8 @@ parent that has not arrived.
 - Two tombstones merge into a tombstone.
 - A clean text merge that SQLite could not store unchanged is a conflict. Removing a
   first line can move U+FEFF to the start of the text, and hashed text must not be
-  altered afterwards.
+  altered afterwards. So is one whose title and body together pass `MAX_NOTE_CHARS`:
+  each side is under the cap, and a merge past it might not sync (ADR-0014).
 
 **Canonical bytes.** The id is the SHA-256 of these bytes, big-endian. A *text* is a
 32-bit length in UTF-8 bytes, then those bytes. A *stamp* is the 64-bit physical

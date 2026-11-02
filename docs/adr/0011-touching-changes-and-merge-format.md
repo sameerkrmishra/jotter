@@ -1,6 +1,6 @@
 # 0011. Touching changes merge, and the merge rules are part of the sync format
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by [0013](0013-merge-base-and-covered-heads.md)
 - **Date:** 2026-11-02
 
 ## Context
