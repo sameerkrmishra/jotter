@@ -11,7 +11,10 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamp
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.storage.InvalidReason
+import io.github.sameerkrmishra.jotter.core.storage.InvalidRevision
 import io.github.sameerkrmishra.jotter.core.storage.isStorableText
+import io.github.sameerkrmishra.jotter.core.storage.toStorableText
 import io.github.sameerkrmishra.jotter.core.sync.dto.RevisionDto
 import io.github.sameerkrmishra.jotter.core.sync.dto.SegmentDto
 import io.github.sameerkrmishra.jotter.core.sync.dto.SegmentHeaderDto
@@ -44,11 +47,13 @@ internal const val MAX_SEGMENT_BYTES: Long = 32L * 1024 * 1024
  * @property device The device whose folder holds it.
  * @property number Its number in that folder.
  * @property revisions The revisions, in the order they arrived on [device].
+ * @property dropped User revisions that could not be read, with what could be read of them.
  */
 internal data class Segment(
     val device: DeviceId,
     val number: Long,
     val revisions: List<Revision>,
+    val dropped: List<InvalidRevision> = emptyList(),
 )
 
 /** Turns segments into the bytes of a file and back: the seam for encryption (PLAN.md §6.6). */
@@ -57,10 +62,10 @@ internal interface SegmentCodec {
     fun encode(segment: Segment): ByteArray
 
     /**
-     * Returns the segment in [bytes], checked as far as it can be without the database: its
-     * format, every field, the id of every automatic merge, and that its text can be stored.
+     * Returns the segment in [bytes]. A revision with a bad value, a merge with the wrong id or
+     * text that cannot be stored is left out, alone: that takes nothing else with it.
      *
-     * @throws SegmentFormatException if it is anything else.
+     * @throws SegmentFormatException if the file as a whole is no segment of this format.
      */
     fun decode(bytes: ByteArray): Segment
 }
@@ -139,6 +144,10 @@ internal class JsonGzipCodec(
     }
 }
 
+/** The JSON text of [revision] alone, with its parents and tags sorted. */
+internal fun revisionJson(revision: Revision): String =
+    strictJson.encodeToString(RevisionDto.serializer(), revision.toDto())
+
 /** The JSON text of [segment], with parents and tags sorted so that it is canonical. */
 internal fun segmentJson(segment: Segment): String =
     strictJson.encodeToString(
@@ -195,8 +204,36 @@ private fun Stamp.toDto(): StampDto =
         revisionId.toString(),
     )
 
-private fun SegmentDto.toSegment(): Segment =
-    Segment(DeviceId.parse(device), number, revisions.map(RevisionDto::toRevision))
+private fun SegmentDto.toSegment(): Segment {
+    val dropped = mutableListOf<InvalidRevision>()
+    val readable =
+        revisions.mapNotNull { dto ->
+            try {
+                dto.toRevision()
+            } catch (_: IllegalArgumentException) {
+                dto.toDropped()?.let { dropped += it }
+                null
+            }
+        }
+    return Segment(DeviceId.parse(device), number, readable, dropped)
+}
+
+/** What can be kept of a revision that cannot be read: a user's text, if it says whose note. */
+private fun RevisionDto.toDropped(): InvalidRevision? {
+    val revision = RevisionId.parseOrNull(id)
+    val noteId = NoteId.parseOrNull(note)
+    return if (merge || revision == null || noteId == null) {
+        null
+    } else {
+        InvalidRevision(
+            revision,
+            noteId,
+            InvalidReason.MALFORMED,
+            snapshot?.title.orEmpty().toStorableText(),
+            snapshot?.body.orEmpty().toStorableText(),
+        )
+    }
+}
 
 private fun RevisionDto.toRevision(): Revision {
     val revision =

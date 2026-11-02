@@ -30,8 +30,8 @@ below is `internal`.
 | `SyncTarget`, `DeviceInfo` | A backend with its lasting local id, and what `device.json` says |
 | `SyncResult` | `Completed`, `Unreachable`, `Incompatible` or `Interrupted` |
 | `SyncReport`, `SyncIssue`, `SegmentProblem` | What a cycle did, and what it could not do |
-| `ConflictResolver` | `open`, `observeOpen`, `details`, `resolve`, and for heads a note cannot merge yet `hidden`, `observeHidden`, `settleHidden` |
-| `ConflictDetails`, `ConflictResolution`, `NoSuchConflictException`, `NoSuchHiddenHeadException` | For the conflict screen |
+| `ConflictResolver` | `open`, `observeOpen`, `details`, `resolve`; for heads a note cannot merge yet `hidden`, `observeHidden`, `settleHidden`; for text that does not count `invalid`, `observeInvalid` |
+| `ConflictDetails`, `ConflictResolution`, `NoSuchConflictException`, `NoSuchHiddenHeadException`, `HiddenHeadWaitsForConflictException` | For the conflict screen |
 
 `SyncReport.merges` above zero means the backend has not seen them: they go out with
 the next cycle.
@@ -56,7 +56,12 @@ The merge rules are in
 - **An edit is never hidden in silence.** A live head a note does not show is listed by
   `ConflictResolver.hidden` with its text, until it merges or the user settles it. The
   UI must show this list, as a missing ancestor may never come.
-- **A merge waits for both parents**, so that it is judged the same whatever came first.
+- **What counts is judged from the revisions alone.** `RevisionGraph` decides, from a
+  revision and its ancestors. Everything readable is stored and passed on, so one bad
+  stamp cannot make devices hold different revisions. The UI must show
+  `ConflictResolver.invalid`, or that text is out of sight.
+- **A restored backup takes a new device id** and reads its old folder as another
+  device's, which brings back what it lost (`SyncIssue.DeviceRenewed`).
 - **`okio`** gives SHA-256 and gzip in common code. It adds no new dependency to the
   project, and `kotlinx-serialization-json` was already used by `interop:keep-import`.
 - **`core:storage` exposes `SyncStore`** to this module: plain reads and writes, no
@@ -81,20 +86,19 @@ one seed: ids, clocks, faults and choices, so a failure names a seed that replay
 
 | In a case | |
 |---|---|
-| Devices | 2 to 5, each on one backend; device 0 relays between all of them. Others can die for good, or forget a backend and add it again |
+| Devices | 2 to 5, each on one backend; device 0 relays between all of them. Others can die for good, forget a backend and add it again, or go back to an old backup. A backup can also start a further device |
 | Backends | 1 to 3 |
 | Edits | Create, edit, pin, state, tags, delete forever, imports of one source on several devices |
 | Delivery | Partial sync, files held back from a listing, so segments arrive late and out of order |
-| Faults | `list`, `read` and `writeNew` failures, a write that fails after publishing, outages, lost segments, damaged files, forged merges |
+| Faults | `list`, `read` and `writeNew` failures, a write that fails after publishing, outages, lost segments, damaged files, forged merges, bad stamps in a segment with good revisions |
 | Crashes | After a write, after recording a segment, inside the apply transaction; plain restarts |
 | Conflicts | Resolved at random, in all four ways |
 
 Then every fault stops and the living sync until a round changes nothing. They must
 then hold the same revisions, live heads, notes, open conflicts and hidden heads, and
 with everything answered each note must have one live head, which it shows. No forged
-merge may be stored. Every line is unique, so text can be followed: a line somebody
-wrote and nobody removed, by editing, deleting or resolving, must be in a note, in an
-open conflict or in a hidden head.
+merge or bad stamp may count. Lost files of a backed-up id are left out, because of the
+limit in ADR-0014.
 
 `check` runs 200 seeds on the JVM and 25 on `linuxX64`, whose debug binary took 12 minutes
 for 200. For more, set the environment variables `JOTTER_SIM_CASES` and
@@ -105,27 +109,11 @@ JOTTER_SIM_START=1000 JOTTER_SIM_CASES=5000 ./gradlew :core:sync:jvmTest --tests
 ```
 
 Besides converging, every stored merge must follow from its parents and their
-ancestors: the simulator computes each one again from the final DAG.
-
-Measured 2026-11-02: seeds 30000 to 36999 passed on the JVM, with 176,365 revisions,
-23,041 merges, 3,499 conflicts and 5,725 crashes.
-
-Whether the tests can fail was checked with 27 source mutations, applied one at a time by
-a throwaway script, on the JVM with 200 seeds, and 1000 for those the first pass did not
-catch in the simulator. All 27 are caught. These reach the simulator's assertions: no
-covered heads, merging without all ancestors, no pause on an open conflict, a hole not
-kept as a gap, a lost segment not repaired, an existing path not compared, text chosen by
-argument order, an edit not beating a deletion, a tombstone closing a conflict beside an
-edit or never closing one, a forged merge accepted, a number reused after `forget`, a
-lost segment not published by its reader, hidden heads not recorded, `KeepBoth` dropping
-text, and a conflict row not written. The others are caught by unit tests alone.
-
-The text check found one format bug: of two merges of the same edits, a tombstone with the
-lower id beat the one with text (seed 715). `forget` found another: a number whose file was
-lost was used again, behind a reader's cursor (seed 40). Two more reports were correct
-behaviour, and now pinned in the check: text that lost a conflict goes with a user's
-deletion on top of it, even if another branch brings the note back, and each conflict
-of a note has its own shown text.
+ancestors: the simulator computes each one again from the final DAG. `LineHistory` follows
+each line through the DAG, with none of the rules of the code under test, and a line
+missing from a live head must be explained by a person: an edit, a resolution, or a
+deletion with no edit beside it. A line that only a conflict's losing side has must have
+an open or answered conflict.
 
 The tests of `SyncEngineTest` each pin one failure rule. Android host tests are
 disabled, as in `core:storage`.

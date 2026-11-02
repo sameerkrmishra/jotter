@@ -105,19 +105,39 @@ class SegmentCodecTest {
     fun aMergeThatDoesNotMatchItsHashIsRefused() {
         val forged = merge.copy(content = merge.text.copy(body = "forged"))
         val json = segmentJson(Segment(DEVICE_A, 1, listOf(forged)))
-        assertTrue(decodeFails(gzip(json)).cause is IllegalArgumentException)
+        val decoded = codec.decode(gzip(json))
+        assertTrue(decoded.revisions.isEmpty())
+        assertTrue(decoded.dropped.isEmpty(), "A merge holds no text of a user's own")
+    }
+
+    private fun assertDropped(json: String) {
+        val decoded = codec.decode(gzip(json))
+        assertTrue(decoded.revisions.isEmpty(), json)
+        assertEquals(1, decoded.dropped.size, json)
     }
 
     @Test
-    fun invalidValuesAreRefused() {
+    fun aRevisionWithAnInvalidValueIsDroppedAlone() {
         val json = segmentJson(Segment(DEVICE_A, 1, listOf(root)))
-        val noted = json.replace("\"state\":\"ACTIVE\"", "\"state\":\"LOST\"")
-        decodeFails(gzip(noted))
-        decodeFails(gzip(json.replace("\"counter\":0", "\"counter\":-1")))
-        decodeFails(gzip(json.replace("\"tags\":[\"a\",\"b\"]", "\"tags\":[\" a\"]")))
-        decodeFails(gzip(json.replace("\"tags\":[\"a\",\"b\"]", "\"tags\":[\"a\",\"a\"]")))
-        decodeFails(gzip(json.replace("\"body\":\"a\\nb\\n\"", "\"body\":\"\\ud800\"")))
-        decodeFails(gzip(json.replace("\"parents\":[]", "\"parents\":[\"nonsense\"]")))
+        assertDropped(json.replace("\"state\":\"ACTIVE\"", "\"state\":\"LOST\""))
+        assertDropped(json.replace("\"counter\":0", "\"counter\":-1"))
+        assertDropped(json.replace("\"tags\":[\"a\",\"b\"]", "\"tags\":[\" a\"]"))
+        assertDropped(json.replace("\"tags\":[\"a\",\"b\"]", "\"tags\":[\"a\",\"a\"]"))
+        assertDropped(json.replace("\"body\":\"a\\nb\\n\"", "\"body\":\"\\ud800\""))
+        assertDropped(json.replace("\"parents\":[]", "\"parents\":[\"nonsense\"]"))
+    }
+
+    @Test
+    fun aRevisionThatCannotSayWhoseItIsLeavesNothing() {
+        val json = segmentJson(Segment(DEVICE_A, 1, listOf(root)))
+        val decoded = codec.decode(gzip(json.replace("\"id\":\"${root.id}\"", "\"id\":\"x\"")))
+        assertTrue(decoded.revisions.isEmpty() && decoded.dropped.isEmpty())
+    }
+
+    @Test
+    fun aBadDeviceInTheHeaderIsNoSegment() {
+        val json = segmentJson(Segment(DEVICE_A, 1, listOf(root)))
+        decodeFails(gzip(json.replaceFirst("\"device\":\"$DEVICE_A\"", "\"device\":\"x\"")))
     }
 
     @Test
@@ -128,16 +148,14 @@ class SegmentCodecTest {
                 "\"parents\":[\"${root.id}\"]",
                 "\"parents\":[\"${root.id}\",\"${root.id}\"]",
             )
-        decodeFails(gzip(twice))
+        assertDropped(twice)
     }
 
     @Test
     fun aUserRevisionWithALosingParentIsRefused() {
         val json = segmentJson(Segment(DEVICE_A, 1, listOf(edit)))
-        decodeFails(
-            gzip(
-                json.replace("\"merge\":false", "\"merge\":false,\"losingParent\":\"${root.id}\""),
-            ),
+        assertDropped(
+            json.replace("\"merge\":false", "\"merge\":false,\"losingParent\":\"${root.id}\""),
         )
     }
 

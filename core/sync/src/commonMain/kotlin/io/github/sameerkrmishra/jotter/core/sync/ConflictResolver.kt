@@ -8,6 +8,8 @@ import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.RevisionId
 import io.github.sameerkrmishra.jotter.core.storage.HiddenHead
+import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
+import io.github.sameerkrmishra.jotter.core.storage.InvalidRevision
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.OpenConflict
 import io.github.sameerkrmishra.jotter.core.storage.requireNoteSize
@@ -60,6 +62,7 @@ public sealed interface ConflictResolution {
  * Resolving writes a user revision and syncs like any other; another device that resolved the same
  * conflict makes a second head, which merges as usual.
  */
+@Suppress("TooManyFunctions") // What the conflict screen does, kept together on purpose.
 public class ConflictResolver(
     private val store: NoteStore,
 ) {
@@ -127,9 +130,11 @@ public class ConflictResolver(
      * Deals with the hidden head [headId], with no merge: [ConflictResolution.KeepLosing] takes its
      * text in place of the shown text, and the others work as in [resolve]. This is the way out
      * when a missing ancestor will never come (ADR-0014). Other devices stop counting that head,
-     * and the note merges as far as it can.
+     * and the note merges as far as it can. A head that waits for an open conflict cannot be
+     * settled, as that would pass over the conflict: resolve the conflict.
      *
      * @throws NoSuchHiddenHeadException if [headId] is not hidden.
+     * @throws HiddenHeadWaitsForConflictException if an open conflict holds it back.
      */
     public fun settleHidden(
         headId: RevisionId,
@@ -139,10 +144,19 @@ public class ConflictResolver(
             val hidden =
                 store.sync.hiddenHeads().firstOrNull { it.revisionId == headId }
                     ?: throw NoSuchHiddenHeadException(headId)
+            if (hidden.reason == HiddenReason.OPEN_CONFLICT) {
+                throw HiddenHeadWaitsForConflictException(headId)
+            }
             val graph = RevisionGraph(store.sync.revisions(hidden.noteId))
             val parent = checkNotNull(graph.shownHead()) { "A hidden head has a shown one" }
             settle(parent, headId, LosingText(hidden.title, hidden.body), resolution)
         }
+
+    /** Returns text that the DAG does not count, by note, so that it is not lost in silence. */
+    public fun invalid(): List<InvalidRevision> = store.sync.invalidRevisions()
+
+    /** Emits [invalid] now and again whenever it changes. */
+    public fun observeInvalid(): Flow<List<InvalidRevision>> = store.sync.observeInvalidRevisions()
 
     /** Writes the user revision on [parent] that names [closed]. Part of a transaction. */
     private fun settle(
@@ -211,6 +225,15 @@ public class NoSuchConflictException(
 public class NoSuchHiddenHeadException(
     public val headId: RevisionId,
 ) : IllegalArgumentException("Revision $headId is not a hidden head")
+
+/**
+ * The hidden head [headId] merges once a conflict is resolved, so it cannot be settled.
+ *
+ * @property headId The revision.
+ */
+public class HiddenHeadWaitsForConflictException(
+    public val headId: RevisionId,
+) : IllegalArgumentException("Revision $headId waits for an open conflict")
 
 private class LosingText(
     val title: String,

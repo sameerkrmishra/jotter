@@ -166,7 +166,7 @@ private fun tagsAddedSince(
     other: Revision,
 ): Set<TagName> {
     val added = HashSet<TagName>()
-    (graph.ancestors(side.id) - graph.ancestors(other.id)).forEach { id ->
+    (graph.textAncestors(side.id) - graph.textAncestors(other.id)).forEach { id ->
         val revision = graph[id]
         val tags = (revision?.content as? RevisionContent.Snapshot)?.tags.orEmpty()
         if (revision?.kind == RevisionKind.User) {

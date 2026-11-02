@@ -8,45 +8,73 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 /**
  * The revision DAG of one note, as far as this device knows it. Pure, and a function of the set of
  * revisions alone, which is what makes two devices with the same revisions agree (ADR-0003).
+ *
+ * Only valid revisions are in it. A revision is judged by itself and its ancestors alone, so that
+ * every device with the same revisions judges alike, in any order of arrival (ADR-0014):
+ *
+ * - A user revision must be stamped above each parent known so far.
+ * - A merge counts only once both parents are here, and must have the stamp and loser they decide.
+ *   Until then it is treated as not arrived.
+ * - A revision on an invalid one is invalid, and so is one with a parent in [foreignParents].
+ *
+ * @param foreignParents Parents of these revisions that are stored under another note.
  */
 @Suppress("TooManyFunctions") // The questions asked of a DAG, kept together on purpose.
 internal class RevisionGraph(
     revisions: Collection<Revision>,
+    foreignParents: Set<RevisionId> = emptySet(),
 ) {
-    private val byId = revisions.associateBy { it.id }
-    private val parentsSeen = revisions.flatMapTo(HashSet()) { it.parents }
+    private val judged = judge(revisions, foreignParents)
+    private val byId = judged.valid.associateBy { it.id }
+    private val parentsSeen = judged.valid.flatMapTo(HashSet()) { it.parents }
     private val userRevisionsOf = HashMap<RevisionId, Set<RevisionId>>()
-    private val settled = revisions.mapNotNullTo(HashSet()) { it.resolves }
+    private val settled = judged.valid.mapNotNullTo(HashSet()) { it.resolves }
+
+    /** The revisions that do not count. They and their text stay out of everything here. */
+    val invalid: List<Revision> = judged.invalid
+
+    /** The invalid revisions with text that no other invalid revision goes on from. */
+    val invalidEnds: List<Revision>
+        get() {
+            val built = invalid.flatMapTo(HashSet()) { it.parents }
+            return invalid.filter { it.id !in built && it.content is RevisionContent.Snapshot }
+        }
 
     /** The revisions nothing is built on, sorted by id: the order of the fold. */
-    val heads: List<Revision> = revisions.filter { it.id !in parentsSeen }.sortedBy { it.id }
+    val heads: List<Revision> = judged.valid.filter { it.id !in parentsSeen }.sortedBy { it.id }
 
-    /**
-     * Whether every parent is here. Until then no merge may run: a merge reads the ancestors, so
-     * without all of them two devices would compute different text from the same two heads.
-     */
+    /** Whether every parent is here. */
     val isComplete: Boolean = parentsSeen.all { it in byId }
 
     /** Returns the stored revision [id], or null. */
     operator fun get(id: RevisionId): Revision? = byId[id]
 
-    /** Returns [id] and everything it descends from, as far as it is known. */
+    /**
+     * Returns [id] and everything it descends from, through tombstones too, as far as it is known.
+     * This is for what happened before a revision: who wrote what, which conflict it stands on. For
+     * what its text came from, see [textAncestors].
+     */
     fun ancestors(id: RevisionId): Set<RevisionId> = reachableFrom(listOf(id))
 
     /**
-     * Returns the best common ancestors of [a] and [b] that have text: the common ancestors,
-     * without tombstones, of which none is an ancestor of another. A tombstone is left out because
-     * it has no text to merge against, and it does not hide the ancestors behind it.
+     * Returns [id] and what its text came from: the ancestors reached without passing a tombstone,
+     * which is not one of them. A deletion merged with an edit holds the edit's text alone, so what
+     * lies behind the deletion says nothing about it.
+     */
+    fun textAncestors(id: RevisionId): Set<RevisionId> =
+        reachableFrom(listOf(id), throughTombstones = false)
+            .filterTo(HashSet()) { byId[it]?.content is RevisionContent.Snapshot }
+
+    /**
+     * Returns the best common ancestors of [a] and [b]: the common [textAncestors], of which none
+     * is an ancestor of another. A tombstone has no text, and a walk does not go through it.
      */
     fun bestCommonAncestors(
         a: RevisionId,
         b: RevisionId,
     ): List<Revision> {
-        val common =
-            (ancestors(a) intersect ancestors(b))
-                .mapNotNull(byId::get)
-                .filter { it.content is RevisionContent.Snapshot }
-        val dominated = reachableFrom(common.flatMap { it.parents })
+        val common = (textAncestors(a) intersect textAncestors(b)).mapNotNull(byId::get)
+        val dominated = reachableFrom(common.flatMap { it.parents }, throughTombstones = false)
         return common.filter { it.id !in dominated }
     }
 
@@ -59,12 +87,30 @@ internal class RevisionGraph(
         b: RevisionId,
     ): Revision? = bestCommonAncestors(a, b).maxByOrNull { it.stamp }
 
-    /** Returns the roots among the ancestors of [a] and [b] (ADR-0009). */
+    /**
+     * Whether [a] and [b] can be merged the same way on every device: all that a merge reads is
+     * here. A missing revision below a common ancestor does not matter, as that ancestor hides it.
+     * One above, on the way from either to what they share, could be the best ancestor itself.
+     */
+    fun canMerge(
+        a: Revision,
+        b: Revision,
+    ): Boolean {
+        val bothHaveText =
+            a.content is RevisionContent.Snapshot && b.content is RevisionContent.Snapshot
+        if (!bothHaveText) return true
+        val common = textAncestors(a.id) intersect textAncestors(b.id)
+        return reachesNoGap(a.id, common) && reachesNoGap(b.id, common)
+    }
+
+    /** Returns the roots among the text ancestors of [a] and [b] (ADR-0009). */
     fun roots(
         a: RevisionId,
         b: RevisionId,
     ): List<Revision> =
-        (ancestors(a) + ancestors(b)).mapNotNull(byId::get).filter { it.parents.isEmpty() }
+        (textAncestors(a) + textAncestors(b))
+            .mapNotNull(byId::get)
+            .filter { it.parents.isEmpty() }
 
     /**
      * The conflicted merges nothing has closed, by id. A resolution closes the merge it names. A
@@ -80,10 +126,10 @@ internal class RevisionGraph(
      * The [heads] that still count: all but the covered ones. An automatic merge adds nothing of
      * its own, so a merge head whose user revisions another head also has is covered and needs no
      * further merge. Of heads with the same user revisions one with text stays, then the lowest
-     * id. A head that
-     * descends from an open conflict stays too, as a resolution builds on it. ADR-0013 explains
-     * why: without this rule, devices that sync out of step make new merges for ever. A head that
-     * a resolution names does not count either: the user has dealt with it (ADR-0014).
+     * id. A head that descends from an open conflict stays too, as a resolution builds on it.
+     * ADR-0013 explains why: without this rule, devices that sync out of step make new merges for
+     * ever. A head that a resolution names does not count either: the user has dealt with it
+     * (ADR-0014).
      */
     val liveHeads: List<Revision> = heads.filterNot { it.id in settled || isCovered(it) }
 
@@ -120,8 +166,12 @@ internal class RevisionGraph(
         return (inConflict.ifEmpty { alive.ifEmpty { liveHeads } }).maxByOrNull { it.stamp }
     }
 
+    /** Returns the heads whose text goes back to [id], the newest first. */
+    fun headsDescendingFrom(id: RevisionId): List<Revision> =
+        heads.filter { id in textAncestors(it.id) }.sortedByDescending { it.stamp }
+
     private fun descendsFromOpenConflict(head: Revision): Boolean =
-        openIds.isNotEmpty() && ancestors(head.id).any { it in openIds }
+        openIds.isNotEmpty() && textAncestors(head.id).any { it in openIds }
 
     private fun isCovered(head: Revision): Boolean {
         if (descendsFromOpenConflict(head)) return false
@@ -147,14 +197,14 @@ internal class RevisionGraph(
             userRevisions(head) == userRevisions(other)
     }
 
+    /**
+     * The user revisions behind [revision], through tombstones too. A merge has all of its
+     * parents', which is what ends the merging (ADR-0013), so this walk must not stop at one.
+     */
     private fun userRevisions(revision: Revision): Set<RevisionId> =
         userRevisionsOf.getOrPut(revision.id) {
             ancestors(revision.id).filterTo(HashSet()) { byId[it]?.kind == RevisionKind.User }
         }
-
-    /** Returns the heads that descend from [id], the newest first. */
-    fun headsDescendingFrom(id: RevisionId): List<Revision> =
-        heads.filter { id in ancestors(it.id) }.sortedByDescending { it.stamp }
 
     private fun findOpenConflicts(): List<Revision> {
         val conflicted = byId.values.filter { it.isConflictedMerge() && it.id !in settled }
@@ -164,6 +214,28 @@ internal class RevisionGraph(
         val alive = heads.filter { it.content is RevisionContent.Snapshot }
         val withText = reachableFrom(alive.map { it.id }, throughTombstones = false)
         return conflicted.filter { it.id !in deleted || it.id in withText }.sortedBy { it.id }
+    }
+
+    /** Whether every way down from [start] reaches [common] or a tombstone, not a missing one. */
+    private fun reachesNoGap(
+        start: RevisionId,
+        common: Set<RevisionId>,
+    ): Boolean {
+        val seen = HashSet<RevisionId>()
+        val stack = ArrayDeque(listOf(start))
+        var isWhole = true
+        while (stack.isNotEmpty()) {
+            val id = stack.removeLast()
+            if (id !in common && seen.add(id)) {
+                val revision = byId[id]
+                if (revision == null) {
+                    isWhole = false
+                } else if (revision.content is RevisionContent.Snapshot) {
+                    stack.addAll(revision.parents)
+                }
+            }
+        }
+        return isWhole
     }
 
     /**
@@ -192,3 +264,88 @@ internal class RevisionGraph(
 /** Whether this is a conflicted automatic merge. */
 internal fun Revision.isConflictedMerge(): Boolean =
     (kind as? RevisionKind.AutomaticMerge)?.isConflicted == true
+
+private class Judged(
+    val valid: List<Revision>,
+    val invalid: List<Revision>,
+)
+
+/**
+ * Sorts [revisions] parents first, and judges each from its parents' verdicts alone. A revision in
+ * a cycle is never reached, and is invalid: a cycle needs a child stamped below its parent.
+ */
+private fun judge(
+    revisions: Collection<Revision>,
+    foreignParents: Set<RevisionId>,
+): Judged {
+    val byId = revisions.associateBy { it.id }
+    val children = HashMap<RevisionId, MutableList<Revision>>()
+    val waitingFor = HashMap<RevisionId, Int>()
+    revisions.forEach { revision ->
+        val present = revision.parents.filter { it in byId }
+        waitingFor[revision.id] = present.size
+        present.forEach { children.getOrPut(it) { mutableListOf() } += revision }
+    }
+    val verdicts = HashMap<RevisionId, Verdict>()
+    val ready = ArrayDeque(revisions.filter { waitingFor[it.id] == 0 })
+    while (ready.isNotEmpty()) {
+        val revision = ready.removeLast()
+        verdicts[revision.id] = verdictOn(revision, byId, verdicts, foreignParents)
+        children[revision.id].orEmpty().forEach { child ->
+            val left = waitingFor.getValue(child.id) - 1
+            waitingFor[child.id] = left
+            if (left == 0) ready.addLast(child)
+        }
+    }
+    return Judged(
+        valid = revisions.filter { verdicts[it.id] == Verdict.VALID },
+        invalid = revisions.filter { it.id !in verdicts || verdicts[it.id] == Verdict.INVALID },
+    )
+}
+
+private enum class Verdict {
+    VALID,
+    INVALID,
+
+    /** A merge without both parents: as if it had not arrived. */
+    NOT_YET,
+}
+
+private fun verdictOn(
+    revision: Revision,
+    byId: Map<RevisionId, Revision>,
+    verdicts: Map<RevisionId, Verdict>,
+    foreignParents: Set<RevisionId>,
+): Verdict {
+    val parents = revision.parents.mapNotNull(byId::get)
+    val parentVerdicts = parents.mapNotNull { verdicts[it.id] }
+    val isBadChild =
+        Verdict.INVALID in parentVerdicts || revision.parents.any { it in foreignParents }
+    val here = parents.filter { verdicts[it.id] == Verdict.VALID }
+    return when {
+        isBadChild -> Verdict.INVALID
+        revision.kind == RevisionKind.User -> userVerdict(revision, here)
+        here.size < revision.parents.size -> Verdict.NOT_YET
+        else -> mergeVerdict(revision, here)
+    }
+}
+
+private fun userVerdict(
+    revision: Revision,
+    parents: List<Revision>,
+): Verdict =
+    if (parents.all { revision.timestamp > it.timestamp }) Verdict.VALID else Verdict.INVALID
+
+private fun mergeVerdict(
+    revision: Revision,
+    parents: List<Revision>,
+): Verdict {
+    val losingParent = (revision.kind as RevisionKind.AutomaticMerge).losingParent
+    val higher = parents.maxBy { it.stamp }
+    val lower = parents.minBy { it.stamp }
+    val followsParents =
+        revision.timestamp == higher.timestamp &&
+            revision.deviceId == higher.deviceId &&
+            (losingParent == null || losingParent == lower.id)
+    return if (followsParents) Verdict.VALID else Verdict.INVALID
+}

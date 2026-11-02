@@ -54,6 +54,7 @@ public data class DeviceInfo(
  * @param databaseContext Where the blocking database work runs, e.g. an IO dispatcher.
  * @param clock The time `device.json` is dated with.
  */
+@Suppress("TooManyFunctions") // The steps of one cycle, kept together on purpose.
 public class SyncEngine internal constructor(
     private val store: NoteStore,
     private val device: DeviceInfo,
@@ -96,15 +97,16 @@ public class SyncEngine internal constructor(
 
     private suspend fun exchange(target: SyncTarget): SyncResult {
         val blobs = target.store
-        val pusher = Pusher(store.sync, target.id, blobs, store.deviceId, seams)
         val puller = Puller(store.sync, target.id, blobs, seams)
+        val pushIssues = mutableListOf<SyncIssue>()
+        var pushed = 0
         val report = {
             SyncReport(
-                pushedSegments = pusher.pushed,
+                pushedSegments = pushed,
                 appliedSegments = puller.applied,
                 newRevisions = puller.newRevisions,
                 merges = puller.merges,
-                issues = pusher.problems + puller.issues,
+                issues = pushIssues + puller.issues,
             )
         }
         return try {
@@ -114,7 +116,16 @@ public class SyncEngine internal constructor(
             } else {
                 val folders = BackendLayout.segments(listDevices(blobs))
                 forgetLostSegments(target.id, folders)
-                pusher.push(folders[store.deviceId]?.keys.orEmpty())
+                checkOwnFolder(target, folders[store.deviceId].orEmpty())?.let { pushIssues += it }
+                val device = store.deviceId
+                val pusher = Pusher(store.sync, target.id, blobs, device, seams)
+                try {
+                    pusher.push(folders[device]?.keys.orEmpty())
+                } finally {
+                    pushed = pusher.pushed
+                    pushIssues += pusher.problems
+                }
+                if (pusher.collided) pushIssues += renew()
                 puller.pull(folders - store.deviceId)
                 SyncResult.Completed(report())
             }
@@ -126,19 +137,56 @@ public class SyncEngine internal constructor(
     /**
      * A segment read from another device that is gone from the backend took its revisions along,
      * and its writer may be gone too. They count as not on the backend again, so this device
-     * pushes them. A live writer repairs the segment as well, which only costs a duplicate.
+     * pushes them. A live writer repairs the segment as well, which only costs a duplicate. The
+     * number becomes a gap: a device restored from a backup can write other content there, which
+     * also shows as a file of another size (ADR-0014).
      */
     private fun forgetLostSegments(
         targetId: String,
         folders: Map<DeviceId, Map<Long, BlobInfo>>,
     ) {
         store.sync.write {
-            store.sync.pulledSegments(targetId).forEach { (device, number) ->
-                if (folders[device]?.containsKey(number) != true) {
+            store.sync.pulledSegments(targetId).forEach { (device, number, size) ->
+                val file = folders[device]?.get(number)
+                if (file == null || (size != null && file.size != size)) {
                     store.sync.forgetPulledSegment(targetId, device, number)
+                    store.sync.addGap(targetId, device, number..number)
                 }
             }
         }
+    }
+
+    /**
+     * Looks at the numbers in this device's folder that it has no record of using. If it holds all
+     * their revisions, it is the same device under another backend id, and takes the numbers as
+     * used. Anything else means a restored backup or a copy of this database, so the id ends here,
+     * before this device writes to that folder again (ADR-0014). Returns what happened.
+     */
+    private suspend fun checkOwnFolder(
+        target: SyncTarget,
+        files: Map<Long, BlobInfo>,
+    ): SyncIssue? {
+        val known = store.sync.lastSegmentNumber(target.id)
+        val beyond = files.keys.filter { it > known }.sorted()
+        val isOurs = beyond.all { number -> holdsOnlyKnown(target.store, files.getValue(number)) }
+        if (isOurs) beyond.lastOrNull()?.let { store.sync.adoptSegmentNumber(target.id, it) }
+        return if (isOurs) null else renew()
+    }
+
+    private suspend fun holdsOnlyKnown(
+        blobs: BlobStore,
+        file: BlobInfo,
+    ): Boolean =
+        try {
+            val segment = seams.codec.decode(blobs.read(file.path))
+            segment.dropped.isEmpty() && segment.revisions.all { store.sync.revision(it.id) == it }
+        } catch (_: SegmentFormatException) {
+            false
+        }
+
+    private fun renew(): SyncIssue {
+        val old = store.deviceId
+        return SyncIssue.DeviceRenewed(old, store.sync.renewDeviceId())
     }
 
     private suspend fun listDevices(blobs: BlobStore): List<BlobInfo> {

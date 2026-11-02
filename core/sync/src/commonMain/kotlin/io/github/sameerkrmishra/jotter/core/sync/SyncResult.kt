@@ -66,12 +66,6 @@ public enum class SegmentProblem {
     /** Written by a newer version of Jotter. An update will apply it. */
     FUTURE_FORMAT,
 
-    /** Valid alone, but it contradicts the revisions here, for example by reusing an id. */
-    REJECTED,
-
-    /** A merge in it waits for its parents. The rest of the segment was applied. */
-    WAITING,
-
     /** The backend listed it but could not give it. */
     UNREADABLE,
 
@@ -94,24 +88,15 @@ public sealed interface SyncIssue {
     ) : SyncIssue
 
     /**
-     * A number in the folder of [device] is too far above its last one to be real, so nothing past
-     * [number] in that folder is read. Other folders are not affected.
+     * This device's folder held what it never wrote, or does not remember writing: it was restored
+     * from a backup, or a copy of this database runs elsewhere. So it took a new id, and reads its
+     * old folder as another device's. It never writes there again (ADR-0014).
      */
-    public data class ImplausibleSegmentNumber(
-        /** The device whose folder holds it. */
-        val device: DeviceId,
-        /** The number. */
-        val number: Long,
-    ) : SyncIssue
-
-    /**
-     * Another file is at the path of this device's segment [number]. Most likely a copy of this
-     * database runs on another machine with the same device id (ADR-0004). This device stops
-     * pushing to the backend and goes on pulling. Nothing is overwritten or renumbered.
-     */
-    public data class SegmentCollision(
-        /** The segment number. */
-        val number: Long,
+    public data class DeviceRenewed(
+        /** The id it had. */
+        val old: DeviceId,
+        /** The id it has now. */
+        val new: DeviceId,
     ) : SyncIssue
 
     /** The revision [id] is too large for any segment, so it stays on this device. */

@@ -19,7 +19,9 @@ class ConvergenceTest {
                     "${outcomes.sumOf { it.revisions }} revisions, " +
                     "${outcomes.sumOf { it.merges }} merges, " +
                     "${outcomes.sumOf { it.conflictsSeen }} conflicts, " +
-                    "${outcomes.sumOf { it.crashes }} crashes",
+                    "${outcomes.sumOf { it.crashes }} crashes, " +
+                    "${outcomes.sumOf { it.badStamps }} bad revisions, " +
+                    "${outcomes.sumOf { it.restores }} restored backups",
             )
             assertTrue(outcomes.sumOf { it.merges } > cases, "The cases must make merges")
             assertTrue(outcomes.sumOf { it.conflictsSeen } > 0, "The cases must make conflicts")

@@ -2,10 +2,8 @@ package io.github.sameerkrmishra.jotter.core.sync
 
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
-import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
-import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.RevisionId
 import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
@@ -141,83 +139,6 @@ class LostHistoryTest {
                 "line\nthird\n",
                 resolver.hidden().singleOrNull()?.body ?: phone.notes.get(note.id)?.body,
             )
-        }
-
-    @Test
-    fun aForgedMergeIsRefusedWhicheverArrivesFirst(): TestResult =
-        runTest {
-            val root = textRevision(1, 10, "a\nb\n")
-            val one = textRevision(2, 20, "A\nb\n", root)
-            val two = textRevision(3, 30, "a\nB\n", root, device = DEVICE_B)
-            val honest = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
-            val wrong = honest.copy(deviceId = DEVICE_A)
-            val forged = wrong.copy(id = mergeRevisionId(wrong))
-
-            suspend fun heads(
-                name: String,
-                order: List<List<Revision>>,
-            ): Pair<Boolean, Set<Revision>> {
-                val store = device(name)
-                val blobs = InMemoryBlobStore()
-                order.forEach { revisions ->
-                    val folder = DeviceId.generate()
-                    val segment = Segment(folder, 1, revisions)
-                    val file = JsonGzipCodec().encode(segment)
-                    blobs.writeNew(BackendLayout.segmentPath(folder, 1), file)
-                    store.sync(blobs)
-                }
-                store.sync(blobs)
-                return (store.sync.revision(forged.id) != null) to
-                    RevisionGraph(store.sync.revisions(root.noteId)).heads.toSet()
-            }
-
-            val parentsFirst = heads("first", listOf(listOf(root, one, two), listOf(forged)))
-            val forgedFirst = heads("second", listOf(listOf(forged), listOf(root, one, two)))
-            assertEquals(false, parentsFirst.first)
-            assertEquals(parentsFirst, forgedFirst)
-        }
-
-    @Test
-    fun aMergeInTheSameBatchAsItsParentsGoesIn(): TestResult =
-        runTest {
-            val pc = device("pc")
-            val blobs = InMemoryBlobStore()
-            val root = textRevision(1, 10, "a\nb\n")
-            val one = textRevision(2, 20, "A\nb\n", root)
-            val two = textRevision(3, 30, "a\nB\n", root)
-            val merge = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
-            val low = DeviceId.parse("00000000-0000-4000-8000-000000000001")
-            val high = DeviceId.parse("ffffffff-0000-4000-8000-000000000001")
-            val mergeFile = JsonGzipCodec().encode(Segment(low, 1, listOf(merge)))
-            val parentsFile = JsonGzipCodec().encode(Segment(high, 1, listOf(root, one, two)))
-            blobs.writeNew(BackendLayout.segmentPath(low, 1), mergeFile)
-            blobs.writeNew(BackendLayout.segmentPath(high, 1), parentsFile)
-            assertTrue(pc.sync(blobs).issues.isEmpty())
-            assertNotNull(pc.sync.revision(merge.id))
-        }
-
-    @Test
-    fun aMergeWithoutItsParentsWaitsAndTheRestOfItsSegmentGoesIn(): TestResult =
-        runTest {
-            val pc = device("pc")
-            val blobs = InMemoryBlobStore()
-            val root = textRevision(1, 10, "a\nb\n")
-            val one = textRevision(2, 20, "A\nb\n", root)
-            val two = textRevision(3, 30, "a\nB\n", root)
-            val merge = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
-            val folder = DeviceId.generate()
-            val segment = Segment(folder, 1, listOf(one, merge))
-            blobs.writeNew(BackendLayout.segmentPath(folder, 1), JsonGzipCodec().encode(segment))
-            val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
-            assertEquals(SegmentProblem.WAITING, issue.problem)
-            assertNotNull(pc.sync.revision(one.id))
-            assertNull(pc.sync.revision(merge.id))
-            val rest = Segment(folder, 2, listOf(root, two))
-            blobs.writeNew(BackendLayout.segmentPath(folder, 2), JsonGzipCodec().encode(rest))
-            pc.sync(blobs)
-            pc.sync(blobs)
-            assertNotNull(pc.sync.revision(merge.id))
-            assertTrue(pc.sync.gaps("b", folder).isEmpty())
         }
 
     @Test

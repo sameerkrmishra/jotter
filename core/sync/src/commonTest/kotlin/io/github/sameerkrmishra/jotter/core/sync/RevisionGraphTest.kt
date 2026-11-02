@@ -57,7 +57,7 @@ class RevisionGraphTest {
     }
 
     @Test
-    fun aTombstoneIsNoBaseAndDoesNotHideTheAncestorsBehindIt() {
+    fun aWalkForABaseStopsAtATombstone() {
         val deleted =
             userRevision(4, 40, left) { RevisionContent.Tombstone }
         val backOne =
@@ -66,7 +66,7 @@ class RevisionGraphTest {
         val backTwo =
             mergeRevisions(RevisionGraph(listOf(root, left, other, deleted)), deleted, other)
         val graph = RevisionGraph(listOf(root, left, right, other, deleted, backOne, backTwo))
-        assertEquals(listOf(left), graph.bestCommonAncestors(backOne.id, backTwo.id))
+        assertEquals(listOf(root), graph.bestCommonAncestors(backOne.id, backTwo.id))
     }
 
     @Test

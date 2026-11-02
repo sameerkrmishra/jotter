@@ -11,7 +11,6 @@ import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
-import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
@@ -398,38 +397,6 @@ class SyncEngineTest {
         }
 
     @Test
-    fun anotherFileAtOurPathIsReportedAndNothingIsOverwritten(): TestResult =
-        runTest {
-            val phone = device("phone")
-            val blobs = ScriptedStore()
-            phone.sync(blobs)
-            phone.notes.create("t", "body")
-            blobs.writeFailureBefore = BlobStoreFailureException("disk full")
-            assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
-            val path = BackendLayout.segmentPath(phone.deviceId, 1)
-            val foreign = textRevision(9, 10, "a copied database wrote this")
-            val bytes = JsonGzipCodec().encode(Segment(phone.deviceId, 1, listOf(foreign)))
-            blobs.inner.writeNew(path, bytes)
-            val report = phone.sync(blobs)
-            assertEquals(listOf<SyncIssue>(SyncIssue.SegmentCollision(1)), report.issues)
-            assertTrue(blobs.read(path).contentEquals(bytes))
-            assertEquals(mapOf(1L to false), phone.sync.ownSegments("b"))
-        }
-
-    @Test
-    fun aDamagedFileAtOurPathIsACollisionToo(): TestResult =
-        runTest {
-            val phone = device("phone")
-            val blobs = ScriptedStore()
-            phone.sync(blobs)
-            phone.notes.create("t", "body")
-            blobs.writeFailureBefore = BlobStoreFailureException("disk full")
-            assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
-            blobs.inner.writeNew(BackendLayout.segmentPath(phone.deviceId, 1), ByteArray(3))
-            assertIs<SyncIssue.SegmentCollision>(phone.sync(blobs).issues.single())
-        }
-
-    @Test
     fun aLostSegmentIsWrittenAgainWithItsContent(): TestResult =
         runTest {
             val phone = device("phone")
@@ -444,7 +411,7 @@ class SyncEngineTest {
             pc.sync(blobs)
             assertNull(pc.notes.get(first.id))
             assertNotNull(pc.notes.get(second.id))
-            assertEquals(setOf(1L), pc.sync.gaps("b", phone.deviceId))
+            assertEquals(listOf(1L..1L), pc.sync.gaps("b", phone.deviceId))
             assertEquals(1, phone.sync(blobs).pushedSegments)
             pc.sync(blobs)
             assertNotNull(pc.notes.get(first.id))
@@ -508,7 +475,7 @@ class SyncEngineTest {
             val issue = assertIs<SyncIssue.SegmentNotApplied>(report.issues.single())
             assertEquals(SegmentProblem.CORRUPT, issue.problem)
             assertEquals(3, pc.all().size)
-            assertEquals(setOf(1L), pc.sync.gaps("b", stranger))
+            assertEquals(listOf(1L..1L), pc.sync.gaps("b", stranger))
             assertEquals(2, pc.sync.cursor("b", stranger))
             assertEquals(1, pc.sync(blobs).issues.size)
         }
@@ -523,7 +490,7 @@ class SyncEngineTest {
             blobs.writeNew(BackendLayout.segmentPath(stranger, 1), bytes)
             val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
             assertEquals(SegmentProblem.FUTURE_FORMAT, issue.problem)
-            assertEquals(setOf(1L), pc.sync.gaps("b", stranger))
+            assertEquals(listOf(1L..1L), pc.sync.gaps("b", stranger))
         }
 
     @Test
@@ -583,25 +550,6 @@ class SyncEngineTest {
         }
 
     @Test
-    fun anImplausibleNumberStopsOnlyItsFolder(): TestResult =
-        runTest {
-            val pc = device("pc")
-            val phone = device("phone")
-            phone.notes.create("t", "b")
-            val blobs = InMemoryBlobStore()
-            phone.sync(blobs)
-            val stranger = DeviceId.generate()
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 999_999_999_999), ByteArray(1))
-            val report = pc.sync(blobs)
-            assertEquals(
-                listOf<SyncIssue>(SyncIssue.ImplausibleSegmentNumber(stranger, 999_999_999_999)),
-                report.issues,
-            )
-            assertEquals(1, pc.all().size)
-            assertEquals(0, pc.sync.cursor("b", stranger))
-        }
-
-    @Test
     fun otherFilesInTheFoldersAreIgnored(): TestResult =
         runTest {
             val pc = device("pc")
@@ -617,108 +565,6 @@ class SyncEngineTest {
                 "jotter/devices/$id/sub/000000000001.json.gz",
             ).forEach { blobs.writeNew(it, ByteArray(1)) }
             assertTrue(pc.sync(blobs).issues.isEmpty())
-        }
-
-    private suspend fun rejected(revisions: List<Revision>): SegmentProblem {
-        val pc = device("pc")
-        val blobs = InMemoryBlobStore()
-        revisions.forEachIndexed { index, revision ->
-            val stranger = DeviceId.generate()
-            val segment = Segment(stranger, 1, listOf(revision))
-            val path = BackendLayout.segmentPath(stranger, 1)
-            blobs.writeNew(path, JsonGzipCodec().encode(segment))
-            val report = pc.sync(blobs)
-            if (index == revisions.lastIndex) {
-                val issue = assertIs<SyncIssue.SegmentNotApplied>(report.issues.last())
-                return issue.problem
-            }
-        }
-        error("No revisions")
-    }
-
-    @Test
-    fun theSameIdWithOtherContentIsRejected(): TestResult =
-        runTest {
-            val one = textRevision(1, 10, "one")
-            assertEquals(
-                SegmentProblem.REJECTED,
-                rejected(listOf(one, one.copy(deviceId = DEVICE_B))),
-            )
-        }
-
-    @Test
-    fun twoRevisionsOfOneIdInASegmentAreRejected(): TestResult =
-        runTest {
-            val pc = device("pc")
-            val blobs = InMemoryBlobStore()
-            val one = textRevision(1, 10, "one")
-            val stranger = DeviceId.generate()
-            val segment = Segment(stranger, 1, listOf(one, one.copy(deviceId = DEVICE_B)))
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 1), JsonGzipCodec().encode(segment))
-            assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
-            assertTrue(pc.all().isEmpty())
-        }
-
-    @Test
-    fun aChildNotAboveItsParentIsRejectedInEitherOrderOfArrival(): TestResult =
-        runTest {
-            val parent = textRevision(1, 50, "parent")
-            val child = textRevision(2, 40, "child", parent)
-            assertEquals(SegmentProblem.REJECTED, rejected(listOf(parent, child)))
-            assertEquals(SegmentProblem.REJECTED, rejected(listOf(child, parent)))
-        }
-
-    @Test
-    fun aParentInAnotherNoteIsRejected(): TestResult =
-        runTest {
-            val parent = textRevision(1, 10, "parent")
-            val child =
-                textRevision(2, 20, "child", parent)
-                    .copy(
-                        noteId =
-                            io.github.sameerkrmishra.jotter.core.model.NoteId
-                                .generate(),
-                    )
-            assertEquals(SegmentProblem.REJECTED, rejected(listOf(parent, child)))
-        }
-
-    @Test
-    fun aCycleCannotEnter(): TestResult =
-        runTest {
-            val a = textRevision(1, 10, "a")
-            val b = textRevision(2, 20, "b", a)
-            val aOnB = a.copy(parents = setOf(b.id), timestamp = a.timestamp)
-            assertEquals(SegmentProblem.REJECTED, rejected(listOf(b, aOnB)))
-        }
-
-    @Test
-    fun aMergeThatDoesNotFollowFromItsParentsIsRejected(): TestResult =
-        runTest {
-            val root = textRevision(1, 10, "a\nb\n")
-            val one = textRevision(2, 20, "A\nb\n", root)
-            val two = textRevision(3, 30, "a\nB\n", root, device = DEVICE_B)
-            val merge = mergeRevisions(RevisionGraph(listOf(root, one, two)), one, two)
-            val wrong = merge.copy(deviceId = DEVICE_A)
-            val forged = wrong.copy(id = mergeRevisionId(wrong))
-            assertEquals(SegmentProblem.REJECTED, rejected(listOf(root, one, two, forged)))
-        }
-
-    @Test
-    fun aRejectedSegmentLeavesNoTrace(): TestResult =
-        runTest {
-            val pc = device("pc")
-            val blobs = InMemoryBlobStore()
-            val parent = textRevision(1, 50, "parent")
-            val good = textRevision(3, 60, "good", parent)
-            val bad = textRevision(2, 40, "bad", parent)
-            val stranger = DeviceId.generate()
-            val first = Segment(stranger, 1, listOf(parent))
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 1), JsonGzipCodec().encode(first))
-            pc.sync(blobs)
-            val second = Segment(stranger, 2, listOf(good, bad))
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 2), JsonGzipCodec().encode(second))
-            assertEquals(1, pc.sync(blobs).issues.size)
-            assertNull(pc.sync.revision(good.id))
         }
 
     @Test

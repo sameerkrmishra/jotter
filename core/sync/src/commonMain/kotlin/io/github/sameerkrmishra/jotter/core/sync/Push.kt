@@ -96,6 +96,10 @@ internal class Pusher(
     var pushed: Int = 0
         private set
 
+    /** Whether another file was at the path of a segment of this device. */
+    var collided: Boolean = false
+        private set
+
     /** What went wrong without ending the cycle. */
     val problems: List<SyncIssue> get() = issues
 
@@ -138,7 +142,7 @@ internal class Pusher(
             number
         }
 
-    /** Returns false after a collision, which stops pushing to this backend. */
+    /** Returns false after a collision, which ends this device's id. */
     private suspend fun publish(number: Long): Boolean {
         seams.probe.at(SyncPoint.SEGMENT_RECORDED)
         val segment = Segment(device, number, store.revisionsOfSegment(backendId, number))
@@ -151,7 +155,7 @@ internal class Pusher(
                 holdsSameContent(path, segment)
             }
         if (!isOurs) {
-            issues += SyncIssue.SegmentCollision(number)
+            collided = true
             return false
         }
         seams.probe.at(SyncPoint.SEGMENT_WRITTEN)
