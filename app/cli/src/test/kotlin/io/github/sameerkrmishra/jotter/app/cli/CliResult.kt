@@ -63,7 +63,7 @@ internal fun runJotter(
     file: Path,
     input: InputStream = InputStream.nullInputStream(),
 ): CliResult {
-    val command = JotterCommand(input)
+    val command = JotterCommand(input, args)
     val stdout = StringBuilder()
     val stderr = StringBuilder()
     val result =

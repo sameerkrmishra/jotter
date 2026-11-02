@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.core.CoreCliktCommand
 import com.github.ajalt.clikt.parameters.arguments.ProcessedArgument
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.convert
+import com.github.ajalt.clikt.parameters.arguments.validate
 import com.github.ajalt.clikt.parameters.options.NullableOption
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
@@ -34,12 +35,26 @@ internal abstract class NoteCommand(
     protected abstract fun execute(notes: NoteService)
 }
 
-/** `jotter add`: creates a note and prints only its id, for scripts. */
+/**
+ * `jotter add`: creates a note and prints only its id, for scripts.
+ *
+ * Checklist items start with `-`, so whatever Clikt does not know as an option is the note's text.
+ * The exception is what [looksLikeOption] says is a mistyped option, as a note called `--tga` is
+ * never what was meant. `--` before the text stores even that.
+ */
 internal class AddCommand(
     location: DatabaseLocation,
     private val stdin: InputStream,
+    private val argv: List<String>,
 ) : NoteCommand(location, "add") {
+    override val treatUnknownOptionsAsArgs: Boolean = true
+
     private val text by argument(name = "TEXT", help = "The note, or - to read it from stdin.")
+        .validate {
+            if (looksLikeOption(it) && "--" !in argv) {
+                fail("no such option $it (put -- before it if it is the note's text)")
+            }
+        }
     private val title by option("--title", help = "The title.").default("")
     private val tags by option("--tag", help = "A tag. May be repeated.").tag().multiple()
 
@@ -62,6 +77,15 @@ internal class AddCommand(
         const val STDIN = "-"
     }
 }
+
+/**
+ * Whether [text] is `--word` or `--word=value`. Prose such as `--force is risky` has a space before
+ * any `=`, and `---` or `-- item` have no letter after the dashes.
+ */
+private fun looksLikeOption(text: String): Boolean =
+    // Regex only when needed: `jotter add` starts in about 160 ms and most notes do not get here.
+    text.startsWith("--") &&
+        Regex("""--\p{L}[^\s=]*(=.*)?""", RegexOption.DOT_MATCHES_ALL).matches(text)
 
 /** `jotter list`: prints one line per note, in [NoteService.list]'s order. */
 internal class ListCommand(

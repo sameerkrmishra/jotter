@@ -18,13 +18,21 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 
 | Command | What it does |
 |---|---|
-| `jotter add TEXT` | Adds a note and prints its id. `--title TITLE`, `--tag TAG` (repeatable). `-` as `TEXT` reads the note from stdin as UTF-8, without its trailing newlines |
+| `jotter add TEXT` | Adds a note and prints its id. `--title TITLE`, `--tag TAG` (repeatable). `-` as `TEXT` reads the note from stdin as UTF-8, without its trailing newlines. `TEXT` may start with `-`, see below |
 | `jotter list` | Lists the active notes, pinned first, then the most recently updated. `--archived` or `--trash` lists those instead (the last one given wins), `--tag TAG` filters by a tag |
 | `jotter show ID` | Prints one note in any state |
 | `jotter search QUERY` | Searches the active notes, at most the best 100. QUERY is plain words, see `core:storage` |
 | `jotter tags` | Lists the tags of the notes outside the trash |
 | `jotter import PATH` | Imports Google Keep notes from a Takeout `Keep` directory or one `.json` file, see below |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
+
+`jotter add` takes anything that is not one of its options as the note, so
+checklist items need no quoting beyond the shell's: `jotter add "- [ ] milk"`,
+`jotter add "-1 degrees" --tag weather`. The one exception is text of the form
+`--word` or `--word=value`, with no space before any `=`. That is refused as a
+mistyped option, so `--tga x` is an error and not a note, and nothing is written.
+To store such text, put `--` before it: `jotter add -- --tga`. `---`, `-- item` and
+`--force is risky` are text. `-h` alone is still help, and `-` alone is stdin.
 
 An `ID` is a whole id or a start of one that only one note, in any state, has.
 Letter case and dashes do not matter. A prefix reads every note, because

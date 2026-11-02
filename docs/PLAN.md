@@ -401,8 +401,9 @@ understand this in one pass?). Naming. Fits the module boundaries and ADRs.
 Tests are meaningful, not coverage padding. KDoc present and accurate. No dead
 code, no premature abstraction.
 
-**Maintainer involvement:** the maintainer reviews at milestone boundaries only.
-Each milestone ends with a demo note and a short summary of decisions made.
+**Maintainer involvement:** the maintainer reviews at the end of the project, not
+at milestone boundaries (decided 2026-11-01). Each milestone still ends with a
+demo note and a short summary of decisions made, in `docs/milestones/`.
 
 Tasks inside a milestone that touch different modules run in parallel.
 

@@ -15,9 +15,12 @@ import java.io.InputStream
  * the Mordant terminal library, which turns tabs into spaces and adds to startup time.
  *
  * @param stdin Where `jotter add -` reads the note from.
+ * @param argv The command line. Clikt no longer tells a command what it was, and `jotter add` must
+ *   know whether it has a `--`.
  */
 internal class JotterCommand(
     stdin: InputStream,
+    argv: List<String>,
 ) : CoreCliktCommand(name = "jotter") {
     private val location = DatabaseLocation()
 
@@ -30,7 +33,7 @@ internal class JotterCommand(
 
     init {
         subcommands(
-            AddCommand(location, stdin),
+            AddCommand(location, stdin, argv),
             ListCommand(location),
             ShowCommand(location),
             SearchCommand(location),

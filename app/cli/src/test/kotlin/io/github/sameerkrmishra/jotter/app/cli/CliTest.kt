@@ -102,6 +102,115 @@ class CliTest {
         assertEquals("first\n\nGrüße ✓", note?.body)
     }
 
+    private fun body(id: String): String? = withStore { it.get(NoteId.parse(id)) }?.body
+
+    @Test
+    fun textStartingWithADashIsTheNote() {
+        val texts =
+            listOf(
+                "- [ ] milk",
+                "-[ ] milk",
+                "- item",
+                "-1 degrees",
+                "-1",
+                "-milk",
+                "-hello",
+                "-hat",
+                "---",
+                "--- a heading rule",
+                "-- two dashes",
+                "--force is risky",
+            )
+
+        for (text in texts) {
+            assertEquals(text, body(add(text)), text)
+        }
+    }
+
+    @Test
+    fun optionsWorkOnEitherSideOfTextStartingWithADash() {
+        val forms =
+            listOf(
+                listOf("--tag", "home", "--title", "T", "- item"),
+                listOf("- item", "--tag", "home", "--title", "T"),
+                listOf("--tag", "home", "- item", "--title", "T"),
+                listOf("--tag=home", "--title=T", "- item"),
+            )
+
+        for (form in forms) {
+            val note = checkNotNull(withStore { it.get(NoteId.parse(add(*form.toTypedArray()))) })
+            assertEquals("- item", note.body, "$form")
+            assertEquals("T", note.title, "$form")
+            assertEquals(listOf("home"), note.tags.map { it.toString() }, "$form")
+        }
+    }
+
+    @Test
+    fun anOptionValueMayStartWithADash() {
+        val note =
+            withStore { it.get(NoteId.parse(add("--title", "- title", "--tag", "-x", "text"))) }
+
+        assertEquals("- title", note?.title)
+        assertEquals(listOf("-x"), note?.tags?.map { it.toString() })
+    }
+
+    @Test
+    fun aMistypedOptionIsAnErrorAndStoresNothing() {
+        val mistakes =
+            listOf(
+                listOf("add", "--tga"),
+                listOf("add", "--tga=x"),
+                listOf("add", "--tga=two words"),
+                listOf("add", "--tga", "x"),
+                listOf("add", "--tga", "x", "milk"),
+                listOf("add", "milk", "--tga", "x"),
+                listOf("add", "milk", "--tga"),
+            )
+
+        for (mistake in mistakes) {
+            val result = jotter(*mistake.toTypedArray())
+
+            assertNotEquals(0, result.statusCode, "$mistake")
+            assertEquals("", result.stdout, "$mistake")
+            assertFalse(database.exists(), "$mistake must not touch the database")
+        }
+    }
+
+    @Test
+    fun theErrorForAMistypedOptionSaysHowToStoreItAnyway() {
+        val result = jotter("add", "--tga")
+
+        assertTrue("no such option --tga" in result.stderr, result.stderr)
+        assertTrue("put -- before it" in result.stderr, result.stderr)
+    }
+
+    @Test
+    fun aDoubleDashMakesAnythingTheNote() {
+        for (text in listOf("- [ ] milk", "--tga", "--tga=x", "--tag", "-h")) {
+            assertEquals(text, body(add("--", text)), text)
+        }
+        assertEquals("- x", body(add("--tag", "t", "--", "- x")))
+    }
+
+    @Test
+    fun helpAndStdinKeepTheirMeaning() {
+        val help = jotter("add", "-h")
+
+        assertEquals(0, help.statusCode)
+        assertTrue("Usage" in help.stdout + help.stderr)
+        assertFalse(database.exists())
+        val result = jotter("add", "-", stdin = "- [ ] from stdin\n")
+        assertEquals("- [ ] from stdin", body(result.stdout.trim()))
+    }
+
+    @Test
+    fun otherCommandsStillRefuseUnknownOptions() {
+        val result = jotter("list", "--tga", "x")
+
+        assertNotEquals(0, result.statusCode)
+        assertTrue("no such option" in result.stderr, result.stderr)
+    }
+
     @Test
     fun addRefusesAnEmptyNoteButAcceptsOneWithOnlyATitle() {
         assertFails("the note is empty", jotter("add", " "))
