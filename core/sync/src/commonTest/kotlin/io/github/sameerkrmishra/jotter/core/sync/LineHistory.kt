@@ -31,10 +31,20 @@ internal sealed interface LineState {
     data object Lost : LineState
 }
 
-/** Follows [line] through [graph]. */
+/** The lines of one text field of a note. */
+internal typealias TextField = (RevisionContent.Snapshot) -> List<String>
+
+/** The lines of a note's body. */
+internal val bodyLines: TextField = { it.body.split('\n') }
+
+/** A note's title, as one line. */
+internal val titleLine: TextField = { listOf(it.title) }
+
+/** Follows [line] of [field] through [graph]. */
 internal class LineHistory(
     private val graph: RevisionGraph,
     private val line: String,
+    private val field: TextField = bodyLines,
 ) {
     private val memo = HashMap<RevisionId, LineState>()
 
@@ -42,7 +52,7 @@ internal class LineHistory(
     fun stateAt(revision: Revision): LineState = memo.getOrPut(revision.id) { work(revision) }
 
     private fun holds(revision: Revision): Boolean =
-        (revision.content as? RevisionContent.Snapshot)?.body?.split('\n')?.contains(line) == true
+        (revision.content as? RevisionContent.Snapshot)?.let(field)?.contains(line) == true
 
     private fun work(revision: Revision): LineState {
         val parents = revision.parents.map(graph::get)

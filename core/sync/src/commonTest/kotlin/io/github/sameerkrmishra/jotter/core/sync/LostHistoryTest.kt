@@ -71,7 +71,7 @@ class LostHistoryTest {
             writer.sync(blobs)
             writer.notes.edit(note.id, first.revisionId, "", "writer 2\nb\n")
             writer.sync(blobs)
-            blobs.lose(BackendLayout.segmentPath(writer.deviceId, 2))
+            blobs.lose(blobs.pathOfNumber(writer.deviceId, 2))
             reader.notes.edit(note.id, note.revisionId, "", "a\nreader\n")
             reader.sync(blobs)
         }
@@ -154,7 +154,7 @@ class LostHistoryTest {
             val second = phone.notes.create("t", "two")
             val report = phone.sync(blobs)
             assertTrue(report.issues.isEmpty(), "${report.issues}")
-            assertEquals(setOf(2L), phone.sync.ownSegments("b").keys)
+            assertEquals(setOf(2L), phone.sync.published("b").keys)
             pc.sync(blobs)
             assertNotNull(pc.notes.get(second.id))
         }
@@ -169,11 +169,11 @@ class LostHistoryTest {
             phone.notes.create("t", "two")
             val report = phone.sync(blobs, target = "new")
             assertTrue(report.issues.isEmpty(), "${report.issues}")
-            assertEquals(setOf(2L), phone.sync.ownSegments("new").keys)
+            assertEquals(setOf(2L), phone.sync.published("new").keys)
         }
 
     @Test
-    fun aNumberIsNotUsedAgainAfterItsFileWasLostAndTheBackendForgotten(): TestResult =
+    fun aFileLostBeforeTheBackendWasForgottenLosesNothing(): TestResult =
         runTest {
             val phone = device("phone")
             val pc = device("pc")
@@ -181,7 +181,7 @@ class LostHistoryTest {
             phone.notes.create("t", "one")
             phone.sync(blobs)
             pc.sync(blobs)
-            blobs.lose(BackendLayout.segmentPath(phone.deviceId, 1))
+            blobs.lose(blobs.pathOfNumber(phone.deviceId, 1))
             SyncEngine(phone, DeviceInfo("d", "test"), EmptyCoroutineContext).forget("b")
             val second = phone.notes.create("t", "two")
             phone.sync(blobs)
@@ -199,7 +199,7 @@ class LostHistoryTest {
             val note = writer.notes.create("t", "body")
             writer.sync(blobs)
             reader.sync(blobs)
-            blobs.lose(BackendLayout.segmentPath(writer.deviceId, 1))
+            blobs.lose(blobs.pathOfNumber(writer.deviceId, 1))
             assertEquals(1, reader.sync(blobs).pushedSegments)
             late.sync(blobs)
             assertEquals("body", late.notes.get(note.id)?.body)

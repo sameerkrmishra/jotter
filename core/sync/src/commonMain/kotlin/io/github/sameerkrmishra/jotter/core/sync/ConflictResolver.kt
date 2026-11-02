@@ -75,7 +75,7 @@ public class ConflictResolver(
     /** Returns what the conflict screen needs for the merge [mergeId], or null if it is closed. */
     public fun details(mergeId: RevisionId): ConflictDetails? {
         val conflict = store.sync.conflict(mergeId) ?: return null
-        val graph = RevisionGraph(store.sync.revisions(conflict.noteId))
+        val graph = storedGraph(store.sync, conflict.noteId)
         return if (graph.isOpen(mergeId)) detailsOf(conflict, graph) else null
     }
 
@@ -109,7 +109,7 @@ public class ConflictResolver(
     ): Note? =
         store.sync.write {
             val conflict = store.sync.conflict(mergeId) ?: throw NoSuchConflictException(mergeId)
-            val graph = RevisionGraph(store.sync.revisions(conflict.noteId))
+            val graph = storedGraph(store.sync, conflict.noteId)
             if (graph.isOpen(mergeId)) {
                 val losing = LosingText(conflict.losingTitle, conflict.losingBody)
                 settle(graph.headOf(mergeId), mergeId, losing, resolution)
@@ -147,7 +147,7 @@ public class ConflictResolver(
             if (hidden.reason == HiddenReason.OPEN_CONFLICT) {
                 throw HiddenHeadWaitsForConflictException(headId)
             }
-            val graph = RevisionGraph(store.sync.revisions(hidden.noteId))
+            val graph = storedGraph(store.sync, hidden.noteId)
             val parent = checkNotNull(graph.shownHead()) { "A hidden head has a shown one" }
             settle(parent, headId, LosingText(hidden.title, hidden.body), resolution)
         }

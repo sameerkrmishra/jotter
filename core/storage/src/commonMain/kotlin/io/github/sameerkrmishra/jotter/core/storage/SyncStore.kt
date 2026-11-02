@@ -61,16 +61,16 @@ public data class HiddenHead(
 )
 
 /**
- * A file read from another device's folder.
+ * A segment this device wrote on a backend.
  *
- * @property device The device whose folder holds it.
  * @property number Its number.
- * @property size Its size in bytes.
+ * @property name Its file name.
+ * @property isPublished Whether it is known to be on the backend.
  */
-public data class ReadSegment(
-    val device: DeviceId,
+public data class OwnSegment(
     val number: Long,
-    val size: Long,
+    val name: String,
+    val isPublished: Boolean,
 )
 
 /** Why text does not count (ADR-0014). */
@@ -81,7 +81,7 @@ public enum class InvalidReason {
     /** The revision could not be read, so only what could be read of it is here. */
     MALFORMED,
 
-    /** Another revision uses its id, and won. */
+    /** Two different revisions were seen under this id, so neither counts. */
     ID_COLLISION,
 }
 
@@ -122,6 +122,7 @@ public annotation class SyncStoreApi
 @Suppress("TooManyFunctions") // One small function per query, kept together on purpose.
 public class SyncStore internal constructor(
     private val database: JotterDatabase,
+    private val deviceId: DeviceId,
     private val clock: Clock,
     private val queryContext: CoroutineContext,
     private val ids: IdSource,
@@ -184,7 +185,7 @@ public class SyncStore internal constructor(
                     noteId = parent.noteId,
                     parents = setOf(parent.id),
                     timestamp = hlc.now(after = parent.timestamp),
-                    deviceId = currentDevice(),
+                    deviceId = deviceId,
                     kind = RevisionKind.User,
                     content = content,
                     resolves = resolves,
@@ -209,75 +210,20 @@ public class SyncStore internal constructor(
             }
         }
 
-    /** Returns the highest segment number processed from [device] on [backend], or 0. */
-    public fun cursor(
-        backend: String,
-        device: DeviceId,
-    ): Long = queries.selectCursor(backend, device.toString()).executeAsOneOrNull() ?: 0
-
-    /** Sets the highest segment number processed from [device] on [backend]. */
-    public fun setCursor(
-        backend: String,
-        device: DeviceId,
-        segment: Long,
-    ) {
-        queries.upsertCursor(backend, device.toString(), segment)
-    }
-
-    /** Returns the ranges of numbers at or below the cursor of [device] not applied yet. */
-    public fun gaps(
-        backend: String,
-        device: DeviceId,
-    ): List<LongRange> =
-        queries
-            .selectGaps(backend, device.toString()) { first, last -> first..last }
-            .executeAsList()
-
-    /** Records that the numbers in [range] of [device] on [backend] were not applied. */
-    public fun addGap(
-        backend: String,
-        device: DeviceId,
-        range: LongRange,
-    ) {
-        if (gaps(backend, device).none { range.first in it }) {
-            queries.insertGap(backend, device.toString(), range.first, range.last)
-        }
-    }
-
-    /** Records that segment [number] of [device] on [backend] has been applied. */
-    public fun removeGap(
-        backend: String,
-        device: DeviceId,
-        number: Long,
-    ) {
-        val range = gaps(backend, device).firstOrNull { number in it } ?: return
-        val name = device.toString()
-        queries.deleteGap(backend, name, range.first)
-        if (number > range.first) queries.insertGap(backend, name, range.first, number - 1)
-        if (number < range.last) queries.insertGap(backend, name, number + 1, range.last)
-    }
-
-    /** Returns this device's segments on [backend], by number, and whether each is published. */
-    public fun ownSegments(backend: String): Map<Long, Boolean> =
-        queries
-            .selectOwnSegments(backend)
-            .executeAsList()
-            .associate { it.number to it.is_published }
+    /** Returns this device's segments on [backend], by number. */
+    public fun ownSegments(backend: String): List<OwnSegment> =
+        queries.selectOwnSegments(backend, ::OwnSegment).executeAsList()
 
     /** Records a new segment of this device on [backend], with [revisionIds], as unpublished. */
     public fun recordSegment(
         backend: String,
         number: Long,
+        name: String,
         revisionIds: List<RevisionId>,
     ) {
-        queries.insertOwnSegment(backend, number)
-        queries.upsertLastNumber(backend, number)
+        queries.insertOwnSegment(backend, number, name)
         revisionIds.forEach { queries.insertPushedRevision(backend, it.toString(), number) }
     }
-
-    /** Returns the highest number this device ever gave a segment on [backend], or 0. */
-    public fun lastSegmentNumber(backend: String): Long =
-        queries.selectLastNumber(backend).executeAsOneOrNull() ?: 0
 
     /** Records that segment [number] of this device is on [backend]. */
     public fun markSegmentPublished(
@@ -300,40 +246,6 @@ public class SyncStore internal constructor(
     /** Returns the ids of the revisions not known to be on [backend], in arrival order. */
     public fun unpushed(backend: String): List<RevisionId> =
         queries.selectUnpushed(backend).executeAsList().map(RevisionId::parse)
-
-    /** Raises the last number used on [backend] to [number], found in this device's folder. */
-    public fun adoptSegmentNumber(
-        backend: String,
-        number: Long,
-    ) {
-        queries.upsertLastNumber(backend, number)
-    }
-
-    /**
-     * Gives this device a new id, in one transaction (ADR-0014). What it published stays on the
-     * backends as another device's, read from behind the numbers it used, and what it had not
-     * published counts as not on any backend. Returns the new id.
-     */
-    public fun renewDeviceId(): DeviceId =
-        write {
-            val old = currentDevice().toString()
-            val new = ids.newDeviceId()
-            queries.demotePublishedRevisions(old)
-            queries.deleteUnpublishedRevisions()
-            queries.insertCursorsOfOldDevice(old)
-            // A number it never got to publish can hold another writer's file, to be read.
-            queries.insertGapsOfUnpublished(old)
-            queries.deleteAllOwnSegments()
-            queries.deleteLastNumbers()
-            database.deviceQueries.updateDeviceId(new.toString())
-            new
-        }
-
-    /** Puts [revision] in the place of the stored one with its id, on no backend so far. */
-    public fun replace(revision: Revision) {
-        revisions.replace(revision)
-        queries.deleteRevisionFromBackends(revision.id.toString())
-    }
 
     /** Removes the note [noteId] from what the UI reads, as no revision of it counts. */
     public fun removeNote(noteId: NoteId) {
@@ -372,67 +284,52 @@ public class SyncStore internal constructor(
             .mapToList(queryContext)
             .distinctUntilChanged()
 
-    /** Records that the stored revision [id] was found on [backend], in a segment of [device]. */
+    /** Returns the ids that two different revisions were seen under. */
+    public fun collidedIds(): Set<RevisionId> =
+        queries
+            .selectCollidedIds()
+            .executeAsList()
+            .mapTo(HashSet(), RevisionId::parse)
+
+    /** Records that the stored revision [id] was found on [backend], in the file [name]. */
     public fun markOnBackend(
         backend: String,
         id: RevisionId,
         device: DeviceId,
-        number: Long,
+        name: String,
     ) {
-        queries.insertPulledRevision(backend, id.toString(), device.toString(), number)
+        queries.insertPulledRevision(backend, id.toString(), device.toString(), name)
     }
 
-    /** Returns the segments of other devices that revisions were recorded from on [backend]. */
-    public fun pulledSegments(backend: String): List<Pair<DeviceId, Long>> =
-        queries.selectPulledSegments(backend).executeAsList().map { row ->
-            DeviceId.parse(checkNotNull(row.source_device)) to checkNotNull(row.source_segment)
-        }
-
-    /** Records that segment [number] of [device] was read from [backend], [size] bytes long. */
+    /** Records that the file [name] in the folder of [device] on [backend] has been read. */
     public fun recordRead(
         backend: String,
         device: DeviceId,
-        number: Long,
-        size: Long,
+        name: String,
     ) {
-        queries.upsertRead(backend, device.toString(), number, size)
+        queries.insertRead(backend, device.toString(), name)
     }
 
-    /** Returns the files read from other devices on [backend]. */
-    public fun readSegments(backend: String): List<ReadSegment> =
+    /** Returns the files read on [backend]: the folder and the file name. */
+    public fun readFiles(backend: String): List<Pair<DeviceId, String>> =
         queries
-            .selectReads(backend) { device, number, size ->
-                ReadSegment(DeviceId.parse(device), number, size)
-            }.executeAsList()
+            .selectReads(backend) { device, name -> DeviceId.parse(device) to name }
+            .executeAsList()
 
-    /** Forgets that segment [number] of [device] was read from [backend]. */
-    public fun forgetRead(
+    /** Forgets the file [name] of [device] on [backend], and that its revisions are there. */
+    public fun forgetFile(
         backend: String,
         device: DeviceId,
-        number: Long,
+        name: String,
     ) {
-        queries.deleteRead(backend, device.toString(), number)
+        queries.deleteRead(backend, device.toString(), name)
+        queries.deleteRevisionsReadFrom(backend, device.toString(), name)
     }
 
-    /** Stops counting the revisions read from segment [number] of [device] as on [backend]. */
-    public fun forgetPulledSegment(
-        backend: String,
-        device: DeviceId,
-        number: Long,
-    ) {
-        queries.deleteRevisionsOfPulledSegment(backend, device.toString(), number)
-    }
-
-    /**
-     * Forgets [backend] (PLAN.md §6.5), in one transaction, but for the last number used: others
-     * may have read it, so it can never be given to other content.
-     */
+    /** Forgets [backend] (PLAN.md §6.5), in one transaction. */
     public fun forgetBackend(backend: String) {
         write {
-            queries.lowerLastNumberBelowUnpublished(backend)
             queries.deleteBackendReads(backend)
-            queries.deleteBackendCursors(backend)
-            queries.deleteBackendGaps(backend)
             queries.deleteBackendSegments(backend)
             queries.deleteBackendRevisions(backend)
         }
@@ -499,14 +396,6 @@ public class SyncStore internal constructor(
             .asFlow()
             .mapToList(queryContext)
             .distinctUntilChanged()
-
-    private fun currentDevice(): DeviceId =
-        DeviceId.parse(
-            database.deviceQueries
-                .selectDevice()
-                .executeAsOne()
-                .id,
-        )
 
     /** Runs [block] with the device's clock and stores the clock's new time. */
     private fun <T> withClock(block: (HybridLogicalClock) -> T): T =

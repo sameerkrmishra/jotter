@@ -28,9 +28,9 @@ class PinnedRunTest {
         const val REPLAYED = 42L
         val PINNED: Map<Long, String> =
             mapOf(
-                1L to "7b0b58678010f509071bfa92f52f1ca8be666423aae5ca2ccc03a69eef627115",
-                2L to "963790c8e4ad31c8259fd8b3c4e7cc545eaa792cc5a9888df04f289326cbd554",
-                3L to "620a3c38387748f2a62f2e7aaadb4176b91d15820f748ad6e3c39bea1937b689",
+                1L to "208be0cc6e5383ba195c175073d26dca74e651377af0730587601b34053147ae",
+                2L to "5d9efb27393d4b39f3705b5e241a58376f3792dc84aa504149a58f9f94254cc7",
+                3L to "f128007725ccd710db90d0895baf79f0078525b5044b6ff4fdfb301a33f12712",
             )
     }
 }

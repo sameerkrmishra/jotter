@@ -17,8 +17,5 @@ VALUES (1, :id, :name, 0, 0);
 selectDevice:
 SELECT id, hlc_physical, hlc_counter FROM device;
 
-updateDeviceId:
-UPDATE device SET id = :id;
-
 updateClock:
 UPDATE device SET hlc_physical = :hlcPhysical, hlc_counter = :hlcCounter;

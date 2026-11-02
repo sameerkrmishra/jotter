@@ -2,6 +2,7 @@
 
 package io.github.sameerkrmishra.jotter.core.sync
 
+import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
 import io.github.sameerkrmishra.jotter.core.model.NoteId
@@ -13,6 +14,7 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamp
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.storage.SyncStore
 
 /** Fixed ids, so that fixtures and pinned vectors never change. */
 internal val NOTE: NoteId = NoteId.parse("01890000-0000-7000-8000-000000000001")
@@ -79,3 +81,43 @@ internal fun textRevision(
 /** The snapshot of this revision, which must have one. */
 internal val Revision.text: RevisionContent.Snapshot
     get() = content as RevisionContent.Snapshot
+
+/** The path of the file that holds [segment]. */
+internal fun pathOf(segment: Segment): String =
+    BackendLayout.segmentPath(
+        segment.device,
+        BackendLayout.segmentName(segment.number, JsonGzipCodec().hash(segment)),
+    )
+
+/** Writes [segment] where its writer would. */
+internal suspend fun BlobStore.writeSegment(segment: Segment) {
+    writeNew(pathOf(segment), JsonGzipCodec().encode(segment))
+}
+
+/** A well-formed path whose hash is no file's hash. */
+internal fun junkPath(
+    device: DeviceId,
+    number: Long,
+): String =
+    BackendLayout.segmentPath(
+        device,
+        BackendLayout.segmentName(number, "0".repeat(JUNK_HASH_DIGITS)),
+    )
+
+private const val JUNK_HASH_DIGITS = 32
+
+/** The path of the one file with [number] in the folder of [device]. */
+internal suspend fun BlobStore.pathOfNumber(
+    device: DeviceId,
+    number: Long,
+): String =
+    BackendLayout
+        .segments(list(BackendLayout.DEVICES))
+        .getValue(device)
+        .single { it.number == number }
+        .info
+        .path
+
+/** This device's segments on [backend], and whether each is published. */
+internal fun SyncStore.published(backend: String): Map<Long, Boolean> =
+    ownSegments(backend).associate { it.number to it.isPublished }

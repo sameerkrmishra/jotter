@@ -10,6 +10,7 @@ import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.Note
+import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.TagName
@@ -141,7 +142,8 @@ class SyncEngineTest {
             )
             val deviceFile = "jotter/devices/${phone.deviceId}/device.json"
             assertTrue(blobs.read(deviceFile).decodeToString().contains("\"platform\":\"test\""))
-            val segment = "jotter/devices/${phone.deviceId}/000000000001.json.gz"
+            val segment = blobs.pathOfNumber(phone.deviceId, 1)
+            assertTrue(segment.contains(Regex("/000000000001-[0-9a-f]{32}\\.json\\.gz$")), segment)
             assertEquals(1, JsonGzipCodec().decode(blobs.read(segment)).revisions.size)
         }
 
@@ -224,8 +226,8 @@ class SyncEngineTest {
             val pc = device("pc")
             val blobs = ScriptedStore()
             exchange(blobs, phone, pc)
-            val cursor = pc.sync.cursor("b", phone.deviceId)
-            assertEquals(1, cursor)
+            val read = pc.sync.readFiles("b")
+            assertEquals(1, read.size)
             phone.notes.create("second", "note")
             phone.sync(blobs)
             val own = pc.sync.ownSegments("b")
@@ -233,7 +235,7 @@ class SyncEngineTest {
             blobs.listFailure = BlobStoreFailureException("disk error")
             val result = pc.engine().sync(SyncTarget("b", blobs))
             assertIs<SyncResult.Interrupted>(result)
-            assertEquals(cursor, pc.sync.cursor("b", phone.deviceId))
+            assertEquals(read, pc.sync.readFiles("b"))
             assertEquals(own, pc.sync.ownSegments("b"))
             assertEquals(1, pc.all().size)
 
@@ -273,12 +275,12 @@ class SyncEngineTest {
             val flaky =
                 object : BlobStore by memory {
                     override suspend fun read(path: String): ByteArray {
-                        if (path.endsWith("2.json.gz") && reads++ == 0) throw outage
+                        if (path.contains("/000000000002-") && reads++ == 0) throw outage
                         return memory.read(path)
                     }
                 }
             assertIs<SyncResult.Interrupted>(pc.engine().sync(SyncTarget("b", flaky)))
-            assertEquals(1, pc.sync.cursor("b", phone.deviceId))
+            assertEquals(1, pc.sync.readFiles("b").size)
             assertEquals(1, pc.all().size)
             pc.sync(flaky)
             assertEquals(2, pc.all().size)
@@ -295,10 +297,10 @@ class SyncEngineTest {
             phone.notes.create("second", "note")
             blobs.writeFailureAfter = BlobStoreFailureException("fsync failed")
             assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
-            assertEquals(mapOf(1L to true, 2L to false), phone.sync.ownSegments("b"))
+            assertEquals(mapOf(1L to true, 2L to false), phone.sync.published("b"))
             phone.notes.create("third", "note")
             val report = phone.sync(blobs)
-            assertEquals(mapOf(1L to true, 2L to true, 3L to true), phone.sync.ownSegments("b"))
+            assertEquals(mapOf(1L to true, 2L to true, 3L to true), phone.sync.published("b"))
             assertTrue(report.issues.isEmpty())
             assertEquals(3, segmentFiles(blobs).size)
             pc.sync(blobs)
@@ -316,9 +318,9 @@ class SyncEngineTest {
             assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
             blobs.writeFailureBefore = BlobStoreFailureException("failed again")
             assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
-            assertEquals(mapOf(1L to false), phone.sync.ownSegments("b"))
+            assertEquals(mapOf(1L to false), phone.sync.published("b"))
             assertTrue(phone.sync(blobs).issues.isEmpty())
-            assertEquals(mapOf(1L to true), phone.sync.ownSegments("b"))
+            assertEquals(mapOf(1L to true), phone.sync.published("b"))
         }
 
     @Test
@@ -332,14 +334,14 @@ class SyncEngineTest {
             assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", blobs)))
             val later = phone.notes.create("later", "note")
             phone.sync(blobs)
-            val path = BackendLayout.segmentPath(phone.deviceId, 1)
+            val path = blobs.pathOfNumber(phone.deviceId, 1)
             assertFalse(
                 JsonGzipCodec().decode(blobs.read(path)).revisions.any {
                     it.noteId ==
                         later.id
                 },
             )
-            val second = BackendLayout.segmentPath(phone.deviceId, 2)
+            val second = blobs.pathOfNumber(phone.deviceId, 2)
             assertTrue(
                 JsonGzipCodec().decode(blobs.read(second)).revisions.any {
                     it.noteId ==
@@ -365,14 +367,14 @@ class SyncEngineTest {
                     },
                 )
             assertFailsWith<SimulatedCrash> { crashing.sync(SyncTarget("b", blobs)) }
-            assertEquals(mapOf(1L to false), phone.sync.ownSegments("b"))
+            assertEquals(mapOf(1L to false), phone.sync.published("b"))
             assertTrue(phone.sync(blobs).issues.isEmpty())
-            assertEquals(mapOf(1L to true), phone.sync.ownSegments("b"))
+            assertEquals(mapOf(1L to true), phone.sync.published("b"))
             assertEquals(1, segmentFiles(blobs).size)
         }
 
     @Test
-    fun aCrashDuringApplyRollsBackRevisionsAndCursors(): TestResult =
+    fun aCrashDuringApplyRollsBackRevisionsAndWhatWasRead(): TestResult =
         runTest {
             val phone = device("phone")
             val pc = device("pc")
@@ -390,7 +392,7 @@ class SyncEngineTest {
                     },
                 )
             assertFailsWith<SimulatedCrash> { crashing.sync(SyncTarget("b", blobs)) }
-            assertEquals(0, pc.sync.cursor("b", phone.deviceId))
+            assertTrue(pc.sync.readFiles("b").isEmpty())
             assertTrue(pc.all().isEmpty())
             pc.sync(blobs)
             assertEquals(1, pc.all().size)
@@ -406,16 +408,15 @@ class SyncEngineTest {
             phone.sync(blobs)
             val second = phone.notes.create("second", "note")
             phone.sync(blobs)
-            val path = BackendLayout.segmentPath(phone.deviceId, 1)
+            val path = blobs.pathOfNumber(phone.deviceId, 1)
             blobs.lose(path)
             pc.sync(blobs)
             assertNull(pc.notes.get(first.id))
             assertNotNull(pc.notes.get(second.id))
-            assertEquals(listOf(1L..1L), pc.sync.gaps("b", phone.deviceId))
             assertEquals(1, phone.sync(blobs).pushedSegments)
+            assertEquals(path, blobs.pathOfNumber(phone.deviceId, 1))
             pc.sync(blobs)
             assertNotNull(pc.notes.get(first.id))
-            assertTrue(pc.sync.gaps("b", phone.deviceId).isEmpty())
         }
 
     @Test
@@ -428,7 +429,7 @@ class SyncEngineTest {
             phone.sync(blobs)
             phone.notes.edit(note.id, note.revisionId, "t", "two")
             phone.sync(blobs)
-            blobs.lose(BackendLayout.segmentPath(phone.deviceId, 1))
+            blobs.lose(blobs.pathOfNumber(phone.deviceId, 1))
             val report = pc.sync(blobs)
             val missing = assertIs<SyncIssue.SegmentNotApplied>(report.issues.single())
             assertEquals(SegmentProblem.MISSING, missing.problem)
@@ -449,7 +450,7 @@ class SyncEngineTest {
             phone.notes.edit(note.id, edited.revisionId, "", "A\nb\nmore\n")
             phone.sync(blobs)
             pc.notes.edit(note.id, note.revisionId, "", "a\nB\n")
-            blobs.lose(BackendLayout.segmentPath(phone.deviceId, 2))
+            blobs.lose(blobs.pathOfNumber(phone.deviceId, 2))
             assertEquals(0, pc.sync(blobs).merges)
             phone.sync(blobs)
             assertEquals(1, pc.sync(blobs).merges)
@@ -468,16 +469,55 @@ class SyncEngineTest {
             phone.sync(blobs)
             laptop.sync(blobs)
             val stranger = DeviceId.generate()
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 1), "junk".encodeToByteArray())
-            val good = Segment(stranger, 2, listOf(textRevision(5, 10, "good")))
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 2), JsonGzipCodec().encode(good))
+            blobs.writeNew(junkPath(stranger, 1), "junk".encodeToByteArray())
+            blobs.writeSegment(Segment(stranger, 2, listOf(textRevision(5, 10, "good"))))
             val report = pc.sync(blobs)
             val issue = assertIs<SyncIssue.SegmentNotApplied>(report.issues.single())
             assertEquals(SegmentProblem.CORRUPT, issue.problem)
             assertEquals(3, pc.all().size)
-            assertEquals(listOf(1L..1L), pc.sync.gaps("b", stranger))
-            assertEquals(2, pc.sync.cursor("b", stranger))
+            assertEquals(1, pc.sync.readFiles("b").count { it.first == stranger })
             assertEquals(1, pc.sync(blobs).issues.size)
+        }
+
+    @Test
+    fun aFileWhoseContentIsNotItsHashIsRefusedAndHarmsNothing(): TestResult =
+        runTest {
+            val pc = device("pc")
+            val blobs = InMemoryBlobStore()
+            val stranger = DeviceId.generate()
+            val forged = Segment(stranger, 1, listOf(textRevision(1, 10, "not what the name says")))
+            blobs.writeNew(junkPath(stranger, 1), JsonGzipCodec().encode(forged))
+
+            repeat(2) {
+                val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
+                assertEquals(SegmentProblem.CORRUPT, issue.problem)
+                assertTrue(issue.detail.contains("hash"), issue.detail)
+                assertTrue(pc.sync.revisions(NOTE).isEmpty())
+                assertTrue(pc.sync.readFiles("b").isEmpty())
+            }
+
+            blobs.writeSegment(forged)
+            assertEquals(1, pc.sync(blobs).issues.size)
+            assertEquals("not what the name says", pc.notes.get(NOTE)?.body)
+        }
+
+    @Test
+    fun twoSegmentsWithOneNumberAreBothApplied(): TestResult =
+        runTest {
+            val pc = device("pc")
+            val blobs = InMemoryBlobStore()
+            val stranger = DeviceId.generate()
+            val one = textRevision(1, 10, "same length a").copy(noteId = NoteId.generate())
+            val two = textRevision(2, 10, "same length b").copy(noteId = NoteId.generate())
+            blobs.writeSegment(Segment(stranger, 1, listOf(one)))
+            pc.sync(blobs)
+            blobs.writeSegment(Segment(stranger, 1, listOf(two)))
+            val report = pc.sync(blobs)
+            assertEquals(1, report.appliedSegments)
+            assertTrue(report.issues.isEmpty(), "${report.issues}")
+            assertEquals(2, pc.sync.readFiles("b").size)
+            assertEquals(one.text.body, pc.notes.get(one.noteId)?.body)
+            assertEquals(two.text.body, pc.notes.get(two.noteId)?.body)
         }
 
     @Test
@@ -487,10 +527,10 @@ class SyncEngineTest {
             val blobs = InMemoryBlobStore()
             val stranger = DeviceId.generate()
             val bytes = gzip("{\"format\":99,\"device\":\"$stranger\"}")
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 1), bytes)
+            blobs.writeNew(junkPath(stranger, 1), bytes)
             val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
             assertEquals(SegmentProblem.FUTURE_FORMAT, issue.problem)
-            assertEquals(listOf(1L..1L), pc.sync.gaps("b", stranger))
+            assertTrue(pc.sync.readFiles("b").isEmpty())
         }
 
     @Test
@@ -500,7 +540,9 @@ class SyncEngineTest {
             val blobs = InMemoryBlobStore()
             val stranger = DeviceId.generate()
             val segment = Segment(DeviceId.generate(), 1, listOf(textRevision(1, 10, "moved")))
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 1), JsonGzipCodec().encode(segment))
+            val name = BackendLayout.segmentName(1, JsonGzipCodec().hash(segment))
+            val path = BackendLayout.segmentPath(stranger, name)
+            blobs.writeNew(path, JsonGzipCodec().encode(segment))
             val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
             assertEquals(SegmentProblem.CORRUPT, issue.problem)
             assertTrue(pc.all().isEmpty())
@@ -511,7 +553,7 @@ class SyncEngineTest {
         runTest {
             val pc = device("pc")
             val stranger = DeviceId.generate()
-            val path = BackendLayout.segmentPath(stranger, 1)
+            val path = junkPath(stranger, 1)
             val memory = InMemoryBlobStore()
             val huge =
                 object : BlobStore by memory {
@@ -525,7 +567,7 @@ class SyncEngineTest {
         }
 
     @Test
-    fun aFileThatCannotBeReadBecomesAGap(): TestResult =
+    fun aFileThatCannotBeReadIsTriedAgain(): TestResult =
         runTest {
             val phone = device("phone")
             val pc = device("pc")
@@ -555,14 +597,19 @@ class SyncEngineTest {
             val pc = device("pc")
             val blobs = InMemoryBlobStore()
             val id = DeviceId.generate()
+            val hash = "0".repeat(HASH_DIGITS)
             listOf(
-                "jotter/devices/not-a-device/000000000001.json.gz",
-                "jotter/devices/${id.toString().uppercase()}/000000000001.json.gz",
-                "jotter/devices/$id/1.json.gz",
-                "jotter/devices/$id/000000000000.json.gz",
-                "jotter/devices/$id/00000000000x.json.gz",
-                "jotter/devices/$id/000000000001.json",
-                "jotter/devices/$id/sub/000000000001.json.gz",
+                "jotter/devices/not-a-device/000000000001-$hash.json.gz",
+                "jotter/devices/${id.toString().uppercase()}/000000000001-$hash.json.gz",
+                "jotter/devices/$id/1-$hash.json.gz",
+                "jotter/devices/$id/000000000000-$hash.json.gz",
+                "jotter/devices/$id/00000000000x-$hash.json.gz",
+                "jotter/devices/$id/000000000001.json.gz",
+                "jotter/devices/$id/000000000001-.json.gz",
+                "jotter/devices/$id/000000000001-${hash.drop(1)}.json.gz",
+                "jotter/devices/$id/000000000001-${"A".repeat(HASH_DIGITS)}.json.gz",
+                "jotter/devices/$id/000000000001-$hash.json",
+                "jotter/devices/$id/sub/000000000001-$hash.json.gz",
             ).forEach { blobs.writeNew(it, ByteArray(1)) }
             assertTrue(pc.sync(blobs).issues.isEmpty())
         }
@@ -710,7 +757,7 @@ class SyncEngineTest {
                 phone.sync(blobs)
             }
             val result = pc.engine(maxBytes = 1).sync(SyncTarget("b", blobs))
-            // A limit of one byte refuses every file unread: nothing is applied, but all is a gap.
+            // A limit of one byte refuses every file: nothing is applied, and each stays unread.
             val report = assertIs<SyncResult.Completed>(result).report
             assertEquals(SPLIT_NOTES, report.issues.size)
             assertEquals(0, report.appliedSegments)
@@ -723,8 +770,7 @@ class SyncEngineTest {
             val blobs = InMemoryBlobStore()
             val stranger = DeviceId.generate()
             val future = textRevision(1, Long.MAX_VALUE / 2, "from the future")
-            val segment = Segment(stranger, 1, listOf(future))
-            blobs.writeNew(BackendLayout.segmentPath(stranger, 1), JsonGzipCodec().encode(segment))
+            blobs.writeSegment(Segment(stranger, 1, listOf(future)))
             assertIs<SyncIssue.ClockDrift>(pc.sync(blobs).issues.single())
             assertEquals("from the future", pc.notes.get(future.noteId)?.body)
         }
@@ -788,5 +834,6 @@ class SyncEngineTest {
         const val LARGE = 40_000
         const val LINE = 2_000
         const val SPLIT_NOTES = 12
+        const val HASH_DIGITS = 32
     }
 }

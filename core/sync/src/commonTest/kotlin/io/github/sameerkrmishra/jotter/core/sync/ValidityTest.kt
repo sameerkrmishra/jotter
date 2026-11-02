@@ -1,7 +1,6 @@
 package io.github.sameerkrmishra.jotter.core.sync
 
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
-import io.github.sameerkrmishra.jotter.backend.api.BlobStoreFailureException
 import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
@@ -28,12 +27,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
-import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** A revision counts by itself and its ancestors alone, and a device can lose its past. */
+@Suppress("LargeClass") // One rule per test, and they share the fixtures above.
 class ValidityTest {
     private val dir =
         FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "jotter-valid-test-${Random.nextLong().toULong()}"
@@ -69,17 +68,18 @@ class ValidityTest {
         folder: DeviceId = DeviceId.generate(),
         number: Long = 1,
     ) {
-        val file = JsonGzipCodec().encode(Segment(folder, number, revisions))
-        blobs.writeNew(BackendLayout.segmentPath(folder, number), file)
+        blobs.writeSegment(Segment(folder, number, revisions))
     }
 
-    /** What a device decides from: all its revisions of [noteId], and what it lists. */
+    /**
+     * What a device decides from: all its revisions of [noteId], and what it lists. The stored copy
+     * of a collided id is left out: which one came first says nothing, and neither counts.
+     */
     private fun NoteStore.view(noteId: NoteId): List<Any?> {
-        val revisions = sync.revisions(noteId)
-        val graph = RevisionGraph(revisions)
+        val collided = sync.collidedIds()
         return listOf(
-            revisions.toSet(),
-            graph.liveHeads,
+            sync.revisions(noteId).filterNot { it.id in collided }.toSet(),
+            storedGraph(sync, noteId).liveHeads,
             notes.get(noteId),
             sync.invalidRevisions(),
             sync.hiddenHeads(),
@@ -211,6 +211,37 @@ class ValidityTest {
         assertNull(RevisionGraph(all + forged)[forged.id])
     }
 
+    /** An open conflict with a tombstone as its loser could never be shown or resolved. */
+    @Test
+    fun aMergeNamingATombstoneAsLoserDoesNotCount() {
+        val deleted = userRevision(2, 20, root) { RevisionContent.Tombstone }
+        val edit = textRevision(3, 30, "kept", root)
+        val all = listOf(root, deleted, edit)
+        val honest = mergeRevisions(RevisionGraph(all), edit, deleted)
+        val wrong = honest.copy(kind = RevisionKind.AutomaticMerge(deleted.id))
+        val forged = wrong.copy(id = mergeRevisionId(wrong))
+        val graph = RevisionGraph(all + forged)
+        assertNull(graph[forged.id])
+        assertTrue(graph.openConflicts.isEmpty())
+    }
+
+    /** No clock goes above the last timestamp, so an edit on such a head could not be made. */
+    @Test
+    fun theLastTimestampDoesNotCountAndTheNoteCanStillBeEdited(): TestResult =
+        runTest {
+            val last = root.copy(timestamp = HybridTimestamp.MAX)
+            assertNull(RevisionGraph(listOf(last))[last.id])
+            val top = userRevision(4, 0, root) { snapshot(body = "the top", writer = it) }
+            val store = device("edit")
+            val blobs = InMemoryBlobStore()
+            plant(blobs, listOf(root, top.copy(timestamp = HybridTimestamp.MAX)))
+            store.report(blobs)
+            val shown = assertNotNull(store.notes.get(root.noteId))
+            assertEquals(root.text.body, shown.body)
+            val edited = store.notes.edit(root.noteId, shown.revisionId, "", "edited")
+            assertEquals("edited", edited.body)
+        }
+
     @Test
     fun aMergeWithoutBothParentsIsAsIfItHadNotArrived(): TestResult =
         runTest {
@@ -244,7 +275,8 @@ class ValidityTest {
                     .replace(stateOf(bad, "ACTIVE"), stateOf(bad, "LOST"))
             val out = Buffer()
             GzipSink(out).buffer().use { it.writeUtf8(json) }
-            blobs.writeNew(BackendLayout.segmentPath(folder, 1), out.readByteArray())
+            val name = BackendLayout.segmentName(1, contentHash(json))
+            blobs.writeNew(BackendLayout.segmentPath(folder, name), out.readByteArray())
             assertTrue(store.report(blobs).issues.isEmpty())
             assertEquals("good", store.notes.get(good.noteId)?.body)
             val row = store.sync.invalidRevisions().single()
@@ -253,7 +285,7 @@ class ValidityTest {
         }
 
     @Test
-    fun twoRevisionsOfOneIdEndTheSameInEveryOrder(): TestResult =
+    fun neitherOfTwoRevisionsOfOneIdCountsInEitherOrder(): TestResult =
         runTest {
             val first = textRevision(1, 10, "first copy")
             val second = textRevision(1, 10, "second copy")
@@ -262,18 +294,17 @@ class ValidityTest {
             val blobs = InMemoryBlobStore()
             plant(blobs, listOf(first, second))
             store.report(blobs)
-            val kept = store.notes.get(first.noteId)?.body
-            val listed = store.sync.invalidRevisions().single()
-            assertEquals(InvalidReason.ID_COLLISION, listed.reason)
-            assertEquals(setOf("first copy", "second copy"), setOf(kept, listed.body))
+            assertNull(store.notes.get(first.noteId))
+            val listed = store.sync.invalidRevisions()
+            assertEquals(setOf(InvalidReason.ID_COLLISION), listed.map { it.reason }.toSet())
+            assertEquals(setOf("first copy", "second copy"), listed.map { it.body }.toSet())
         }
 
     @Test
-    fun aDeletionCanWinAnIdAndEndsTheNoteEverywhere(): TestResult =
+    fun aDeletionSharingAnIdWithAnEditEndsNothing(): TestResult =
         runTest {
             val deleted = userRevision(2, 15, root) { RevisionContent.Tombstone }
             val edit = textRevision(2, 20, "my words", root)
-            assertTrue(revisionJson(deleted) < revisionJson(edit))
             assertSameInEveryOrder(root.noteId, listOf(listOf(root, edit), listOf(deleted)))
             val store = device("deleted")
             val blobs = InMemoryBlobStore()
@@ -281,28 +312,8 @@ class ValidityTest {
             store.report(blobs)
             plant(blobs, listOf(deleted))
             store.report(blobs)
-            assertNull(store.notes.get(root.noteId))
-            val listed = store.sync.invalidRevisions().single()
-            assertEquals("my words", listed.body)
-        }
-
-    @Test
-    fun theWinningCopyOfAnIdIsPassedOn(): TestResult =
-        runTest {
-            val relay = device("relay")
-            val left = InMemoryBlobStore()
-            val right = InMemoryBlobStore()
-            val copies = listOf(textRevision(1, 10, "a copy"), textRevision(1, 10, "b copy"))
-            val (winner, loser) = copies.sortedBy(::revisionJson)
-            plant(left, listOf(loser))
-            relay.report(left, "left")
-            relay.report(right, "right")
-            plant(left, listOf(winner))
-            relay.report(left, "left")
-            relay.report(right, "right")
-            val pc = device("pc")
-            pc.report(right)
-            assertEquals(winner.text.body, pc.notes.get(winner.noteId)?.body)
+            assertEquals(root.text.body, store.notes.get(root.noteId)?.body)
+            assertTrue(store.sync.invalidRevisions().any { it.body == "my words" })
         }
 
     @Test
@@ -386,7 +397,7 @@ class ValidityTest {
             writer.report(blobs)
             writer.notes.edit(note.id, first.revisionId, "", "writer 2\nb\n")
             writer.report(blobs)
-            blobs.lose(BackendLayout.segmentPath(writer.deviceId, 2))
+            blobs.lose(blobs.pathOfNumber(writer.deviceId, 2))
             reader.notes.edit(note.id, note.revisionId, "", "a\nreader\n")
             reader.report(blobs)
             val resolver = ConflictResolver(reader)
@@ -418,11 +429,10 @@ class ValidityTest {
             plant(blobs, listOf(root), folder, number)
             pc.report(blobs)
             assertEquals("a\nb\n", pc.notes.get(root.noteId)?.body)
-            assertEquals(listOf(1L..number - 1), pc.sync.gaps("b", folder))
         }
 
     @Test
-    fun aLateNumberInsideARangeIsReadAndSplitsIt(): TestResult =
+    fun aLateFileWithALowNumberIsRead(): TestResult =
         runTest {
             val pc = device("pc")
             val blobs = InMemoryBlobStore()
@@ -431,7 +441,6 @@ class ValidityTest {
             pc.report(blobs)
             plant(blobs, listOf(one), folder, 5)
             pc.report(blobs)
-            assertEquals(listOf(1L..4L, 6L..5000L), pc.sync.gaps("b", folder))
             assertEquals("A\nb\n", pc.notes.get(root.noteId)?.body)
         }
 
@@ -458,103 +467,121 @@ class ValidityTest {
     }
 
     @Test
-    fun aRestoredBackupTakesANewIdAndGetsItsTailBack(): TestResult =
+    fun aRestoredBackupGetsItsTailBackFromItsOwnFolder(): TestResult =
         runTest {
             val blobs = InMemoryBlobStore()
             var phone = device("phone")
             val early = phone.notes.create("", "early")
             phone.report(blobs)
             phone = backUp(phone, "phone")
-            val old = phone.deviceId
+            val id = phone.deviceId
             val late = phone.notes.create("", "late")
             phone.report(blobs)
-            val files = blobs.list(BackendLayout.deviceFolder(old))
+            val files = blobs.list(BackendLayout.deviceFolder(id))
 
             phone = restore(phone, "phone")
             assertNull(phone.notes.get(late.id))
-            val report = phone.report(blobs)
+            assertTrue(phone.report(blobs).issues.isEmpty())
 
-            val renewed = assertIs<SyncIssue.DeviceRenewed>(report.issues.single())
-            assertEquals(old, renewed.old)
-            assertEquals(renewed.new, phone.deviceId)
+            assertEquals(id, phone.deviceId)
             assertEquals("late", phone.notes.get(late.id)?.body)
             assertEquals("early", phone.notes.get(early.id)?.body)
-            phone.notes.create("", "new")
-            phone.report(blobs)
-            assertEquals(files, blobs.list(BackendLayout.deviceFolder(old)))
-            val path = BackendLayout.segmentPath(renewed.new, 1)
-            val pushed = JsonGzipCodec().decode(blobs.read(path)).revisions
-            assertTrue(
-                pushed.none { it.noteId == early.id || it.noteId == late.id },
-                "What the old folder holds needs no second copy: $pushed",
-            )
+            val added = phone.notes.create("", "new")
+            assertEquals(1, phone.report(blobs).pushedSegments)
+            val folder = blobs.list(BackendLayout.deviceFolder(id))
+            assertTrue(folder.containsAll(files))
+            val pushed = (folder - files.toSet()).single()
+            val revisions = JsonGzipCodec().decode(blobs.read(pushed.path)).revisions
+            assertEquals(setOf(added.id), revisions.map { it.noteId }.toSet())
         }
 
     @Test
-    fun forgettingAPendingNumberLeavesItToBeChecked(): TestResult =
+    fun aRestoredBackupEditingBeforeItSyncsLosesNothing(): TestResult =
         runTest {
             val blobs = InMemoryBlobStore()
+            val pc = device("pc")
             var phone = device("phone")
             phone.report(blobs)
             phone = backUp(phone, "phone")
-            val id = phone.deviceId
-            val tail = phone.notes.create("", "the tail")
+            val tail = phone.notes.create("", "same length 1")
             phone.report(blobs)
+            pc.report(blobs)
             phone = restore(phone, "phone")
-            phone.notes.create("", "after the restore")
-            // The listing does not show the tail, and the write of the same number fails.
-            val blind =
-                object : BlobStore by blobs {
-                    override suspend fun list(prefix: String) =
-                        blobs.list(prefix).filterNot { it.path.endsWith(".json.gz") }
-
-                    override suspend fun writeNew(
-                        path: String,
-                        bytes: ByteArray,
-                    ): Unit = throw BlobStoreFailureException("disk full")
-                }
-            val engine = SyncEngine(phone, DeviceInfo("d", "test"), EmptyCoroutineContext)
-            assertIs<SyncResult.Interrupted>(engine.sync(SyncTarget("b", blind)))
-            assertEquals(mapOf(1L to false), phone.sync.ownSegments("b"))
-            engine.forget("b")
-            assertEquals(0, phone.sync.lastSegmentNumber("b"))
-
-            assertIs<SyncIssue.DeviceRenewed>(phone.report(blobs).issues.single())
-            assertNotEquals(id, phone.deviceId)
-            assertEquals("the tail", phone.notes.get(tail.id)?.body)
+            val after = phone.notes.create("", "same length 2")
+            repeat(2) {
+                phone.report(blobs)
+                pc.report(blobs)
+            }
+            listOf(phone, pc).forEach { store ->
+                assertEquals(tail.body, store.notes.get(tail.id)?.body)
+                assertEquals(after.body, store.notes.get(after.id)?.body)
+            }
         }
 
     @Test
-    fun aSegmentLostAndRewrittenByABackupIsReadAgain(): TestResult =
+    fun aSegmentLostAndWrittenAnewByABackupIsReadAndTheLostOneComesBack(): TestResult =
         runTest {
             val blobs = LossyBlobStore()
             val pc = device("pc")
             var phone = device("phone")
             phone.report(blobs)
             phone = backUp(phone, "phone")
-            phone.notes.create("", "lost with the backend")
+            val lost = phone.notes.create("", "same length 1")
             phone.report(blobs)
             pc.report(blobs)
-            blobs.lose(BackendLayout.segmentPath(phone.deviceId, 1))
+            blobs.lose(blobs.pathOfNumber(phone.deviceId, 1))
             phone = restore(phone, "phone")
-            val again = phone.notes.create("", "written again under the same number, longer")
-            phone.report(blobs)
+            val again = phone.notes.create("", "same length 2")
+            repeat(2) {
+                phone.report(blobs)
+                pc.report(blobs)
+            }
+            listOf(phone, pc).forEach { store ->
+                assertEquals(lost.body, store.notes.get(lost.id)?.body)
+                assertEquals(again.body, store.notes.get(again.id)?.body)
+            }
+        }
+
+    /** Text of one length: the size of a file cannot tell what a restored device wrote again. */
+    @Test
+    fun aWholeDiskRestoreOfDatabaseAndBackendLosesNothing(): TestResult =
+        runTest {
+            val blobs = LossyBlobStore()
+            val pc = device("pc")
+            var hub = device("hub")
+            hub.report(blobs)
             pc.report(blobs)
-            assertEquals(again.body, pc.notes.get(again.id)?.body)
+            hub = backUp(hub, "hub")
+            val image = blobs.image()
+            val forgotten = hub.notes.create("", "same length 1")
+            hub.report(blobs)
+            pc.report(blobs)
+
+            hub = restore(hub, "hub")
+            blobs.rollBack(image)
+            val written = hub.notes.create("", "same length 2")
+            repeat(2) {
+                hub.report(blobs)
+                pc.report(blobs)
+            }
+
+            listOf(hub, pc).forEach { store ->
+                assertEquals(forgotten.body, store.notes.get(forgotten.id)?.body)
+                assertEquals(written.body, store.notes.get(written.id)?.body)
+            }
         }
 
     @Test
-    fun aRewrittenSegmentThatBroughtNothingNewIsStillNoticed(): TestResult =
+    fun aFileLostAndWrittenAnewThatBroughtNothingNewAtFirstIsStillRead(): TestResult =
         runTest {
             val blobs = LossyBlobStore()
             val pc = device("pc")
             val writer = DeviceId.generate()
-            val path = BackendLayout.segmentPath(writer, 1)
             plant(blobs, listOf(root))
             pc.report(blobs)
             plant(blobs, listOf(root), writer)
             pc.report(blobs)
-            blobs.lose(path)
+            blobs.lose(pathOf(Segment(writer, 1, listOf(root))))
             plant(blobs, listOf(root, one), writer)
             pc.report(blobs)
             assertEquals("A\nb\n", pc.notes.get(root.noteId)?.body)
@@ -570,15 +597,12 @@ class ValidityTest {
             phone.report(first, "first")
             phone.report(second, "second")
             phone = backUp(phone, "phone")
-            val old = phone.deviceId
             val late = phone.notes.create("", "late")
             phone.report(second, "second")
 
             phone = restore(phone, "phone")
             assertTrue(phone.report(first, "first").issues.isEmpty())
-            assertEquals(old, phone.deviceId)
-            assertIs<SyncIssue.DeviceRenewed>(phone.report(second, "second").issues.single())
-            assertNotEquals(old, phone.deviceId)
+            assertTrue(phone.report(second, "second").issues.isEmpty())
             assertEquals("late", phone.notes.get(late.id)?.body)
             phone.report(first, "first")
             val pc = device("pc")
@@ -587,72 +611,59 @@ class ValidityTest {
         }
 
     @Test
-    fun twoCopiesOfABackupEachTakeTheirOwnId(): TestResult =
+    fun twoCopiesOfADatabaseShareAFolderAndLoseNothing(): TestResult =
         runTest {
             val blobs = InMemoryBlobStore()
             var phone = device("phone")
             phone.report(blobs)
             phone = backUp(phone, "phone")
-            val old = phone.deviceId
             val tail = phone.notes.create("", "tail")
             phone.report(blobs)
             FileSystem.SYSTEM.copy(dir / "phone-backup.db", dir / "copy.db")
             val copy = device("copy")
             phone = restore(phone, "phone")
-            phone.notes.create("", "on the first copy")
-            copy.notes.create("", "on the second copy")
+            val first = phone.notes.create("", "on the first copy")
+            val second = copy.notes.create("", "on the second copy")
             repeat(2) {
                 phone.report(blobs)
                 copy.report(blobs)
             }
-            assertEquals(3, phone.notes.list().size)
-            assertEquals(3, copy.notes.list().size)
-            assertEquals(
-                setOf("tail"),
-                phone.notes
-                    .list()
-                    .map { it.body }
-                    .filter { it == tail.body }
-                    .toSet(),
-            )
-            assertEquals(3, setOf(old, phone.deviceId, copy.deviceId).size)
+            assertEquals(phone.deviceId, copy.deviceId)
+            val pc = device("pc")
+            pc.report(blobs)
+            listOf(phone, copy, pc).forEach { store ->
+                listOf(tail, first, second).forEach { note ->
+                    assertEquals(note.body, store.notes.get(note.id)?.body)
+                }
+            }
         }
 
+    /** The listing was taken before a copy of this database wrote the same number. */
     @Test
-    fun aDifferentFileAtAPendingPathEndsTheIdAndOverwritesNothing(): TestResult =
+    fun aCopysFileWithTheSameNumberIsNeitherOverwrittenNorMissed(): TestResult =
         runTest {
             val phone = device("phone")
             val inner = InMemoryBlobStore()
             phone.report(inner)
-            val old = phone.deviceId
             val note = phone.notes.create("t", "body")
-            val path = BackendLayout.segmentPath(old, 1)
             val foreign = textRevision(9, 10, "a copied database wrote this")
-            val bytes = JsonGzipCodec().encode(Segment(old, 1, listOf(foreign)))
+            val segment = Segment(phone.deviceId, 1, listOf(foreign))
+            val path = pathOf(segment)
+            val bytes = JsonGzipCodec().encode(segment)
             val racing =
                 object : BlobStore by inner {
-                    // The listing was taken before the copy wrote its segment.
                     override suspend fun list(prefix: String) =
-                        inner.list(prefix).filter {
-                            it.path !=
-                                path
-                        }
+                        inner.list(prefix).filter { it.path != path }
                 }
             inner.writeNew(path, bytes)
-            val renewed = phone.report(racing).issues.single()
-            assertIs<SyncIssue.DeviceRenewed>(renewed)
+            assertTrue(phone.report(racing).issues.isEmpty())
             assertTrue(inner.read(path).contentEquals(bytes))
             phone.report(inner)
-            assertTrue(inner.list(BackendLayout.deviceFolder(phone.deviceId)).size > 1)
-            assertEquals(
-                "body",
-                device("pc")
-                    .also { it.report(inner) }
-                    .notes
-                    .get(note.id)
-                    ?.body,
-            )
             assertEquals("a copied database wrote this", phone.notes.get(foreign.noteId)?.body)
+            val pc = device("pc")
+            pc.report(inner)
+            assertEquals("body", pc.notes.get(note.id)?.body)
+            assertEquals("a copied database wrote this", pc.notes.get(foreign.noteId)?.body)
         }
 
     @Test

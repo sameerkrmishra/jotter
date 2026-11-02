@@ -78,9 +78,10 @@ internal class SegmentBatches(
 
 /**
  * Step 1 of the sync cycle (ADR-0004): publishes this device's segments on one backend. A segment
- * is recorded with its number and revisions before it is written, and from then on it is never
+ * is recorded with its name and revisions before it is written, and from then on it is never
  * changed or given up: every failure of `writeNew`, a retry's too, may have published the file, so
- * only a success or the same content at the path marks it as published.
+ * only a success or a file already at that path marks it as published. The name holds the content
+ * hash, so a file there is this same segment (ADR-0014).
  */
 internal class Pusher(
     private val store: SyncStore,
@@ -96,30 +97,26 @@ internal class Pusher(
     var pushed: Int = 0
         private set
 
-    /** Whether another file was at the path of a segment of this device. */
-    var collided: Boolean = false
-        private set
-
     /** What went wrong without ending the cycle. */
     val problems: List<SyncIssue> get() = issues
 
     /**
-     * Publishes what is unfinished and then what is new. [listed] are the numbers of this device's
-     * segments on the backend: a published segment missing from it was lost, for example to a power
-     * cut on the backend (ADR-0012), and is written again, under its number and with its content.
+     * Publishes what is unfinished and then what is new. [listed] are the files in this device's
+     * folder on the backend: a published segment missing from it was lost, for example to a power
+     * cut on the backend (ADR-0012), and is written again, under its name and with its content.
      */
-    suspend fun push(listed: Set<Long>) {
-        val unfinished =
-            store.ownSegments(backendId).filter { (number, isPublished) ->
-                !isPublished || number !in listed
-            }
-        for (number in unfinished.keys.sorted()) {
-            if (!publish(number)) return
-        }
+    suspend fun push(listed: List<SegmentFile>) {
+        val names = listed.mapTo(HashSet()) { it.name }
+        store
+            .ownSegments(backendId)
+            .filter { !it.isPublished || it.name !in names }
+            .forEach { publish(it.number, it.name) }
         val (segments, tooLarge) = batches.split(unpushedRevisions())
         tooLarge.forEach { issues += SyncIssue.RevisionTooLarge(it.id) }
+        val listedNumber = listed.maxOfOrNull { it.number } ?: 0
         for (revisions in segments) {
-            if (!publish(record(revisions))) return
+            val (number, name) = record(revisions, listedNumber)
+            publish(number, name)
         }
     }
 
@@ -127,50 +124,38 @@ internal class Pusher(
         store.unpushed(backendId).map { id -> checkNotNull(store.revision(id)) { "$id is gone" } }
 
     /**
-     * Numbers the new segment above what this device ever used, which includes what its folder
-     * held when the cycle began (ADR-0014). A number is never used twice, even if its file is gone:
-     * a reader may be past it.
+     * Numbers the new segment above what this device wrote and what its folder holds. Numbers only
+     * order the files, so a number used twice after a restore does no harm (ADR-0014).
      */
-    private fun record(revisions: List<Revision>): Long =
+    private fun record(
+        revisions: List<Revision>,
+        listedNumber: Long,
+    ): Pair<Long, String> =
         store.write {
-            val number = store.lastSegmentNumber(backendId) + 1
-            store.recordSegment(backendId, number, revisions.map { it.id })
-            number
+            val written = store.ownSegments(backendId).maxOfOrNull { it.number } ?: 0
+            val number = maxOf(written, listedNumber) + 1
+            val hash = seams.codec.hash(Segment(device, number, revisions))
+            val name = BackendLayout.segmentName(number, hash)
+            store.recordSegment(backendId, number, name, revisions.map { it.id })
+            number to name
         }
 
-    /** Returns false after a collision, which ends this device's id. */
-    private suspend fun publish(number: Long): Boolean {
+    private suspend fun publish(
+        number: Long,
+        name: String,
+    ) {
         seams.probe.at(SyncPoint.SEGMENT_RECORDED)
         val segment = Segment(device, number, store.revisionsOfSegment(backendId, number))
-        val path = BackendLayout.segmentPath(device, number)
-        val isOurs =
-            try {
-                blobs.writeNew(path, seams.codec.encode(segment))
-                true
-            } catch (_: BlobAlreadyExistsException) {
-                holdsSameContent(path, segment)
-            }
-        if (!isOurs) {
-            collided = true
-            return false
+        try {
+            blobs.writeNew(BackendLayout.segmentPath(device, name), seams.codec.encode(segment))
+        } catch (_: BlobAlreadyExistsException) {
+            // The name holds the content hash, so this is the same segment, written before.
         }
         seams.probe.at(SyncPoint.SEGMENT_WRITTEN)
-        store.write { store.markSegmentPublished(backendId, number) }
-        pushed++
-        return true
-    }
-
-    /** ADR-0004 compares the decoded content, as gzip bytes need not be the same. */
-    private suspend fun holdsSameContent(
-        path: String,
-        segment: Segment,
-    ): Boolean =
-        try {
-            val found = seams.codec.decode(blobs.read(path))
-            found.device == segment.device &&
-                found.number == segment.number &&
-                found.revisions.toSet() == segment.revisions.toSet()
-        } catch (_: SegmentFormatException) {
-            false
+        store.write {
+            store.markSegmentPublished(backendId, number)
+            store.recordRead(backendId, device, name)
         }
+        pushed++
+    }
 }

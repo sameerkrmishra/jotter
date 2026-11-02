@@ -61,13 +61,21 @@ internal interface SegmentCodec {
     /** Returns the file for [segment]. The same segment always gives the same content. */
     fun encode(segment: Segment): ByteArray
 
+    /** Returns the content hash that goes in the file name of [segment]. */
+    fun hash(segment: Segment): String
+
     /**
      * Returns the segment in [bytes]. A revision with a bad value, a merge with the wrong id or
      * text that cannot be stored is left out, alone: that takes nothing else with it.
      *
-     * @throws SegmentFormatException if the file as a whole is no segment of this format.
+     * @param expectedHash The hash in the file's name, which the content must have.
+     * @throws SegmentFormatException if the file as a whole is no segment of this format, or does
+     *   not have that hash.
      */
-    fun decode(bytes: ByteArray): Segment
+    fun decode(
+        bytes: ByteArray,
+        expectedHash: String? = null,
+    ): Segment
 }
 
 /**
@@ -91,14 +99,26 @@ internal class JsonGzipCodec(
         return out.readByteArray()
     }
 
-    override fun decode(bytes: ByteArray): Segment {
+    override fun hash(segment: Segment): String = contentHash(segmentJson(segment))
+
+    override fun decode(
+        bytes: ByteArray,
+        expectedHash: String?,
+    ): Segment {
         if (bytes.size > maxBytes) throw SegmentFormatException("The file is too large")
-        return parse(utf8(inflate(bytes)))
+        return parse(utf8(inflate(bytes)), expectedHash)
     }
 
-    private fun parse(json: String): Segment =
+    /** The format comes first: a newer format may hash differently, and is not a damaged file. */
+    private fun parse(
+        json: String,
+        expectedHash: String?,
+    ): Segment =
         try {
             requireKnownFormat(headerJson.decodeFromString<SegmentHeaderDto>(json).format)
+            if (expectedHash != null && expectedHash != contentHash(json)) {
+                throw SegmentFormatException("The content does not match the hash in its name")
+            }
             strictJson.decodeFromString<SegmentDto>(json).toSegment()
         } catch (cause: SerializationException) {
             throw SegmentFormatException("The file is not a valid segment", cause = cause)
@@ -144,9 +164,18 @@ internal class JsonGzipCodec(
     }
 }
 
-/** The JSON text of [revision] alone, with its parents and tags sorted. */
-internal fun revisionJson(revision: Revision): String =
-    strictJson.encodeToString(RevisionDto.serializer(), revision.toDto())
+/**
+ * The content hash of a segment's JSON text: the first 16 bytes of its SHA-256 as lowercase hex. It
+ * is taken before gzip, so it does not depend on the compressor (ADR-0014).
+ */
+internal fun contentHash(json: String): String =
+    Buffer()
+        .writeUtf8(json)
+        .sha256()
+        .hex()
+        .take(CONTENT_HASH_DIGITS)
+
+private const val CONTENT_HASH_DIGITS = 32
 
 /** The JSON text of [segment], with parents and tags sorted so that it is canonical. */
 internal fun segmentJson(segment: Segment): String =

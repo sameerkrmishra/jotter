@@ -21,18 +21,18 @@ import io.github.sameerkrmishra.jotter.core.storage.SyncStore
  * the same revisions make the same merges, whatever order the revisions arrived in. Every merge
  * has more user revisions than either parent, so with no new edits the merges come to an end.
  *
- * @param foreignParents See [RevisionGraph].
+ * @param refused See [RevisionGraph].
  */
 internal fun foldHeads(
     revisions: List<Revision>,
-    foreignParents: Set<RevisionId> = emptySet(),
+    refused: Set<RevisionId> = emptySet(),
 ): List<Revision> {
-    val start = RevisionGraph(revisions, foreignParents)
+    val start = RevisionGraph(revisions, refused)
     if (start.openConflicts.isNotEmpty()) return emptyList()
     val merges = mutableListOf<Revision>()
     var folded = start.liveHeads.firstOrNull()
     for (head in start.liveHeads.drop(1)) {
-        val graph = RevisionGraph(revisions + merges, foreignParents)
+        val graph = RevisionGraph(revisions + merges, refused)
         val current = checkNotNull(folded)
         if (!graph.isCoveredBy(head, current) && graph.canMerge(current, head)) {
             val merge = mergeRevisions(graph, current, head)
@@ -54,20 +54,38 @@ internal fun reconcile(
     noteId: NoteId,
 ): List<Revision> {
     val stored = store.revisions(noteId)
-    val ids = stored.mapTo(HashSet()) { it.id }
-    val foreign =
-        stored
-            .flatMapTo(HashSet()) { it.parents }
-            .filterTo(HashSet()) { it !in ids && store.revision(it) != null }
-    val merges = foldHeads(stored, foreign)
+    val refused = refusedIds(store, stored)
+    val merges = foldHeads(stored, refused)
     merges.forEach(store::insert)
-    val graph = RevisionGraph(stored + merges, foreign)
+    val graph = RevisionGraph(stored + merges, refused)
     store.replaceConflicts(noteId, graph.openConflicts.mapNotNull { openConflict(graph, it) })
     store.replaceHiddenHeads(noteId, graph.hiddenHeads.map { hiddenHead(graph, it) })
     store.replaceBadHistory(noteId, graph.invalidEnds.map(::invalidRow))
     val shown = graph.shownHead()
     if (shown != null) store.materialise(shown) else store.removeNote(noteId)
     return merges
+}
+
+/** Returns the graph of the stored revisions of the note [noteId]. */
+internal fun storedGraph(
+    store: SyncStore,
+    noteId: NoteId,
+): RevisionGraph {
+    val stored = store.revisions(noteId)
+    return RevisionGraph(stored, refusedIds(store, stored))
+}
+
+/** See [RevisionGraph]. */
+private fun refusedIds(
+    store: SyncStore,
+    stored: List<Revision>,
+): Set<RevisionId> {
+    val ids = stored.mapTo(HashSet()) { it.id }
+    val foreign =
+        stored
+            .flatMapTo(HashSet()) { it.parents }
+            .filterTo(HashSet()) { it !in ids && store.revision(it) != null }
+    return foreign + store.collidedIds()
 }
 
 private fun invalidRow(revision: Revision): InvalidRevision {

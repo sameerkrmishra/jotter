@@ -74,6 +74,17 @@ internal class LossyBlobStore : BlobStore {
         memory.writeNew(path, bytes)
     }
 
+    /** Returns every file: what a disk image of this backend holds. */
+    suspend fun image(): Map<String, ByteArray> = list(ROOT).associate { it.path to read(it.path) }
+
+    /** Puts the disk back to [image]: later files are gone and those lost since are back. */
+    suspend fun rollBack(image: Map<String, ByteArray>) {
+        list(ROOT).filter { it.path !in image }.forEach { lose(it.path) }
+        image.forEach { (path, bytes) ->
+            if (path in lost) rewritten[path] = bytes.copyOf()
+        }
+    }
+
     override suspend fun list(prefix: String): List<BlobInfo> {
         val kept = memory.list(prefix).filter { it.path !in lost }
         val back =
@@ -105,6 +116,7 @@ internal class LossyBlobStore : BlobStore {
     override suspend fun ping(): Reachability = memory.ping()
 
     private companion object {
+        const val ROOT = "jotter"
         val DOWN = Reachability.Unreachable(UnreachableReason.FAILED, "the store is switched off")
     }
 }

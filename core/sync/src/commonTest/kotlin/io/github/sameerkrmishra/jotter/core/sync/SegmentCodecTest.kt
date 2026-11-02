@@ -56,6 +56,31 @@ class SegmentCodecTest {
         assertEquals(one, codec.decode(PINNED_FILE.decodeHex().toByteArray()))
     }
 
+    /** Worked out outside this code from the JSON above: SHA-256, first 16 bytes, as hex. */
+    @Test
+    fun theContentHashIsPinned() {
+        assertEquals(PINNED_HASH, codec.hash(Segment(DEVICE_A, 1, listOf(root))))
+        assertEquals(PINNED_HASH, contentHash(PINNED_JSON))
+    }
+
+    @Test
+    fun aFileMustHaveTheHashInItsName() {
+        val one = Segment(DEVICE_A, 1, listOf(root))
+        assertEquals(one, codec.decode(PINNED_FILE.decodeHex().toByteArray(), PINNED_HASH))
+        val failure =
+            assertFailsWith<SegmentFormatException> {
+                codec.decode(codec.encode(segment), PINNED_HASH)
+            }
+        assertFalse(failure.isFutureFormat)
+    }
+
+    @Test
+    fun aFutureFormatIsNotJudgedByItsHash() {
+        val future = gzip("{\"format\":2}")
+        val failure = assertFailsWith<SegmentFormatException> { codec.decode(future, PINNED_HASH) }
+        assertTrue(failure.isFutureFormat)
+    }
+
     @Test
     fun aDamagedFileIsRefused() {
         val good = codec.encode(segment)
@@ -173,6 +198,7 @@ class SegmentCodecTest {
                 "\"state\":\"ACTIVE\",\"stateStamp\":{\"physicalMillis\":1000,\"counter\":0,\"dev" +
                 "ice\":\"aaaaaaaa-0000-4000-8000-000000000001\",\"revision\":\"000000000000000000" +
                 "00000000000001\"}}}]}"
+        const val PINNED_HASH = "903ff4dd1a4754fe28f79209dd11a707"
         const val PINNED_FILE =
             "1f8b08000000000002ffcd503d8bc24010fd2f5327b08103bd74725c6161a5d89c169364d585cd6c" +
                 "d81d0509f9efce443d2b8f3bb8c2570cccd79b37af875d882d329445068d3db9da420978436e04f9" +

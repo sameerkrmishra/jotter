@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.core.sync
 
+import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
 import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.RevisionId
@@ -15,16 +16,18 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
  * - A user revision must be stamped above each parent known so far.
  * - A merge counts only once both parents are here, and must have the stamp and loser they decide.
  *   Until then it is treated as not arrived.
- * - A revision on an invalid one is invalid, and so is one with a parent in [foreignParents].
+ * - A revision on an invalid one is invalid.
+ * - A revision that is in [refused], or has a parent in it, is invalid.
  *
- * @param foreignParents Parents of these revisions that are stored under another note.
+ * @param refused Ids that cannot count: parents stored under another note, and ids that two
+ *   different revisions were seen under.
  */
 @Suppress("TooManyFunctions") // The questions asked of a DAG, kept together on purpose.
 internal class RevisionGraph(
     revisions: Collection<Revision>,
-    foreignParents: Set<RevisionId> = emptySet(),
+    private val refused: Set<RevisionId> = emptySet(),
 ) {
-    private val judged = judge(revisions, foreignParents)
+    private val judged = judge(revisions, refused)
     private val byId = judged.valid.associateBy { it.id }
     private val parentsSeen = judged.valid.flatMapTo(HashSet()) { it.parents }
     private val userRevisionsOf = HashMap<RevisionId, Set<RevisionId>>()
@@ -37,7 +40,9 @@ internal class RevisionGraph(
     val invalidEnds: List<Revision>
         get() {
             val built = invalid.flatMapTo(HashSet()) { it.parents }
-            return invalid.filter { it.id !in built && it.content is RevisionContent.Snapshot }
+            return invalid.filter {
+                it.id !in built && it.id !in refused && it.content is RevisionContent.Snapshot
+            }
         }
 
     /** The revisions nothing is built on, sorted by id: the order of the fold. */
@@ -276,7 +281,7 @@ private class Judged(
  */
 private fun judge(
     revisions: Collection<Revision>,
-    foreignParents: Set<RevisionId>,
+    refused: Set<RevisionId>,
 ): Judged {
     val byId = revisions.associateBy { it.id }
     val children = HashMap<RevisionId, MutableList<Revision>>()
@@ -290,7 +295,7 @@ private fun judge(
     val ready = ArrayDeque(revisions.filter { waitingFor[it.id] == 0 })
     while (ready.isNotEmpty()) {
         val revision = ready.removeLast()
-        verdicts[revision.id] = verdictOn(revision, byId, verdicts, foreignParents)
+        verdicts[revision.id] = verdictOn(revision, byId, verdicts, refused)
         children[revision.id].orEmpty().forEach { child ->
             val left = waitingFor.getValue(child.id) - 1
             waitingFor[child.id] = left
@@ -315,15 +320,17 @@ private fun verdictOn(
     revision: Revision,
     byId: Map<RevisionId, Revision>,
     verdicts: Map<RevisionId, Verdict>,
-    foreignParents: Set<RevisionId>,
+    refused: Set<RevisionId>,
 ): Verdict {
     val parents = revision.parents.mapNotNull(byId::get)
     val parentVerdicts = parents.mapNotNull { verdicts[it.id] }
-    val isBadChild =
-        Verdict.INVALID in parentVerdicts || revision.parents.any { it in foreignParents }
+    val isBad =
+        Verdict.INVALID in parentVerdicts ||
+            revision.id in refused ||
+            revision.parents.any { it in refused }
     val here = parents.filter { verdicts[it.id] == Verdict.VALID }
     return when {
-        isBadChild -> Verdict.INVALID
+        isBad -> Verdict.INVALID
         revision.kind == RevisionKind.User -> userVerdict(revision, here)
         here.size < revision.parents.size -> Verdict.NOT_YET
         else -> mergeVerdict(revision, here)
@@ -333,8 +340,13 @@ private fun verdictOn(
 private fun userVerdict(
     revision: Revision,
     parents: List<Revision>,
-): Verdict =
-    if (parents.all { revision.timestamp > it.timestamp }) Verdict.VALID else Verdict.INVALID
+): Verdict {
+    // No clock can go above the highest timestamp, so an edit on such a head could not be made.
+    val isPossible =
+        revision.timestamp != HybridTimestamp.MAX &&
+            parents.all { revision.timestamp > it.timestamp }
+    return if (isPossible) Verdict.VALID else Verdict.INVALID
+}
 
 private fun mergeVerdict(
     revision: Revision,
@@ -346,6 +358,8 @@ private fun mergeVerdict(
     val followsParents =
         revision.timestamp == higher.timestamp &&
             revision.deviceId == higher.deviceId &&
-            (losingParent == null || losingParent == lower.id)
+            (losingParent == null || (losingParent == lower.id && parents.all(::hasText)))
     return if (followsParents) Verdict.VALID else Verdict.INVALID
 }
+
+private fun hasText(revision: Revision): Boolean = revision.content is RevisionContent.Snapshot

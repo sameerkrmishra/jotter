@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.core.sync
 
 import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
+import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
@@ -71,6 +72,30 @@ class ConflictResolverTest {
             assertEquals(shown, pc.notes.get(note.id))
             assertEquals(setOf("phone", "pc"), setOf(shown.body, conflict.losingBody))
             assertEquals(conflict.mergeId, shown.revisionId)
+        }
+
+    /** A revision on a parent in another note does not count, so it closes no conflict. */
+    @Test
+    fun aRevisionWithAParentInAnotherNoteDoesNotCloseAConflict(): TestResult =
+        runTest {
+            val other = phone.notes.create("other", "note")
+            val foreign = phone.sync.revisions(other.id).single()
+            val (note, conflicts) = conflicted()
+            val mergeId = conflicts.open().single().mergeId
+            val claim =
+                textRevision(9, FAR_AHEAD, "claims to resolve it").copy(
+                    noteId = note.id,
+                    parents = setOf(foreign.id),
+                    resolves = mergeId,
+                )
+            blobs.writeSegment(Segment(DeviceId.generate(), 1, listOf(claim)))
+            engine(phone).sync(target)
+
+            assertEquals(mergeId, conflicts.open().single().mergeId)
+            assertEquals(mergeId, phone.notes.get(note.id)?.revisionId)
+            assertNotNull(conflicts.details(mergeId))
+            conflicts.resolve(mergeId, ConflictResolution.KeepShown)
+            assertTrue(conflicts.open().isEmpty())
         }
 
     @Test
@@ -234,5 +259,6 @@ class ConflictResolverTest {
 
     private companion object {
         const val ROUNDS = 3
+        const val FAR_AHEAD = 4_000_000_000_000L
     }
 }

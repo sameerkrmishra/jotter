@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.core.sync
 
+import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
@@ -117,6 +118,13 @@ internal data class SimOutcome(
     val merges: Int,
     val badStamps: Int,
     val restores: Int,
+    val diskRestores: Int,
+)
+
+/** A local-folder backend as it was when a device took its backup, on the same disk. */
+private class DiskImage(
+    val backend: LossyBlobStore,
+    val files: Map<String, ByteArray>,
 )
 
 /**
@@ -124,11 +132,12 @@ internal data class SimOutcome(
  * platform: the ids, the clocks, the faults and the choices all come from one generator.
  *
  * Random phase: devices edit offline, sync partially with one backend at a time, crash, restart,
- * die for good, forget a backend and add it again, restore old backups, and lose files, and
- * strangers plant damaged files, forged merges and revisions with bad stamps. Then every fault
- * stops and the living sync until nothing changes.
+ * die for good, forget a backend and add it again, restore old backups, also of a whole disk that
+ * holds a backend, and lose files, and strangers plant damaged files, forged merges and revisions
+ * with bad stamps. Then every fault stops and the living sync until nothing changes.
  *
- * Every line is unique, so that [LineHistory] can follow it through the DAG.
+ * Every line and title is unique, so that [LineHistory] can follow it through the DAG, and of one
+ * length, so that what a restored device writes again is of the size of what it forgot.
  */
 @Suppress("TooManyFunctions", "LargeClass") // One function per thing that can happen in the world.
 internal class Simulation(
@@ -146,12 +155,13 @@ internal class Simulation(
     private var merges = 0
     private var lines = 0
     private var restores = 0
+    private var diskRestores = 0
 
     /** The devices that still run. Device 0, the relay, never dies. */
     private val alive = devices.toMutableList()
 
-    /** The ids that more than one copy of a database may have written under. */
-    private val backedUpIds = HashSet<String>()
+    /** The disk images taken with each device's backup, by device. */
+    private val diskImages = HashMap<Int, DiskImage>()
 
     /** Revisions planted that must never count, on any device. */
     private val forged = HashSet<RevisionId>()
@@ -178,6 +188,7 @@ internal class Simulation(
                 merges,
                 forged.size,
                 restores,
+                diskRestores,
             )
         } finally {
             devices.forEach(SimDevice::close)
@@ -223,7 +234,7 @@ internal class Simulation(
             6 -> create(device)
             7 -> importShared(device)
             8, 9 -> organise(device)
-            10 -> delete(device)
+            10, 26, 27, 28, 29 -> delete(device)
             11, 12, 13, 14, 15 -> syncOnce(device, device.links.keys.random(random))
             16 -> resolveOne(device)
             17 -> loseSegment()
@@ -239,7 +250,11 @@ internal class Simulation(
         }
     }
 
-    private fun newLine(): String = "- [ ] item ${random.nextInt(WORDS)} #${lines++}"
+    private fun nextNumber(): String = (lines++).toString().padStart(NUMBER_DIGITS, '0')
+
+    private fun newLine(): String = "- [ ] item ${random.nextInt(WORDS)} #${nextNumber()}"
+
+    private fun newTitle(): String = "title #${nextNumber()}"
 
     /** A device that never comes back, with whatever it did not push. Its files stay. */
     private fun kill(device: SimDevice) {
@@ -252,14 +267,27 @@ internal class Simulation(
     }
 
     /**
-     * Takes a backup, or goes back to it, or starts a second installation from it. Everything the
-     * device did since is gone from it. What it published comes back from its old folder.
+     * Takes a backup, with an image of a backend on the same disk, or goes back to either, or
+     * starts a second installation from the backup. Everything the device did since is gone from
+     * it. What it published comes back from its folder, unless the disk took that along too: then
+     * it is only on the devices that read it, and they push it again.
      */
-    private fun backUpOrRestore(device: SimDevice) {
+    private suspend fun backUpOrRestore(device: SimDevice) {
+        val image = diskImages[device.index]
         when {
             !device.hasBackup -> {
-                backedUpIds += device.store.deviceId.toString()
                 device.takeBackup()
+                val backend = backends[device.links.keys.random(random)]
+                if (backend.reachable) {
+                    diskImages[device.index] = DiskImage(backend, backend.image())
+                }
+            }
+
+            image != null && image.backend.reachable && random.nextBoolean() -> {
+                device.restoreBackup()
+                image.backend.rollBack(image.files)
+                restores++
+                diskRestores++
             }
 
             devices.size < MAX_DEVICES + MAX_CLONES && random.nextBoolean() -> {
@@ -291,7 +319,7 @@ internal class Simulation(
         val fake = changed.copy(id = mergeRevisionId(changed))
         forged += fake.id
         val segment = Segment(stranger, 1, listOf(fake))
-        backend.plant(BackendLayout.segmentPath(stranger, 1), JsonGzipCodec().encode(segment))
+        backend.plant(pathOf(segment), JsonGzipCodec().encode(segment))
     }
 
     /**
@@ -332,7 +360,7 @@ internal class Simulation(
             )
         forged += bad.id
         val segment = Segment(stranger, 1, listOf(onTop, bad, good).shuffled(random))
-        backend.plant(BackendLayout.segmentPath(stranger, 1), JsonGzipCodec().encode(segment))
+        backend.plant(pathOf(segment), JsonGzipCodec().encode(segment))
     }
 
     private fun hasText(revision: Revision): Boolean = revision.content is RevisionContent.Snapshot
@@ -348,7 +376,7 @@ internal class Simulation(
         val note = allNotes(device).randomOrNull(random) ?: return
         val body = editedBody(note.body)
         val changesTitle = random.nextInt(TITLE_EDIT_ODDS) == 0
-        val title = if (changesTitle) "t${random.nextInt(WORDS)}" else note.title
+        val title = if (changesTitle) newTitle() else note.title
         try {
             device.store.notes.edit(note.id, note.revisionId, title, body)
         } catch (_: StaleEditException) {
@@ -370,7 +398,7 @@ internal class Simulation(
 
     private fun create(device: SimDevice) {
         val lines = List(random.nextInt(1, MAX_LINES)) { newLine() }
-        device.store.notes.create("t${random.nextInt(WORDS)}", lines.joinToString("\n"))
+        device.store.notes.create(newTitle(), lines.joinToString("\n"))
     }
 
     /** Two devices that import one source note give it two roots (ADR-0009). */
@@ -469,19 +497,16 @@ internal class Simulation(
             0 -> ConflictResolution.KeepShown
             1 -> ConflictResolution.KeepLosing
             2 -> ConflictResolution.KeepBoth
-            else -> ConflictResolution.Edited("resolved", newLine())
+            else -> ConflictResolution.Edited(newTitle(), newLine())
         }
 
     /** A power cut on a backend takes a published segment with it. Its writer must notice. */
     private suspend fun loseSegment() {
         val backend = backends.random(random)
         if (!backend.reachable) return
-        // A file that is lost and then written again under its number by another copy of the same
-        // id cannot always be told from the old one (ADR-0014), so those faults do not meet here.
-        // ValidityTest covers what can be detected.
         val segments =
             backend.list(BackendLayout.DEVICES).filter { file ->
-                file.path.endsWith(".json.gz") && backedUpIds.none { it in file.path }
+                file.path.endsWith(".json.gz")
             }
         segments.randomOrNull(random)?.let { backend.lose(it.path) }
     }
@@ -496,15 +521,27 @@ internal class Simulation(
         val backend = backends.random(random)
         if (!backend.reachable) return
         val stranger = SimIds(random).newDeviceId()
-        val path = BackendLayout.segmentPath(stranger, 1)
         val good = JsonGzipCodec().encode(Segment(stranger, 1, emptyList()))
         val bytes =
             when (random.nextInt(BAD_FILES)) {
                 0 -> good.copyOf(good.size / 2)
                 1 -> random.nextBytes(good.size)
-                else -> good.copyOf().also { it[it.size / 2] = (it[it.size / 2] + 1).toByte() }
+                2 -> good.copyOf().also { it[it.size / 2] = (it[it.size / 2] + 1).toByte() }
+                else -> wellFormedSegment(stranger)
             }
-        backend.plant(path, bytes)
+        backend.plant(junkPath(stranger, 1), bytes)
+    }
+
+    /** A sound segment, for a path whose hash it does not have: it must not count. */
+    private fun wellFormedSegment(stranger: DeviceId): ByteArray {
+        val ids = SimIds(random)
+        val revision =
+            textRevision(1, IMPORT_MILLIS, newLine(), device = stranger).copy(
+                id = ids.newRevisionId(),
+                noteId = ids.newNoteId(),
+            )
+        forged += revision.id
+        return JsonGzipCodec().encode(Segment(stranger, 1, listOf(revision)))
     }
 
     private fun heal() {
@@ -590,13 +627,16 @@ internal class Simulation(
         revisions(device).groupBy { it.noteId }.values.forEach { note ->
             val graph = RevisionGraph(note)
             val answered = open + note.mapNotNull { it.resolves }
-            val everWritten =
+            val texts =
                 note
                     .filter { graph[it.id] != null }
                     .mapNotNull { it.content as? RevisionContent.Snapshot }
-                    .flatMapTo(HashSet()) { it.body.split('\n') }
+            listOf(bodyLines, titleLine).forEach { field ->
+                texts
+                    .flatMapTo(HashSet(), field)
                     .filterTo(HashSet(), String::isNotEmpty)
-            everWritten.forEach { line -> assertLineExplained(graph, line, answered) }
+                    .forEach { line -> assertLineExplained(graph, field, line, answered) }
+            }
             graph.invalidEnds.forEach {
                 check(it.id in listed) { "Seed $seed: ${it.id} is hidden in silence" }
             }
@@ -605,10 +645,11 @@ internal class Simulation(
 
     private fun assertLineExplained(
         graph: RevisionGraph,
+        field: TextField,
         line: String,
         answered: Set<RevisionId>,
     ) {
-        val history = LineHistory(graph, line)
+        val history = LineHistory(graph, line, field)
         graph.liveHeads.forEach { head ->
             val state = history.stateAt(head)
             val isLost =
@@ -638,7 +679,7 @@ internal class Simulation(
         val text = snapshot?.body?.replace('\n', '|')?.replace("- [ ] item ", "")
         val parents = revision.parents.map(::shortId)
         return "${shortId(revision.id)} ${revision.kind} p=$parents res=${revision.resolves} " +
-            "${snapshot?.state?.value} $text"
+            "${snapshot?.state?.value} ${snapshot?.title}: $text"
     }
 
     /**
@@ -737,7 +778,7 @@ internal class Simulation(
         const val MAX_CLONES = 2
         const val MIN_STEPS = 30
         const val MAX_STEPS = 140
-        const val ACTIONS = 27
+        const val ACTIONS = 31
         const val KILL_ODDS = 3
         const val SHORT_ID = 6
         const val SOURCE_NOTES = 3
@@ -751,7 +792,8 @@ internal class Simulation(
         const val TAGS = 4
         const val ORGANISE_ACTIONS = 4
         const val RESOLUTIONS = 4
-        const val BAD_FILES = 3
+        const val BAD_FILES = 4
+        const val NUMBER_DIGITS = 6
         const val MAX_ROUNDS = 25
     }
 }

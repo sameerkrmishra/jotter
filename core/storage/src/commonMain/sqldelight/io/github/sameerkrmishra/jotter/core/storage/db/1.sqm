@@ -1,31 +1,19 @@
 -- Schema 2 (M3): a resolution names the conflict it closes, and what sync keeps per backend.
 ALTER TABLE revision ADD COLUMN resolves TEXT;
 
-CREATE TABLE sync_cursor (
+CREATE TABLE sync_read (
   backend_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  last_segment INTEGER NOT NULL,
-  PRIMARY KEY (backend_id, device_id)
-) WITHOUT ROWID;
-
-CREATE TABLE sync_gap (
-  backend_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  first_number INTEGER NOT NULL,
-  last_number INTEGER NOT NULL,
-  PRIMARY KEY (backend_id, device_id, first_number)
+  name TEXT NOT NULL,
+  PRIMARY KEY (backend_id, device_id, name)
 ) WITHOUT ROWID;
 
 CREATE TABLE sync_segment (
   backend_id TEXT NOT NULL,
   number INTEGER NOT NULL,
+  name TEXT NOT NULL,
   is_published INTEGER AS kotlin.Boolean NOT NULL CHECK (is_published IN (0, 1)),
   PRIMARY KEY (backend_id, number)
-) WITHOUT ROWID;
-
-CREATE TABLE sync_last_number (
-  backend_id TEXT NOT NULL PRIMARY KEY,
-  last_number INTEGER NOT NULL
 ) WITHOUT ROWID;
 
 CREATE TABLE backend_revision (
@@ -33,20 +21,12 @@ CREATE TABLE backend_revision (
   revision_id TEXT NOT NULL REFERENCES revision(id),
   segment INTEGER,
   source_device TEXT,
-  source_segment INTEGER,
+  source_name TEXT,
   PRIMARY KEY (backend_id, revision_id)
 ) WITHOUT ROWID;
 
-CREATE TABLE sync_read (
-  backend_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  number INTEGER NOT NULL,
-  size INTEGER NOT NULL,
-  PRIMARY KEY (backend_id, device_id, number)
-) WITHOUT ROWID;
-
 CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
-CREATE INDEX backend_revision_by_source ON backend_revision(backend_id, source_device, source_segment);
+CREATE INDEX backend_revision_by_source ON backend_revision(backend_id, source_device, source_name);
 
 CREATE TABLE hidden_head (
   revision_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),

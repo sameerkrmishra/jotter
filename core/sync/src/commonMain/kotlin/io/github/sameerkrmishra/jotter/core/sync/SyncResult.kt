@@ -24,8 +24,8 @@ public sealed interface SyncResult {
     ) : SyncResult
 
     /**
-     * The backend failed in the middle of the cycle. What was done before is kept, and the cursors
-     * stand behind everything that was not applied.
+     * The backend failed in the middle of the cycle. What was done before is kept, and what was not
+     * applied stays unread.
      */
     public data class Interrupted(
         /** The failure. */
@@ -58,7 +58,7 @@ public data class SyncReport(
     val issues: List<SyncIssue>,
 )
 
-/** Why a segment was not applied. It stays a gap and is tried again on every sync. */
+/** Why a segment was not applied. It stays unread and is tried again on every sync. */
 public enum class SegmentProblem {
     /** Damaged or not a segment: bad gzip, bad JSON, a bad value, or a merge's hash is wrong. */
     CORRUPT,
@@ -69,7 +69,7 @@ public enum class SegmentProblem {
     /** The backend listed it but could not give it. */
     UNREADABLE,
 
-    /** A number below other segments of the device is not there (yet). */
+    /** A number below other segments of the device has no file (yet). */
     MISSING,
 }
 
@@ -85,18 +85,6 @@ public sealed interface SyncIssue {
         val problem: SegmentProblem,
         /** A description for logs. */
         val detail: String,
-    ) : SyncIssue
-
-    /**
-     * This device's folder held what it never wrote, or does not remember writing: it was restored
-     * from a backup, or a copy of this database runs elsewhere. So it took a new id, and reads its
-     * old folder as another device's. It never writes there again (ADR-0014).
-     */
-    public data class DeviceRenewed(
-        /** The id it had. */
-        val old: DeviceId,
-        /** The id it has now. */
-        val new: DeviceId,
     ) : SyncIssue
 
     /** The revision [id] is too large for any segment, so it stays on this device. */

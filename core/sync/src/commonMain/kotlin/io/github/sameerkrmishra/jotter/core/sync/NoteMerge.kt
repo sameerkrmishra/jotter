@@ -15,7 +15,7 @@ import io.github.sameerkrmishra.jotter.core.storage.isStorableText
 /**
  * Merges the two heads [a] and [b] into an automatic merge (PLAN.md §5). Every field of the result
  * comes from them and their ancestors in [graph], so every device computes the same revision.
- * [graph] must be complete.
+ * [RevisionGraph.canMerge] must allow it.
  */
 internal fun mergeRevisions(
     graph: RevisionGraph,

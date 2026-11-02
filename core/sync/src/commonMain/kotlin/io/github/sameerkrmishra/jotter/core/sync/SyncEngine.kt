@@ -21,7 +21,7 @@ import kotlin.time.Clock
 /**
  * A backend to sync with.
  *
- * @property id The backend's lasting local name, which the cursors are kept under. A backend added
+ * @property id The backend's lasting local name, which sync records are kept under. A backend added
  *   again under a new id is a new backend, and gets the whole history.
  * @property store The backend.
  */
@@ -54,7 +54,6 @@ public data class DeviceInfo(
  * @param databaseContext Where the blocking database work runs, e.g. an IO dispatcher.
  * @param clock The time `device.json` is dated with.
  */
-@Suppress("TooManyFunctions") // The steps of one cycle, kept together on purpose.
 public class SyncEngine internal constructor(
     private val store: NoteStore,
     private val device: DeviceInfo,
@@ -78,7 +77,7 @@ public class SyncEngine internal constructor(
             withContext(databaseContext) { cycle(target) }
         }
 
-    /** Forgets [targetId]'s cursors and segments (PLAN.md §6.5). Its files stay. */
+    /** Forgets what is known of [targetId] (PLAN.md §6.5). Its files stay. */
     public suspend fun forget(targetId: String) {
         cycles.withLock {
             withContext(databaseContext) { store.sync.forgetBackend(targetId) }
@@ -115,18 +114,15 @@ public class SyncEngine internal constructor(
                 SyncResult.Incompatible(problem)
             } else {
                 val folders = BackendLayout.segments(listDevices(blobs))
-                forgetLostSegments(target.id, folders)
-                checkOwnFolder(target, folders[store.deviceId].orEmpty())?.let { pushIssues += it }
-                val device = store.deviceId
-                val pusher = Pusher(store.sync, target.id, blobs, device, seams)
+                forgetLostFiles(target.id, folders)
+                val pusher = Pusher(store.sync, target.id, blobs, store.deviceId, seams)
                 try {
-                    pusher.push(folders[device]?.keys.orEmpty())
+                    pusher.push(folders[store.deviceId].orEmpty())
                 } finally {
                     pushed = pusher.pushed
                     pushIssues += pusher.problems
                 }
-                if (pusher.collided) pushIssues += renew()
-                puller.pull(folders - store.deviceId)
+                puller.pull(folders)
                 SyncResult.Completed(report())
             }
         } catch (failure: BlobStoreException) {
@@ -135,66 +131,21 @@ public class SyncEngine internal constructor(
     }
 
     /**
-     * A segment read from another device that is gone from the backend took its revisions along,
-     * and its writer may be gone too. They count as not on the backend again, so this device
-     * pushes them. A live writer repairs the segment as well, which only costs a duplicate. The
-     * number becomes a gap: a device restored from a backup can write other content there, which
-     * also shows as a file of another size (ADR-0014).
+     * A file that was read and is gone from the backend took its revisions along, and its writer
+     * may be gone too. They count as not on the backend again, so this device pushes them. A live
+     * writer repairs the file as well, which only costs a duplicate.
      */
-    private fun forgetLostSegments(
+    private fun forgetLostFiles(
         targetId: String,
-        folders: Map<DeviceId, Map<Long, BlobInfo>>,
+        folders: Map<DeviceId, List<SegmentFile>>,
     ) {
         store.sync.write {
-            store.sync.readSegments(targetId).forEach { (device, number, size) ->
-                val file = folders[device]?.get(number)
-                if (file == null || file.size != size) {
-                    store.sync.forgetRead(targetId, device, number)
-                    store.sync.forgetPulledSegment(targetId, device, number)
-                    store.sync.addGap(targetId, device, number..number)
-                }
-            }
-            // Those of a device's own old id were never read, as it wrote them itself.
-            store.sync.pulledSegments(targetId).forEach { (device, number) ->
-                if (folders[device]?.containsKey(number) != true) {
-                    store.sync.forgetPulledSegment(targetId, device, number)
-                    store.sync.addGap(targetId, device, number..number)
+            store.sync.readFiles(targetId).forEach { (device, name) ->
+                if (folders[device].orEmpty().none { it.name == name }) {
+                    store.sync.forgetFile(targetId, device, name)
                 }
             }
         }
-    }
-
-    /**
-     * Looks at the numbers in this device's folder that it has no record of using. If it holds all
-     * their revisions, it is the same device under another backend id, and takes the numbers as
-     * used. Anything else means a restored backup or a copy of this database, so the id ends here,
-     * before this device writes to that folder again (ADR-0014). Returns what happened.
-     */
-    private suspend fun checkOwnFolder(
-        target: SyncTarget,
-        files: Map<Long, BlobInfo>,
-    ): SyncIssue? {
-        val known = store.sync.lastSegmentNumber(target.id)
-        val beyond = files.keys.filter { it > known }.sorted()
-        val isOurs = beyond.all { number -> holdsOnlyKnown(target.store, files.getValue(number)) }
-        if (isOurs) beyond.lastOrNull()?.let { store.sync.adoptSegmentNumber(target.id, it) }
-        return if (isOurs) null else renew()
-    }
-
-    private suspend fun holdsOnlyKnown(
-        blobs: BlobStore,
-        file: BlobInfo,
-    ): Boolean =
-        try {
-            val segment = seams.codec.decode(blobs.read(file.path))
-            segment.dropped.isEmpty() && segment.revisions.all { store.sync.revision(it.id) == it }
-        } catch (_: SegmentFormatException) {
-            false
-        }
-
-    private fun renew(): SyncIssue {
-        val old = store.deviceId
-        return SyncIssue.DeviceRenewed(old, store.sync.renewDeviceId())
     }
 
     private suspend fun listDevices(blobs: BlobStore): List<BlobInfo> {

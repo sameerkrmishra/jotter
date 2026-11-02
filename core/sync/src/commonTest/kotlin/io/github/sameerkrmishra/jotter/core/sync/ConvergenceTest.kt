@@ -10,10 +10,10 @@ import kotlin.time.Duration.Companion.minutes
 class ConvergenceTest {
     @Test
     fun devicesConvergeUnderEveryFault(): TestResult =
-        runTest(timeout = 30.minutes) {
+        runTest(timeout = maxOf(MIN_TIMEOUT_MINUTES, CASES / CASES_PER_MINUTE).minutes) {
             val start = simulationProperty("jotter.sim.start") ?: FIRST_SEED
-            val cases = simulationProperty("jotter.sim.cases") ?: simulationDefaultCases
-            val outcomes = (start until start + cases).map { simulate(it) }
+            val cases = CASES
+            val outcomes = (start until start + cases).map { seeded(it) }
             println(
                 "Simulated seeds $start until ${start + cases}: " +
                     "${outcomes.sumOf { it.revisions }} revisions, " +
@@ -21,14 +21,48 @@ class ConvergenceTest {
                     "${outcomes.sumOf { it.conflictsSeen }} conflicts, " +
                     "${outcomes.sumOf { it.crashes }} crashes, " +
                     "${outcomes.sumOf { it.badStamps }} bad revisions, " +
-                    "${outcomes.sumOf { it.restores }} restored backups",
+                    "${outcomes.sumOf { it.restores }} restored backups, " +
+                    "${outcomes.sumOf { it.diskRestores }} of them whole disks",
             )
             assertTrue(outcomes.sumOf { it.merges } > cases, "The cases must make merges")
             assertTrue(outcomes.sumOf { it.conflictsSeen } > 0, "The cases must make conflicts")
             assertTrue(outcomes.sumOf { it.crashes } > 0, "The cases must crash")
         }
 
+    /** On every platform: these seeds lie outside what most of them run by default. */
+    @Test
+    fun theSeedsThatFoundBugsStillPass(): TestResult =
+        runTest(timeout = MIN_TIMEOUT_MINUTES.minutes) {
+            REGRESSION_SEEDS.forEach { seeded(it) }
+        }
+
+    /** Whatever goes wrong in a case, the failure names the seed that replays it. */
+    private suspend fun seeded(seed: Long): SimOutcome =
+        runCatching { simulate(seed) }.getOrElse { failure ->
+            throw AssertionError("Seed $seed failed: ${failure.message}", failure)
+        }
+
     private companion object {
         const val FIRST_SEED = 1L
+
+        /** The first seed to catch each bug the simulator found or was shown to find. */
+        val REGRESSION_SEEDS =
+            listOf(
+                11L,
+                40L,
+                263L,
+                384L,
+                715L,
+                1050L,
+                1236L,
+                2091L,
+                3621L,
+                55279L,
+            )
+
+        /** The timeout is generous: a slow runner should fail on a finding, not on the clock. */
+        const val MIN_TIMEOUT_MINUTES = 30L
+        const val CASES_PER_MINUTE = 100L
+        val CASES: Long get() = simulationProperty("jotter.sim.cases") ?: simulationDefaultCases
     }
 }
