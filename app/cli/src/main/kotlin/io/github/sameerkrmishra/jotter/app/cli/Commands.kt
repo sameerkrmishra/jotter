@@ -17,6 +17,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
+import io.github.sameerkrmishra.jotter.core.storage.NoteTooLargeException
 import java.io.IOException
 import java.io.InputStream
 import java.nio.file.InvalidPathException
@@ -63,7 +64,11 @@ internal class AddCommand(
     override fun execute(notes: NoteService) {
         val body = if (text == STDIN) readStdin() else text
         if (title.isBlank() && body.isBlank()) throw CliktError("jotter: the note is empty")
-        echo(notes.create(title, body, tags.toSet()).id)
+        try {
+            echo(notes.create(title, body, tags.toSet()).id)
+        } catch (e: NoteTooLargeException) {
+            throw CliktError("jotter: the note is too long: ${e.message}", e)
+        }
     }
 
     private fun readStdin(): String =

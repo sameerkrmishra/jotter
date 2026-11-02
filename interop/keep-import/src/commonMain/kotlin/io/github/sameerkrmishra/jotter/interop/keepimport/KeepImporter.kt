@@ -24,9 +24,10 @@ private val keepJson: Json =
 /** The fixed detail of a [KeepImportFailure.Kind.MALFORMED_JSON] failure. */
 private const val MALFORMED_DETAIL = "Not a valid Keep note"
 
-/** The fixed detail of a [KeepImportFailure.Kind.STORAGE_ERROR] failure. */
+/** The fixed detail of a [KeepImportFailure.Kind.NOTE_TOO_LARGE] failure. */
 private const val TOO_LARGE_DETAIL = "The note is larger than a note can be, and was not imported."
 
+/** The fixed detail of a [KeepImportFailure.Kind.STORAGE_ERROR] failure. */
 private const val STORAGE_ERROR_DETAIL = "The database could not store this note"
 
 /**

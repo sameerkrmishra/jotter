@@ -28,6 +28,15 @@ internal class NoteMaterialiser(
      * [head] must already be stored, as the `note` row refers to it.
      */
     fun materialise(head: Revision) {
+        materialiseChecked(head)
+    }
+
+    /** Removes the note [noteId] from what the UI reads, when no revision of it counts. */
+    fun remove(noteId: String) {
+        queries.deleteNote(noteId)
+    }
+
+    private fun materialiseChecked(head: Revision) {
         val noteId = head.noteId.toString()
         queries.transaction {
             when (val content = head.content) {

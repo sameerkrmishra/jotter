@@ -10,14 +10,15 @@ CREATE TABLE sync_cursor (
   PRIMARY KEY (backend_id, device_id)
 ) WITHOUT ROWID;
 
--- A segment number at or below the cursor that was not applied: unreadable, of a future format,
--- rejected, or not there. It is tried again on every sync, so one bad file costs one read and
--- blocks nothing behind it.
+-- A range of segment numbers at or below the cursor that were not applied: unreadable, of a future
+-- format, or not there. They are tried again on every sync, so one bad file costs one read and
+-- blocks nothing behind it. A range, so that a folder starting at 5001 costs one row.
 CREATE TABLE sync_gap (
   backend_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  number INTEGER NOT NULL,
-  PRIMARY KEY (backend_id, device_id, number)
+  first_number INTEGER NOT NULL,
+  last_number INTEGER NOT NULL,
+  PRIMARY KEY (backend_id, device_id, first_number)
 ) WITHOUT ROWID;
 
 -- A segment this device owns on a backend. It is recorded with its number and revisions before
@@ -46,6 +47,7 @@ CREATE TABLE backend_revision (
   segment INTEGER,
   source_device TEXT,
   source_segment INTEGER,
+  source_size INTEGER,
   PRIMARY KEY (backend_id, revision_id)
 ) WITHOUT ROWID;
 
@@ -64,6 +66,20 @@ CREATE TABLE hidden_head (
 ) WITHOUT ROWID;
 
 CREATE INDEX hidden_head_by_note ON hidden_head(note_id);
+
+-- Text that the revision DAG does not count, so that it is not lost in silence. BAD_HISTORY rows are
+-- a cache of what the revisions say. MALFORMED and ID_COLLISION rows hold what was refused on
+-- arrival, whose revision is not stored: the same segments give the same rows on every device.
+CREATE TABLE invalid_revision (
+  revision_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('BAD_HISTORY', 'MALFORMED', 'ID_COLLISION')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (revision_id, reason, title, body)
+) WITHOUT ROWID;
+
+CREATE INDEX invalid_revision_by_note ON invalid_revision(note_id);
 
 -- The open conflicts: conflicted merges that nothing closed, with the text that lost. A cache of
 -- what the revisions say, rewritten whenever a note's revisions change. A row needs the losing
@@ -87,17 +103,17 @@ VALUES (:backendId, :deviceId, :lastSegment)
 ON CONFLICT (backend_id, device_id) DO UPDATE SET last_segment = excluded.last_segment;
 
 selectGaps:
-SELECT number FROM sync_gap
+SELECT first_number, last_number FROM sync_gap
 WHERE backend_id = :backendId AND device_id = :deviceId
-ORDER BY number;
+ORDER BY first_number;
 
 insertGap:
-INSERT OR IGNORE INTO sync_gap(backend_id, device_id, number)
-VALUES (:backendId, :deviceId, :number);
+INSERT OR IGNORE INTO sync_gap(backend_id, device_id, first_number, last_number)
+VALUES (:backendId, :deviceId, :firstNumber, :lastNumber);
 
 deleteGap:
 DELETE FROM sync_gap
-WHERE backend_id = :backendId AND device_id = :deviceId AND number = :number;
+WHERE backend_id = :backendId AND device_id = :deviceId AND first_number = :firstNumber;
 
 selectLastNumber:
 SELECT last_number FROM sync_last_number WHERE backend_id = :backendId;
@@ -133,11 +149,11 @@ VALUES (:backendId, :revisionId, :segment);
 
 insertPulledRevision:
 INSERT OR IGNORE INTO backend_revision(
-  backend_id, revision_id, segment, source_device, source_segment
-) VALUES (:backendId, :revisionId, NULL, :sourceDevice, :sourceSegment);
+  backend_id, revision_id, segment, source_device, source_segment, source_size
+) VALUES (:backendId, :revisionId, NULL, :sourceDevice, :sourceSegment, :sourceSize);
 
 selectPulledSegments:
-SELECT DISTINCT source_device, source_segment FROM backend_revision
+SELECT DISTINCT source_device, source_segment, source_size FROM backend_revision
 WHERE backend_id = :backendId AND source_device IS NOT NULL AND source_segment IS NOT NULL;
 
 deleteRevisionsOfPulledSegment:
@@ -153,6 +169,63 @@ VALUES (:revisionId, :noteId, :title, :body, :isIncomplete);
 
 selectHiddenHeads:
 SELECT * FROM hidden_head ORDER BY note_id, revision_id;
+
+deleteBadHistoryOfNote:
+DELETE FROM invalid_revision WHERE note_id = :noteId AND reason = 'BAD_HISTORY';
+
+insertInvalidRevision:
+INSERT OR IGNORE INTO invalid_revision(revision_id, note_id, reason, title, body)
+VALUES (:revisionId, :noteId, :reason, :title, :body);
+
+selectInvalidRevisions:
+SELECT * FROM invalid_revision ORDER BY note_id, revision_id, reason, title, body;
+
+deleteRevisionFromBackends:
+DELETE FROM backend_revision WHERE revision_id = :revisionId;
+
+-- A new device id: what this device published is now another device's, by the rules of pulling.
+demotePublishedRevisions:
+UPDATE backend_revision
+SET source_device = :oldDevice, source_segment = segment, segment = NULL
+WHERE segment IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM sync_segment
+    WHERE sync_segment.backend_id = backend_revision.backend_id
+      AND sync_segment.number = backend_revision.segment
+      AND sync_segment.is_published = 1
+  );
+
+deleteUnpublishedRevisions:
+DELETE FROM backend_revision WHERE segment IS NOT NULL;
+
+deleteAllOwnSegments:
+DELETE FROM sync_segment;
+
+-- Its numbers up to the last one were this device's own, so reading the folder starts behind them.
+insertCursorsOfOldDevice:
+INSERT OR REPLACE INTO sync_cursor(backend_id, device_id, last_segment)
+SELECT backend_id, :oldDevice, last_number FROM sync_last_number;
+
+insertGapsOfUnpublished:
+INSERT OR IGNORE INTO sync_gap(backend_id, device_id, first_number, last_number)
+SELECT backend_id, :oldDevice, number, number FROM sync_segment WHERE is_published = 0;
+
+deleteLastNumbers:
+DELETE FROM sync_last_number;
+
+-- A number recorded but not known to be published was never used for sure, and it can be another
+-- writer's. Forgetting the record must not hide that number behind the last one used. Unpublished
+-- segments are always the highest numbers.
+lowerLastNumberBelowUnpublished:
+UPDATE sync_last_number
+SET last_number = (
+  SELECT min(number) - 1 FROM sync_segment
+  WHERE sync_segment.backend_id = :backendId AND is_published = 0
+)
+WHERE backend_id = :backendId AND EXISTS (
+  SELECT 1 FROM sync_segment
+  WHERE sync_segment.backend_id = :backendId AND is_published = 0
+);
 
 deleteBackendCursors:
 DELETE FROM sync_cursor WHERE backend_id = :backendId;

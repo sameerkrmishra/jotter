@@ -51,13 +51,16 @@ import kotlin.time.Instant
 @Suppress("TooManyFunctions") // The note operations of PLAN.md §3.3, kept together on purpose.
 public class NoteService internal constructor(
     private val database: JotterDatabase,
-    private val deviceId: DeviceId,
     private val clock: Clock,
     private val queryContext: CoroutineContext,
     private val ids: IdSource,
 ) {
     private val revisions = RevisionStore(database.revisionQueries)
     private val materialiser = NoteMaterialiser(database.noteQueries)
+
+    // Read in every write transaction and used only inside one, as sync can replace it.
+    private var writingDevice: DeviceId? = null
+    private val deviceId: DeviceId get() = checkNotNull(writingDevice)
 
     /**
      * Creates an active note and returns it.
@@ -404,6 +407,7 @@ public class NoteService internal constructor(
         reportingBusy {
             database.transactionWithResult {
                 val stored = database.deviceQueries.selectDevice().executeAsOne()
+                writingDevice = DeviceId.parse(stored.id)
                 val last = hybridTimestamp(stored.hlc_physical, stored.hlc_counter)
                 val hlc = HybridLogicalClock(clock, last)
                 val result = block(hlc)

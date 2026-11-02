@@ -61,6 +61,48 @@ public data class HiddenHead(
 )
 
 /**
+ * A segment that revisions were read from.
+ *
+ * @property device The device whose folder holds it.
+ * @property number Its number.
+ * @property size The size of the file, or null if it was this device's own.
+ */
+public data class PulledSegment(
+    val device: DeviceId,
+    val number: Long,
+    val size: Long?,
+)
+
+/** Why text does not count (ADR-0014). */
+public enum class InvalidReason {
+    /** The revision, or one it builds on, does not fit its parents, or has a parent elsewhere. */
+    BAD_HISTORY,
+
+    /** The revision could not be read, so only what could be read of it is here. */
+    MALFORMED,
+
+    /** Another revision uses its id, and won. */
+    ID_COLLISION,
+}
+
+/**
+ * Text that the DAG does not count, listed so that it is not lost in silence (ADR-0014).
+ *
+ * @property revisionId The revision.
+ * @property noteId Its note.
+ * @property reason Why it does not count.
+ * @property title Its title.
+ * @property body Its body.
+ */
+public data class InvalidRevision(
+    val revisionId: RevisionId,
+    val noteId: NoteId,
+    val reason: InvalidReason,
+    val title: String,
+    val body: String,
+)
+
+/**
  * Marks what is for `core:sync` alone. Kotlin has no friend modules, so [SyncStore] cannot be
  * `internal` to `core:storage` and still reach `core:sync`. No app needs it: this opt-in makes any
  * other use a compile error.
@@ -80,7 +122,6 @@ public annotation class SyncStoreApi
 @Suppress("TooManyFunctions") // One small function per query, kept together on purpose.
 public class SyncStore internal constructor(
     private val database: JotterDatabase,
-    private val deviceId: DeviceId,
     private val clock: Clock,
     private val queryContext: CoroutineContext,
     private val ids: IdSource,
@@ -143,7 +184,7 @@ public class SyncStore internal constructor(
                     noteId = parent.noteId,
                     parents = setOf(parent.id),
                     timestamp = hlc.now(after = parent.timestamp),
-                    deviceId = deviceId,
+                    deviceId = currentDevice(),
                     kind = RevisionKind.User,
                     content = content,
                     resolves = resolves,
@@ -183,19 +224,24 @@ public class SyncStore internal constructor(
         queries.upsertCursor(backend, device.toString(), segment)
     }
 
-    /** Returns the numbers at or below the cursor of [device] on [backend] not applied yet. */
+    /** Returns the ranges of numbers at or below the cursor of [device] not applied yet. */
     public fun gaps(
         backend: String,
         device: DeviceId,
-    ): Set<Long> = queries.selectGaps(backend, device.toString()).executeAsList().toSet()
+    ): List<LongRange> =
+        queries
+            .selectGaps(backend, device.toString()) { first, last -> first..last }
+            .executeAsList()
 
-    /** Records that segment [number] of [device] on [backend] was not applied. */
+    /** Records that the numbers in [range] of [device] on [backend] were not applied. */
     public fun addGap(
         backend: String,
         device: DeviceId,
-        number: Long,
+        range: LongRange,
     ) {
-        queries.insertGap(backend, device.toString(), number)
+        if (gaps(backend, device).none { range.first in it }) {
+            queries.insertGap(backend, device.toString(), range.first, range.last)
+        }
     }
 
     /** Records that segment [number] of [device] on [backend] has been applied. */
@@ -204,7 +250,11 @@ public class SyncStore internal constructor(
         device: DeviceId,
         number: Long,
     ) {
-        queries.deleteGap(backend, device.toString(), number)
+        val range = gaps(backend, device).firstOrNull { number in it } ?: return
+        val name = device.toString()
+        queries.deleteGap(backend, name, range.first)
+        if (number > range.first) queries.insertGap(backend, name, range.first, number - 1)
+        if (number < range.last) queries.insertGap(backend, name, number + 1, range.last)
     }
 
     /** Returns this device's segments on [backend], by number, and whether each is published. */
@@ -251,20 +301,99 @@ public class SyncStore internal constructor(
     public fun unpushed(backend: String): List<RevisionId> =
         queries.selectUnpushed(backend).executeAsList().map(RevisionId::parse)
 
-    /** Records that the stored revision [id] was found on [backend], in a segment of [device]. */
+    /** Raises the last number used on [backend] to [number], found in this device's folder. */
+    public fun adoptSegmentNumber(
+        backend: String,
+        number: Long,
+    ) {
+        queries.upsertLastNumber(backend, number)
+    }
+
+    /**
+     * Gives this device a new id, in one transaction (ADR-0014). What it published stays on the
+     * backends as another device's, read from behind the numbers it used, and what it had not
+     * published counts as not on any backend. Returns the new id.
+     */
+    public fun renewDeviceId(): DeviceId =
+        write {
+            val old = currentDevice().toString()
+            val new = ids.newDeviceId()
+            queries.demotePublishedRevisions(old)
+            queries.deleteUnpublishedRevisions()
+            queries.insertCursorsOfOldDevice(old)
+            // A number it never got to publish can hold another writer's file, to be read.
+            queries.insertGapsOfUnpublished(old)
+            queries.deleteAllOwnSegments()
+            queries.deleteLastNumbers()
+            database.deviceQueries.updateDeviceId(new.toString())
+            new
+        }
+
+    /** Puts [revision] in the place of the stored one with its id, on no backend so far. */
+    public fun replace(revision: Revision) {
+        revisions.replace(revision)
+        queries.deleteRevisionFromBackends(revision.id.toString())
+    }
+
+    /** Removes the note [noteId] from what the UI reads, as no revision of it counts. */
+    public fun removeNote(noteId: NoteId) {
+        materialiser.remove(noteId.toString())
+    }
+
+    /** Replaces the [InvalidReason.BAD_HISTORY] rows of the note [noteId] with [rows]. */
+    public fun replaceBadHistory(
+        noteId: NoteId,
+        rows: List<InvalidRevision>,
+    ) {
+        queries.deleteBadHistoryOfNote(noteId.toString())
+        rows.forEach(::addInvalid)
+    }
+
+    /** Records [row], once. */
+    public fun addInvalid(row: InvalidRevision) {
+        queries.insertInvalidRevision(
+            row.revisionId.toString(),
+            row.noteId.toString(),
+            row.reason.name,
+            row.title,
+            row.body,
+        )
+    }
+
+    /** Returns the text that the DAG does not count, by note. */
+    public fun invalidRevisions(): List<InvalidRevision> =
+        queries.selectInvalidRevisions(::invalidOfRow).executeAsList()
+
+    /** Emits [invalidRevisions] now and again whenever they change. */
+    public fun observeInvalidRevisions(): Flow<List<InvalidRevision>> =
+        queries
+            .selectInvalidRevisions(::invalidOfRow)
+            .asFlow()
+            .mapToList(queryContext)
+            .distinctUntilChanged()
+
+    /**
+     * Records that the stored revision [id] was found on [backend], in segment [number] of
+     * [device], a file of [size] bytes.
+     */
     public fun markOnBackend(
         backend: String,
         id: RevisionId,
         device: DeviceId,
         number: Long,
+        size: Long,
     ) {
-        queries.insertPulledRevision(backend, id.toString(), device.toString(), number)
+        queries.insertPulledRevision(backend, id.toString(), device.toString(), number, size)
     }
 
-    /** Returns the segments of other devices that revisions were recorded from on [backend]. */
-    public fun pulledSegments(backend: String): List<Pair<DeviceId, Long>> =
+    /** Returns the segments of other devices that revisions were read from on [backend]. */
+    public fun pulledSegments(backend: String): List<PulledSegment> =
         queries.selectPulledSegments(backend).executeAsList().map { row ->
-            DeviceId.parse(checkNotNull(row.source_device)) to checkNotNull(row.source_segment)
+            PulledSegment(
+                DeviceId.parse(checkNotNull(row.source_device)),
+                checkNotNull(row.source_segment),
+                row.source_size,
+            )
         }
 
     /** Stops counting the revisions read from segment [number] of [device] as on [backend]. */
@@ -282,6 +411,7 @@ public class SyncStore internal constructor(
      */
     public fun forgetBackend(backend: String) {
         write {
+            queries.lowerLastNumberBelowUnpublished(backend)
             queries.deleteBackendCursors(backend)
             queries.deleteBackendGaps(backend)
             queries.deleteBackendSegments(backend)
@@ -351,6 +481,14 @@ public class SyncStore internal constructor(
             .mapToList(queryContext)
             .distinctUntilChanged()
 
+    private fun currentDevice(): DeviceId =
+        DeviceId.parse(
+            database.deviceQueries
+                .selectDevice()
+                .executeAsOne()
+                .id,
+        )
+
     /** Runs [block] with the device's clock and stores the clock's new time. */
     private fun <T> withClock(block: (HybridLogicalClock) -> T): T =
         write {
@@ -367,6 +505,21 @@ public class SyncStore internal constructor(
             result
         }
 }
+
+private fun invalidOfRow(
+    revisionId: String,
+    noteId: String,
+    reason: String,
+    title: String,
+    body: String,
+): InvalidRevision =
+    InvalidRevision(
+        RevisionId.parse(revisionId),
+        NoteId.parse(noteId),
+        InvalidReason.valueOf(reason),
+        title,
+        body,
+    )
 
 private fun hiddenHeadOfRow(
     revisionId: String,

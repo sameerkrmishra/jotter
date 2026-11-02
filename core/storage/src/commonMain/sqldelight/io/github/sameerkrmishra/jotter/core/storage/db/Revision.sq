@@ -101,6 +101,25 @@ INSERT INTO revision_parent(revision_id, parent_id) VALUES (:revisionId, :parent
 insertTag:
 INSERT INTO revision_tag(revision_id, tag) VALUES (:revisionId, :tag);
 
+-- Only for two revisions under one id, when the one that wins arrives second (ADR-0014).
+updateRevision:
+UPDATE revision SET
+  note_id = :noteId, hlc_physical = :hlcPhysical, hlc_counter = :hlcCounter, device_id = :deviceId,
+  is_merge = :isMerge, losing_parent = :losingParent, resolves = :resolves,
+  is_tombstone = :isTombstone, title = :title, body = :body,
+  pinned = :pinned, pinned_hlc_physical = :pinnedHlcPhysical,
+  pinned_hlc_counter = :pinnedHlcCounter, pinned_device_id = :pinnedDeviceId,
+  pinned_revision_id = :pinnedRevisionId,
+  state = :state, state_hlc_physical = :stateHlcPhysical, state_hlc_counter = :stateHlcCounter,
+  state_device_id = :stateDeviceId, state_revision_id = :stateRevisionId
+WHERE id = :id;
+
+deleteParents:
+DELETE FROM revision_parent WHERE revision_id = :revisionId;
+
+deleteTags:
+DELETE FROM revision_tag WHERE revision_id = :revisionId;
+
 selectRevision:
 SELECT * FROM revision WHERE id = :id;
 

@@ -20,7 +20,6 @@ internal const val JOTTER_APPLICATION_ID = 0x4A4F5452
  * open at the same time. The composition root opens it once, hands [notes] to whoever needs it,
  * and closes it on exit.
  *
- * @property deviceId This installation's identity, created with the database and kept for good.
  * @property notes Creates, changes, lists, observes and searches the notes.
  * @property sync What `core:sync` reads and writes. Nothing else can use it (see [SyncStoreApi]).
  */
@@ -28,10 +27,19 @@ internal const val JOTTER_APPLICATION_ID = 0x4A4F5452
 public class NoteStore private constructor(
     internal val driver: SqlDriver,
     internal val database: JotterDatabase,
-    public val deviceId: DeviceId,
     public val notes: NoteService,
     @property:SyncStoreApi public val sync: SyncStore,
 ) : AutoCloseable {
+    /** This installation's identity. Sync can replace it (ADR-0014), so it is read every time. */
+    public val deviceId: DeviceId
+        get() =
+            DeviceId.parse(
+                database.deviceQueries
+                    .selectDevice()
+                    .executeAsOne()
+                    .id,
+            )
+
     /**
      * Closes the database. Waits for a write running on another thread to finish. The store and
      * its [notes] cannot be used afterwards, and observation flows must be cancelled before.
@@ -74,33 +82,29 @@ public class NoteStore private constructor(
             var opened = false
             try {
                 val database = JotterDatabase(driver)
-                val deviceId = reportingBusy { readOrCreateDeviceId(database, deviceName, ids) }
-                val notes = NoteService(database, deviceId, clock, queryContext, ids)
-                val sync = SyncStore(database, deviceId, clock, queryContext, ids)
+                reportingBusy { createDeviceIfAbsent(database, deviceName, ids) }
+                val notes = NoteService(database, clock, queryContext, ids)
+                val sync = SyncStore(database, clock, queryContext, ids)
                 opened = true
-                return NoteStore(driver, database, deviceId, notes, sync)
+                return NoteStore(driver, database, notes, sync)
             } finally {
                 if (!opened) driver.close()
             }
         }
 
         // INSERT OR IGNORE: another process may create the row between the two reads.
-        private fun readOrCreateDeviceId(
+        private fun createDeviceIfAbsent(
             database: JotterDatabase,
             deviceName: String,
             ids: IdSource,
-        ): DeviceId {
+        ) {
             val queries = database.deviceQueries
-            val stored =
-                queries.selectDevice().executeAsOneOrNull()
-                    ?: run {
-                        queries.insertDeviceIfAbsent(
-                            ids.newDeviceId().toString(),
-                            deviceName.toStorableText(),
-                        )
-                        queries.selectDevice().executeAsOne()
-                    }
-            return DeviceId.parse(stored.id)
+            if (queries.selectDevice().executeAsOneOrNull() == null) {
+                queries.insertDeviceIfAbsent(
+                    ids.newDeviceId().toString(),
+                    deviceName.toStorableText(),
+                )
+            }
         }
     }
 }
