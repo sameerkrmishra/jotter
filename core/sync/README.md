@@ -107,6 +107,9 @@ JOTTER_SIM_START=1000 JOTTER_SIM_CASES=5000 ./gradlew :core:sync:jvmTest --tests
 Besides converging, every stored merge must follow from its parents and their
 ancestors: the simulator computes each one again from the final DAG.
 
+Measured 2026-11-02: seeds 30000 to 36999 passed on the JVM, with 176,365 revisions,
+23,041 merges, 3,499 conflicts and 5,725 crashes.
+
 Whether the tests can fail was checked with 27 source mutations, applied one at a time by
 a throwaway script, on the JVM with 200 seeds, and 1000 for those the first pass did not
 catch in the simulator. All 27 are caught. These reach the simulator's assertions: no
