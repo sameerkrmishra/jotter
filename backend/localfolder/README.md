@@ -33,11 +33,23 @@ makes the store unreachable until it is initialised again.
   `ping` said `NOT_INITIALIZED` would turn the mount point of an unplugged stick
   into a store. It needs the folder to exist, and does not create it.
 - **`ping`** returns `Reachable` if the marker is there, `MISSING` if the folder
-  is gone and `NOT_INITIALIZED` for a folder without the marker. A read-only stick
-  is reachable, and `writeNew` fails with `BlobStoreFailureException`.
+  is gone, `NOT_INITIALIZED` for a folder without the marker and `FAILED` if the
+  root cannot be examined. It looks at the root only. A read-only stick is
+  reachable, and `writeNew` fails with `BlobStoreFailureException`.
+- **Errors are never absence.** Only "no such file" counts as absent. Any other
+  error from a lookup or a listing fails the call, and a store that goes away
+  during a call raises `BackendUnavailableException`, never an empty or partial
+  list or a missing file.
 - **`writeNew` on FAT or exFAT** has the same guarantee as elsewhere for all
   processes on one machine, through a lock file instead of a hard link. Two
   machines on a network share without hard links are not covered. See ADR-0012.
+- **Locks.** Hard links work without the lock. Without hard links a lock failure
+  fails every write, so on storage with neither the backend cannot write at all.
+- **A failed directory `fsync` fails `writeNew`**, but the file stays in place. A
+  retry that finds it syncs again before it throws `BlobAlreadyExistsException`.
+  Only "not supported" results are tolerated. See the KDoc of `BlobStore.writeNew`.
+- **Android `content://` folders are not supported**, because the store needs a
+  real file path. M5 must address them.
 - **Case.** On FAT `a` and `A` are one file, so the second write fails with
   `BlobAlreadyExistsException`. The sync layout has no such pairs.
 - **Symbolic links** inside the store are not followed: `list` and `read` act as
@@ -48,25 +60,29 @@ makes the store unreachable until it is initialised again.
 
 ## Design
 
-- **okio in common code**, with four `expect` declarations in `Platform.kt`: hard
-  link, record lock, directory `fsync` and the I/O dispatcher. The JVM and Android
-  share one implementation in `src/javaNioMain`, through a `javaNio` group in the
-  source set hierarchy. `linuxX64Main` has the other. Native-only code is not
-  measured by the coverage gate, so it is kept this thin.
+- **okio in common code**, with `expect` declarations in `Platform.kt` for what it
+  lacks or gets wrong: strict lookup and listing, hard link, record lock, directory
+  `fsync` and the I/O dispatcher. The JVM and Android share one implementation in
+  `src/javaNioMain`, through a `javaNio` group in the source set hierarchy.
+  `linuxX64Main` has the other. Native-only code is not measured by the coverage
+  gate, so it is kept this thin.
 - **Walks paths one segment at a time** instead of asking the system about the
-  whole path. Platforms disagree on the error for a file above the path, and okio
-  would throw for one of them.
+  whole path. Platforms disagree on the error for a file above the path.
 - **`NoReplaceWriter`** holds the steps of a write. `LocalFolderBlobStore` holds
-  the store's rules. A hard link can be swapped out in its internal constructor,
-  which is how the tests run the fallback for file systems without hard links.
+  the store's rules. `FolderAccess` bundles the platform calls, and its internal
+  constructor is how the tests disable hard links or locks and inject errors.
 
 ## Tests
 
-`HardLinkContractTest` and `RenameContractTest` run the whole contract suite, the
-second with `link` disabled as on FAT, on the JVM (counted by the coverage gate),
-linuxX64 and the Android host. `LocalFolderBlobStoreTest` covers what is specific
-to a folder: the marker, stale temporary files, failures in each step through
-okio's `ForwardingFileSystem`, and symbolic links.
+`HardLinkContractTest`, `RenameContractTest` (`link` disabled, as on FAT) and
+`NoLockContractTest` (no lock) run the whole contract suite on the JVM (counted by
+the coverage gate), linuxX64 and the Android host. `LocalFolderBlobStoreTest`
+covers what is specific to a folder: the marker, stale temporary files, failures
+in each step through okio's `ForwardingFileSystem`, and symbolic links.
+`LocalFolderFaultTest` covers errors that must not read as absence, retries and
+lock failures, with real `chmod` errors where a test can cause them. Real `EIO`
+from `readdir` and from `fsync` cannot be caused from a test. Those were checked
+by hand with an `LD_PRELOAD` shim, on the JVM and linuxX64.
 
 `TwoProcessTest` (JVM) and `NativeTwoProcessTest` (linuxX64) race three processes
 for 200 paths in both modes. Without the lock file, the rename mode fails them, as
