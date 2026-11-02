@@ -47,8 +47,17 @@ CREATE TABLE backend_revision (
   segment INTEGER,
   source_device TEXT,
   source_segment INTEGER,
-  source_size INTEGER,
   PRIMARY KEY (backend_id, revision_id)
+) WITHOUT ROWID;
+
+-- The files read from other devices, with their sizes, also if nothing in them was new. A file that
+-- goes missing or changes size was lost, or written again by a restored copy (ADR-0014).
+CREATE TABLE sync_read (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  PRIMARY KEY (backend_id, device_id, number)
 ) WITHOUT ROWID;
 
 CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
@@ -149,12 +158,26 @@ VALUES (:backendId, :revisionId, :segment);
 
 insertPulledRevision:
 INSERT OR IGNORE INTO backend_revision(
-  backend_id, revision_id, segment, source_device, source_segment, source_size
-) VALUES (:backendId, :revisionId, NULL, :sourceDevice, :sourceSegment, :sourceSize);
+  backend_id, revision_id, segment, source_device, source_segment
+) VALUES (:backendId, :revisionId, NULL, :sourceDevice, :sourceSegment);
 
 selectPulledSegments:
-SELECT DISTINCT source_device, source_segment, source_size FROM backend_revision
+SELECT DISTINCT source_device, source_segment FROM backend_revision
 WHERE backend_id = :backendId AND source_device IS NOT NULL AND source_segment IS NOT NULL;
+
+upsertRead:
+INSERT INTO sync_read(backend_id, device_id, number, size)
+VALUES (:backendId, :deviceId, :number, :size)
+ON CONFLICT (backend_id, device_id, number) DO UPDATE SET size = excluded.size;
+
+selectReads:
+SELECT device_id, number, size FROM sync_read WHERE backend_id = :backendId;
+
+deleteRead:
+DELETE FROM sync_read WHERE backend_id = :backendId AND device_id = :deviceId AND number = :number;
+
+deleteBackendReads:
+DELETE FROM sync_read WHERE backend_id = :backendId;
 
 deleteRevisionsOfPulledSegment:
 DELETE FROM backend_revision

@@ -144,6 +144,7 @@ internal class Puller(
                     segment.dropped.forEach(store::addInvalid)
                     segment.revisions.forEach { store(item, it, touched, inserted) }
                     store.removeGap(backendId, item.device, item.number)
+                    store.recordRead(backendId, item.device, item.number, item.size)
                     applied++
                 }
             }
@@ -179,7 +180,7 @@ internal class Puller(
                 touched += stored.noteId
             }
         }
-        store.markOnBackend(backendId, revision.id, item.device, item.number, item.size)
+        store.markOnBackend(backendId, revision.id, item.device, item.number)
         touched += revision.noteId
     }
 

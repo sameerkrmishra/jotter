@@ -146,9 +146,17 @@ public class SyncEngine internal constructor(
         folders: Map<DeviceId, Map<Long, BlobInfo>>,
     ) {
         store.sync.write {
-            store.sync.pulledSegments(targetId).forEach { (device, number, size) ->
+            store.sync.readSegments(targetId).forEach { (device, number, size) ->
                 val file = folders[device]?.get(number)
-                if (file == null || (size != null && file.size != size)) {
+                if (file == null || file.size != size) {
+                    store.sync.forgetRead(targetId, device, number)
+                    store.sync.forgetPulledSegment(targetId, device, number)
+                    store.sync.addGap(targetId, device, number..number)
+                }
+            }
+            // Those of a device's own old id were never read, as it wrote them itself.
+            store.sync.pulledSegments(targetId).forEach { (device, number) ->
+                if (folders[device]?.containsKey(number) != true) {
                     store.sync.forgetPulledSegment(targetId, device, number)
                     store.sync.addGap(targetId, device, number..number)
                 }

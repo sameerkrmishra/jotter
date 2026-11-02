@@ -18,7 +18,8 @@ devices disagree for good.
 
 **Local tables** (schema 2): `sync_cursor` and `sync_gap` per backend and device,
 `sync_segment` and `sync_last_number` for this device's own segments,
-`backend_revision` for what is known to be on a backend, `conflict` as PLAN.md §4 says,
+`backend_revision` for what is known to be on a backend, `sync_read` for the files read
+from others, `conflict` as PLAN.md §4 says,
 `hidden_head` and `invalid_revision`. `backend_id` is opaque, as the `backend` table
 comes with M4.
 
@@ -182,9 +183,9 @@ other use a compile error.
 - A settled head's edit is merged by hand or not at all, and a missing ancestor that
   comes later does not undo that.
 - A user revision whose parent never arrives can never be judged, so it counts.
-- **Known limit: a rewrite of the same size.** If a file is lost and another copy of the
-  same device id then writes other content under its number, nobody can tell from the
-  writer's side. A reader sees it as a missing file or another size, and reads it again.
+- **Known limit: a rewrite of the same size.** If a file is lost and its number is then
+  written with other content, by another copy of the same device id or after forgetting
+  a pending number, nobody can tell from the writer's side. A reader sees it as a missing file or another size, and reads it again.
   A rewrite of exactly the same size that it never saw missing stays unread, as a
   listing has no more than sizes. That needs a lost file, a restored backup and an equal
   size at once, and the revisions stay on the device that wrote them. The simulator keeps

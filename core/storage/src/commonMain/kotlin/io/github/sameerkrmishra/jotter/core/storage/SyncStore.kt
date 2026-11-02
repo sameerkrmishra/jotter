@@ -61,16 +61,16 @@ public data class HiddenHead(
 )
 
 /**
- * A segment that revisions were read from.
+ * A file read from another device's folder.
  *
  * @property device The device whose folder holds it.
  * @property number Its number.
- * @property size The size of the file, or null if it was this device's own.
+ * @property size Its size in bytes.
  */
-public data class PulledSegment(
+public data class ReadSegment(
     val device: DeviceId,
     val number: Long,
-    val size: Long?,
+    val size: Long,
 )
 
 /** Why text does not count (ADR-0014). */
@@ -372,29 +372,47 @@ public class SyncStore internal constructor(
             .mapToList(queryContext)
             .distinctUntilChanged()
 
-    /**
-     * Records that the stored revision [id] was found on [backend], in segment [number] of
-     * [device], a file of [size] bytes.
-     */
+    /** Records that the stored revision [id] was found on [backend], in a segment of [device]. */
     public fun markOnBackend(
         backend: String,
         id: RevisionId,
         device: DeviceId,
         number: Long,
-        size: Long,
     ) {
-        queries.insertPulledRevision(backend, id.toString(), device.toString(), number, size)
+        queries.insertPulledRevision(backend, id.toString(), device.toString(), number)
     }
 
-    /** Returns the segments of other devices that revisions were read from on [backend]. */
-    public fun pulledSegments(backend: String): List<PulledSegment> =
+    /** Returns the segments of other devices that revisions were recorded from on [backend]. */
+    public fun pulledSegments(backend: String): List<Pair<DeviceId, Long>> =
         queries.selectPulledSegments(backend).executeAsList().map { row ->
-            PulledSegment(
-                DeviceId.parse(checkNotNull(row.source_device)),
-                checkNotNull(row.source_segment),
-                row.source_size,
-            )
+            DeviceId.parse(checkNotNull(row.source_device)) to checkNotNull(row.source_segment)
         }
+
+    /** Records that segment [number] of [device] was read from [backend], [size] bytes long. */
+    public fun recordRead(
+        backend: String,
+        device: DeviceId,
+        number: Long,
+        size: Long,
+    ) {
+        queries.upsertRead(backend, device.toString(), number, size)
+    }
+
+    /** Returns the files read from other devices on [backend]. */
+    public fun readSegments(backend: String): List<ReadSegment> =
+        queries
+            .selectReads(backend) { device, number, size ->
+                ReadSegment(DeviceId.parse(device), number, size)
+            }.executeAsList()
+
+    /** Forgets that segment [number] of [device] was read from [backend]. */
+    public fun forgetRead(
+        backend: String,
+        device: DeviceId,
+        number: Long,
+    ) {
+        queries.deleteRead(backend, device.toString(), number)
+    }
 
     /** Stops counting the revisions read from segment [number] of [device] as on [backend]. */
     public fun forgetPulledSegment(
@@ -412,6 +430,7 @@ public class SyncStore internal constructor(
     public fun forgetBackend(backend: String) {
         write {
             queries.lowerLastNumberBelowUnpublished(backend)
+            queries.deleteBackendReads(backend)
             queries.deleteBackendCursors(backend)
             queries.deleteBackendGaps(backend)
             queries.deleteBackendSegments(backend)

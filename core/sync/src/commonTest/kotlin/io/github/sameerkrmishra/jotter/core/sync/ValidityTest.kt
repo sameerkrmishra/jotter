@@ -526,6 +526,23 @@ class ValidityTest {
         }
 
     @Test
+    fun aRewrittenSegmentThatBroughtNothingNewIsStillNoticed(): TestResult =
+        runTest {
+            val blobs = LossyBlobStore()
+            val pc = device("pc")
+            val writer = DeviceId.generate()
+            val path = BackendLayout.segmentPath(writer, 1)
+            plant(blobs, listOf(root))
+            pc.report(blobs)
+            plant(blobs, listOf(root), writer)
+            pc.report(blobs)
+            blobs.lose(path)
+            plant(blobs, listOf(root, one), writer)
+            pc.report(blobs)
+            assertEquals("A\nb\n", pc.notes.get(root.noteId)?.body)
+        }
+
+    @Test
     fun aRestoredBackupSeeingNoTailHereFindsItOnTheNextBackend(): TestResult =
         runTest {
             val first = InMemoryBlobStore()

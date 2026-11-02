@@ -34,8 +34,15 @@ CREATE TABLE backend_revision (
   segment INTEGER,
   source_device TEXT,
   source_segment INTEGER,
-  source_size INTEGER,
   PRIMARY KEY (backend_id, revision_id)
+) WITHOUT ROWID;
+
+CREATE TABLE sync_read (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  PRIMARY KEY (backend_id, device_id, number)
 ) WITHOUT ROWID;
 
 CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
