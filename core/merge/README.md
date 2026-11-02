@@ -50,6 +50,9 @@ hard case moves.
   change's new lines at the end that touches it: base `b`, ours `B`, `milk`,
   theirs `b`, `milk` gives `B`, `milk`. An insertion that only partly repeats the
   change, or matches its far end, is kept whole, so such a line can appear twice.
+  A line that two replacements both add also appears twice: base `a`, `b`, `c`,
+  ours `a`, `B`, `milk`, `c`, theirs `a`, `b`, `milk`, `C` gives `a`, `B`,
+  `milk`, `milk`, `C`, as neither side made an insertion to drop.
 - **Touching changes merge.** Changes to adjacent lines, and an insertion right
   next to a changed line, are not a conflict. Git and classic diff3 do conflict
   here, because they need an unchanged line between two changes. We don't,
@@ -128,7 +131,8 @@ texts, that a clean merge holds only lines of its inputs, and that generated
 non-overlapping edits always merge to exactly both edits. A generator of
 touching edits, built from lines that are unsafe to join and from repeated
 insertions, checks the laws, symmetry and that no line is altered. A second one
-checks that lines added on both sides next to an edit appear once.
+checks that lines one side only inserted, and the other added next to its edit,
+appear once.
 
 The tests for large bodies do not look at a clock. They count the diff's steps
 (`DiffCost`) and require them to stay within the linear bound, on inputs built

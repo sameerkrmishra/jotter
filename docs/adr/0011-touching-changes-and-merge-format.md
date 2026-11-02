@@ -53,9 +53,15 @@ This amends ADR-0003 for `body` and `title`.
   changing either needs a format version. A pinned test covers a merge beyond
   the limit on the JVM and on `linuxX64`.
 - **Fold order.** ADR-0003's left fold over several heads can give different
-  clean texts in different orders, because a merge is not associative. A later
-  merge of those results reconciles them, and that merge may be a conflict. A
-  sampled probe of 13 million cases during review found 127,950 such cases.
+  clean texts in different orders, because a merge is not associative. Under
+  random stress generators, 5.0%, 14.0% and 19.2% of 13 million three-head cases
+  gave different clean texts (4.9%, 13.7% and 18.4% without the repeat rule).
+  These are not rates for real notes. A later merge of those results reconciles
+  them. At the original base it usually conflicts: in the probe, 97.8% of pairs
+  of differing clean results did. ADR-0003 leaves the choice of ancestor in such
+  a criss-cross to M3, and at that base the choice between the texts goes to a
+  conflict the user sees. This is not a convergence risk, because each merge
+  reduces the number of heads.
 
 ## Consequences
 
@@ -63,8 +69,9 @@ This amends ADR-0003 for `body` and `title`.
 
 - Ticks of neighbouring items, and a tick next to an added item, merge without
   the user.
-- A line both sides added next to an edit does not appear twice, whichever order
-  a fold takes.
+- A line that one side only inserted and the other added at the touching end of
+  its edit appears once. For a tick and two equal additions, that holds in either
+  fold order.
 - No merge rewrites a line: mixed line endings and a missing final break
   round-trip.
 
@@ -74,7 +81,11 @@ This amends ADR-0003 for `body` and `title`.
   together, and nothing flags it. A person has to notice.
 - A merge that would alter a line turns all touching changes in that note into
   conflicts, not only the one at fault.
-- Partial repeats can still leave a line twice in a clean merge.
+- Partial repeats can still leave a line twice in a clean merge. So can two
+  replacements: base `a`, `b`, `c`, ours `a`, `B`, `milk`, `c`, theirs `a`, `b`,
+  `milk`, `C` gives `a`, `B`, `milk`, `milk`, `C`. Each side replaced a line, so
+  there is no insertion to drop. A probe found this in 18 of 256 two-head
+  checklist-tick cases.
 - A fold can end in a conflict that another order would have avoided.
 - Fixing a merge bug or tuning `MAX_EDITS` is a format change, not a refactor.
 

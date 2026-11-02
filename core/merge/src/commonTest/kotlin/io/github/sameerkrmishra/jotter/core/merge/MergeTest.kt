@@ -167,6 +167,16 @@ class MergeTest {
     }
 
     @Test
+    fun aLineAddedByTwoReplacementsAppearsTwice() {
+        assertClean(
+            "a\nB\nmilk\nmilk\nC\n",
+            "a\nb\nc\n",
+            "a\nB\nmilk\nc\n",
+            "a\nb\nmilk\nC\n",
+        )
+    }
+
+    @Test
     fun aLastLineWithoutABreakAddedOnBothSidesIsAddedOnce() {
         assertClean("a\nB\nx", "a\nb\n", "a\nB\nx", "a\nb\nx")
     }
