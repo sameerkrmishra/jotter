@@ -207,6 +207,31 @@ class ConflictResolverTest {
             assertTrue(pc.notes.list(NoteFilter(state = NoteState.TRASHED)).isEmpty())
         }
 
+    @Test
+    fun aHeadThatWaitedForADeletedConflictMergesOnTheNextSyncWithNothingNew(): TestResult =
+        runTest {
+            val third = open("third")
+            val note = phone.notes.create("", "line\nother\n")
+            exchange()
+            engine(third).sync(target)
+            phone.notes.edit(note.id, note.revisionId, "", "phone\nother\n")
+            pc.notes.edit(note.id, note.revisionId, "", "pc\nother\n")
+            exchange()
+            third.notes.edit(note.id, note.revisionId, "", "line\nthird\n")
+            engine(third).sync(target)
+            exchange()
+            phone.notes.setState(note.id, NoteState.TRASHED)
+            phone.notes.deleteForever(note.id)
+            assertNull(phone.notes.get(note.id))
+
+            val report = engine(phone).sync(target)
+
+            assertEquals(1, (report as SyncResult.Completed).report.merges)
+            assertEquals("line\nthird\n", phone.notes.get(note.id)?.body)
+            assertEquals(NoteState.TRASHED, phone.notes.get(note.id)?.state)
+            third.close()
+        }
+
     private companion object {
         const val ROUNDS = 3
     }

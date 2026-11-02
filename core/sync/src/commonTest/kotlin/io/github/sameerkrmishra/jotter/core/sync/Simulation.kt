@@ -378,9 +378,25 @@ internal class Simulation(
             }
         }
         expected.groupBy { it.noteId }.forEach { (noteId, revisions) ->
-            check(RevisionGraph(revisions).isComplete) { "Seed $seed: $noteId lacks an ancestor" }
+            val graph = RevisionGraph(revisions)
+            check(graph.isComplete) { "Seed $seed: $noteId lacks an ancestor" }
+            revisions.filter { it.kind != RevisionKind.User }.forEach { assertRederives(graph, it) }
         }
         return expected.size
+    }
+
+    /**
+     * A merge must follow from its parents and their ancestors alone. A device that merged on too
+     * little would still converge, on a revision no other device would have computed.
+     */
+    private fun assertRederives(
+        graph: RevisionGraph,
+        merge: Revision,
+    ) {
+        val (a, b) = merge.parents.map { checkNotNull(graph[it]) }
+        check(mergeRevisions(graph, a, b) == merge) {
+            "Seed $seed: merge ${merge.id} does not follow from its parents"
+        }
     }
 
     /** Everything a device shows or decides from, without what is local to it. */

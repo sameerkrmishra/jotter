@@ -96,5 +96,29 @@ for 200. For more, set the environment variables `JOTTER_SIM_CASES` and
 JOTTER_SIM_START=1000 JOTTER_SIM_CASES=5000 ./gradlew :core:sync:jvmTest --tests ConvergenceTest
 ```
 
+Besides converging, every stored merge must follow from its parents and their
+ancestors: the simulator computes each one again from the final DAG.
+
+Measured 2026-11-02: seeds 1000 to 5999 passed on the JVM, with 160,660 revisions,
+28,827 merges, 4,081 conflicts and 5,082 crashes.
+
+Whether the tests can fail was checked with 17 source mutations, applied by hand with a
+throwaway script. All 17 are caught.
+
+| Caught by the simulator's assertions | Caught by a pinned digest and unit tests only |
+|---|---|
+| No covered heads | Base is the lowest stamp |
+| Merging without all ancestors | A failed write counts as published (the repair hides it) |
+| No pause on an open conflict | A `list` failure reads as empty (no cursor moves anyway) |
+| A hole, or a bad segment, not kept as a gap | Text chosen by argument order |
+| A lost segment not repaired | An edit does not beat a deletion |
+| An existing path not compared | |
+| A cursor committed apart from its revisions | |
+| A tombstone does not close a conflict | |
+
+Three more are caught by unit tests alone: tags as a plain union, a merge's hash not
+checked (the simulator plants no forged merge), and no settling of notes nothing new
+arrived for.
+
 The tests of `SyncEngineTest` each pin one failure rule. Android host tests are
 disabled, as in `core:storage`.
