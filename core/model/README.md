@@ -23,7 +23,7 @@ stay small, stable and fully tested.
 | `HybridLogicalClock` | Issues `HybridTimestamp`s for local events (`now`, optionally `after` a parent's timestamp) and records remote ones (`observe`) |
 | `Stamp` | The one total order of ADR-0003: timestamp, then device id, then revision id |
 | `Stamped<T>` | A last-writer-wins value with the stamp of the revision that wrote it |
-| `Revision` | One immutable version of a note in its DAG, with `RevisionKind` (user or automatic merge, possibly conflicted) and `RevisionContent` (a full `Snapshot` or a `Tombstone`) |
+| `Revision` | One immutable version of a note in its DAG, with `RevisionKind` (user or automatic merge, possibly conflicted), `RevisionContent` (a full `Snapshot` or a `Tombstone`) and, for a resolution, the conflict it closes in `resolves` |
 | `Note` | The current, materialised state of a note that the UI reads |
 
 ## Decisions
