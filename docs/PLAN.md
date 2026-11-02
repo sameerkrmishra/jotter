@@ -95,7 +95,8 @@ jotter/
 │   ├── sync/           # revision DAG, change segments, SyncEngine
 │   └── logging/        # thin wrapper over Kermit + rotating file sink
 ├── backend/
-│   ├── api/            # BlobStore interface + contract test suite
+│   ├── api/            # BlobStore interface
+│   │   └── contract/   # contract test suite, for the tests of other modules
 │   ├── localfolder/    # BlobStore over a filesystem directory
 │   ├── webdav/         # BlobStore over WebDAV (Ktor client)
 │   └── peer/           # BlobStore client for the PC hub server
@@ -266,7 +267,14 @@ interface BlobStore {
 }
 ```
 
-A shared **contract test suite** in `backend/api` runs against every
+`list(prefix)` matches whole path segments, recursively, and `ping` is reachable
+only when the store itself is there: an unplugged drive never reads as an empty
+store. The KDoc of `BlobStore` is the exact definition. The local folder needs a
+marker file for that, written once when the backend is added, and it publishes
+files without hard links on FAT
+([ADR-0012](adr/0012-local-folder-publishing.md)).
+
+A shared **contract test suite** in `backend/api/contract` runs against every
 implementation. A new backend is "done" when it passes.
 
 ### 6.2 Layout on a backend
