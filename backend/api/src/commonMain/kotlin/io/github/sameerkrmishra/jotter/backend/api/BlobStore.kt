@@ -60,7 +60,8 @@ public interface BlobStore {
      * durable, without an error. That is not proof: Linux can report a failed writeback once and
      * then report success. The caller compares the file with what it meant to write (ADR-0004). A
      * retry never reports success for a file it found, because it cannot tell whose file that is
-     * and has no better news about its durability. If the retry fails too, nothing has changed.
+     * and has no better news about its durability. A retry that fails can have published the file
+     * just as the first attempt can, so the same rules apply to the next retry.
      *
      * @throws InvalidBlobPathException if [path] is not valid.
      * @throws BlobAlreadyExistsException if [path] exists, as a file or as a directory.

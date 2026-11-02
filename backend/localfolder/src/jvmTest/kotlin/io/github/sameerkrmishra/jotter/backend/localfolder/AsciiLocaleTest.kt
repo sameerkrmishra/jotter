@@ -19,12 +19,25 @@ internal object AsciiLocaleLister {
         runBlocking {
             println(System.getProperty("sun.jnu.encoding"))
             println(store.list("").joinToString(",") { it.path })
-            try {
-                store.read("café")
-                println("read")
-            } catch (e: BlobStoreException) {
-                println(e::class.simpleName)
-            }
+            val name = "café"
+            val renaming = renamingStore(args[0].toPath())
+            val bytes = byteArrayOf(1)
+            report { store.read(name) }
+            report { store.list(name) }
+            // The name is the last segment under a new directory, so no lookup reaches it.
+            report { store.writeNew("new-for-link/$name", bytes) }
+            report { renaming.writeNew("new-for-rename/$name", bytes) }
+            report { store.writeNew(name, bytes) }
+            report { store.writeNew("$name/below", bytes) }
+        }
+    }
+
+    private suspend fun report(call: suspend () -> Unit) {
+        try {
+            call()
+            println("no failure")
+        } catch (e: BlobStoreException) {
+            println(e::class.simpleName)
         }
     }
 }
@@ -67,10 +80,11 @@ class AsciiLocaleTest {
         assertEquals(0, process.exitValue(), "output: $lines")
         assertNotEquals("UTF-8", lines[0], "the child must not be able to express the name")
         assertEquals("plain", lines[1])
-        assertEquals("BlobStoreFailureException", lines[2])
+        assertEquals(List(CALLS) { "BlobStoreFailureException" }, lines.drop(2))
     }
 
     private companion object {
         const val TIMEOUT_SECONDS = 60L
+        const val CALLS = 6
     }
 }

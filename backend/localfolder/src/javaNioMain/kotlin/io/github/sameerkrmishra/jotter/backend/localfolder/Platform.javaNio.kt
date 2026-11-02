@@ -40,25 +40,35 @@ internal actual val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 
 internal actual val systemFileSystem: FileSystem = FileSystem.SYSTEM
 
+/**
+ * The only way to `java.nio` in this file. A valid blob path can be one that this process's
+ * encoding cannot express, such as a non-ASCII one under `LC_ALL=C`, and okio's `toNioPath` then
+ * throws an unchecked exception that would escape the store. okio's own calls in common code all
+ * follow a [strictStat] of the same path, so they get this failure first.
+ */
+private fun nio(path: Path): java.nio.file.Path =
+    try {
+        path.toNioPath()
+    } catch (e: InvalidPathException) {
+        throw IOException("Cannot express $path in this locale", e)
+    }
+
 internal actual fun strictStat(path: Path): FolderEntry? =
     try {
         val attributes =
             Files.readAttributes(
-                path.toNioPath(),
+                nio(path),
                 BasicFileAttributes::class.java,
                 LinkOption.NOFOLLOW_LINKS,
             )
         FolderEntry(attributes.isDirectory, attributes.isRegularFile, attributes.size())
     } catch (_: NoSuchFileException) {
         null
-    } catch (e: InvalidPathException) {
-        // A valid blob path that this process's encoding cannot express. Every call stats first.
-        throw IOException("Cannot express $path in this locale", e)
     }
 
 internal actual fun strictListNames(directory: Path): List<String> =
     try {
-        Files.newDirectoryStream(directory.toNioPath()).use { stream ->
+        Files.newDirectoryStream(nio(directory)).use { stream ->
             stream.map { it.fileName.toString() }.filter(::isRepresentable)
         }
     } catch (e: DirectoryIteratorException) {
@@ -81,7 +91,7 @@ internal actual fun systemHardLink(
     target: Path,
 ): LinkResult =
     try {
-        Files.createLink(target.toNioPath(), source.toNioPath())
+        Files.createLink(nio(target), nio(source))
         LinkResult.LINKED
     } catch (_: FileAlreadyExistsException) {
         LinkResult.TARGET_EXISTS
@@ -96,7 +106,7 @@ internal actual fun systemHardLink(
 
 private fun fileStoreType(path: Path): String =
     try {
-        Files.getFileStore(path.parent?.toNioPath()).type()
+        Files.getFileStore(nio(path.parent ?: path)).type()
     } catch (_: IOException) {
         ""
     }
@@ -120,7 +130,7 @@ internal actual fun withProcessFileLock(
 ) {
     val channel =
         try {
-            FileChannel.open(file.toNioPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+            FileChannel.open(nio(file), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
         } catch (e: IOException) {
             block(e)
             return
@@ -139,7 +149,7 @@ internal actual fun withProcessFileLock(
 
 internal actual fun syncDirectory(directory: Path) {
     try {
-        FileChannel.open(directory.toNioPath(), StandardOpenOption.READ).use { it.force(true) }
+        FileChannel.open(nio(directory), StandardOpenOption.READ).use { it.force(true) }
     } catch (e: IOException) {
         if (!isUnsupportedSyncFailure(e)) throw e
     }

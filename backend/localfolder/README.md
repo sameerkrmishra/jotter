@@ -43,7 +43,9 @@ makes the store unreachable until it is initialised again.
 - **`writeNew` on FAT or exFAT** has the same guarantee as elsewhere for all
   processes on one machine, through a lock file instead of a hard link. ADR-0012
   lists exactly which setups keep it, and which do not, such as several machines
-  on a share with local locks and no hard links.
+  on a share with local locks and no hard links. On the JVM, exFAT through FUSE
+  (`fuseblk`) on a system that translates error messages fails every write: the
+  message cannot be recognised, and the file store's type does not give it away.
 - **Link errors.** Only "hard links are unsupported here" leads to the rename. Any
   other link error fails the write, as a rename could replace a file.
 - **Locks.** Hard links work without the lock. Without hard links a lock failure
@@ -54,8 +56,10 @@ makes the store unreachable until it is initialised again.
   report a failed writeback only once. Only "not supported" results are tolerated.
   See the KDoc of `BlobStore.writeNew`.
 - **Names this process cannot express**, such as a non-ASCII name under `LC_ALL=C`
-  on the JVM, are skipped by `list` like other invalid names, and `read` and
-  `writeNew` of such a path fail with `BlobStoreFailureException`.
+  on the JVM, are skipped by `list` like other invalid names. `writeNew` of such a
+  path fails with `BlobStoreFailureException`, and may leave a new empty directory
+  above it, which does not show. `read` fails the same way, or with
+  `BlobNotFoundException` if the directory above it does not exist.
 - **Android `content://` folders are not supported**, because the store needs a
   real file path. M5 must address them.
 - **Case.** On FAT `a` and `A` are one file, so the second write fails with
