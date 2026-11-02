@@ -157,6 +157,25 @@ class MergeTest {
     }
 
     @Test
+    fun theOrderOfATickAndTwoEqualAdditionsCanChangeACountOfALineTheNoteHolds() {
+        val base = "- [ ] a\nmilk\n- [ ] c\nmilk\n"
+        val ticked = "- [x] a\nmilk\n- [ ] c\nmilk\n"
+        val added = "- [ ] a\nmilk\nmilk\n- [ ] c\nmilk\n"
+
+        val additionsFirst = assertIs<Clean>(merge(base, added, added)).text
+        val tickFirst = assertIs<Clean>(merge(base, ticked, added)).text
+
+        assertEquals(
+            Clean("- [x] a\nmilk\nmilk\n- [ ] c\nmilk\n"),
+            merge(base, additionsFirst, ticked),
+        )
+        assertEquals(
+            Clean("- [x] a\nmilk\nmilk\nmilk\n- [ ] c\nmilk\n"),
+            merge(base, tickFirst, added),
+        )
+    }
+
+    @Test
     fun anInsertionMatchingTheFarEndOfTheChangeIsKept() {
         assertClean("new\nA\nnew\nb\n", "a\nb\n", "new\nA\nb\n", "a\nnew\nb\n")
     }
