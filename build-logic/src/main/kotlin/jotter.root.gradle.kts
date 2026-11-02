@@ -31,6 +31,7 @@ kover {
                 // classes, with one branch per field and per default. Such classes go in a `dto`
                 // package of their module, named here, and stay plain data (CONTRIBUTING.md).
                 classes("*.keepimport.dto.*")
+                classes("*.sync.dto.*")
                 // Thin platform entry points (Activity, `main()`) are covered by manual and UI
                 // testing instead. Name them here as they are added, e.g. "*.MainKt".
                 classes("*.app.cli.MainKt")

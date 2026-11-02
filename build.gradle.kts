@@ -13,6 +13,7 @@ dependencies {
     kover(projects.core.model)
     kover(projects.core.sqlite)
     kover(projects.core.storage)
+    kover(projects.core.sync)
     kover(projects.interop.keepImport)
     kover(projects.interop.markdownExport)
 }
