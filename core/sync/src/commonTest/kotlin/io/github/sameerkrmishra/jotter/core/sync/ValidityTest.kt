@@ -269,6 +269,24 @@ class ValidityTest {
         }
 
     @Test
+    fun aDeletionCanWinAnIdAndEndsTheNoteEverywhere(): TestResult =
+        runTest {
+            val deleted = userRevision(2, 15, root) { RevisionContent.Tombstone }
+            val edit = textRevision(2, 20, "my words", root)
+            assertTrue(revisionJson(deleted) < revisionJson(edit))
+            assertSameInEveryOrder(root.noteId, listOf(listOf(root, edit), listOf(deleted)))
+            val store = device("deleted")
+            val blobs = InMemoryBlobStore()
+            plant(blobs, listOf(root, edit))
+            store.report(blobs)
+            plant(blobs, listOf(deleted))
+            store.report(blobs)
+            assertNull(store.notes.get(root.noteId))
+            val listed = store.sync.invalidRevisions().single()
+            assertEquals("my words", listed.body)
+        }
+
+    @Test
     fun theWinningCopyOfAnIdIsPassedOn(): TestResult =
         runTest {
             val relay = device("relay")

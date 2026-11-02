@@ -3,6 +3,7 @@ package io.github.sameerkrmishra.jotter.core.storage
 import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
 import io.github.sameerkrmishra.jotter.core.model.Revision
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
+import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.bind
 import io.kotest.property.arbitrary.int
@@ -27,6 +28,24 @@ class RevisionStoreTest {
                     assertEquals(revision, store.get(revision.id))
                     // Note ids are random, so this is the note's only revision.
                     assertEquals(listOf(revision), store.forNote(revision.noteId))
+                }
+            }
+        }
+
+    @Test
+    fun anyShapeOfRevisionCanReplaceAnotherOfItsKind() =
+        runDatabaseTest {
+            withDatabase { db, _ ->
+                val store = RevisionStore(db.revisionQueries)
+                checkAll(revisions, revisions) { first, second ->
+                    if ((first.kind == RevisionKind.User) == (second.kind == RevisionKind.User)) {
+                        store.insert(first)
+                        val replacement = second.copy(id = first.id)
+
+                        store.replace(replacement)
+
+                        assertEquals(replacement, store.get(first.id))
+                    }
                 }
             }
         }
