@@ -115,5 +115,14 @@ missing from a live head must be explained by a person: an edit, a resolution, o
 deletion with no edit beside it. A line that only a conflict's losing side has must have
 an open or answered conflict.
 
+Measured 2026-11-03 on the final code: seeds 50000 to 56999 passed on the JVM, with
+166,036 revisions, 25,780 merges, 3,488 conflicts, 5,510 crashes, 8,396 bad revisions
+and 7,961 restored backups; seeds 70000 to 70039 passed on `linuxX64`.
+
+Whether the tests can fail was checked with 52 source mutations, applied one at a time by a
+throwaway script. All 52 are caught, 19 by the simulator's own assertions at 200 seeds and
+the rest by unit tests. A merge base that walks through tombstones, and a tombstone that
+closes a conflict beside an edit, take more seeds: the simulator finds both within 6000.
+
 The tests of `SyncEngineTest` each pin one failure rule. Android host tests are
 disabled, as in `core:storage`.
