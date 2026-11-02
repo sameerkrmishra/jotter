@@ -303,15 +303,18 @@ class ValidityTest {
     }
 
     @Test
-    fun aTagBehindATombstoneIsNotAnAddition() {
-        val base = textRevision(1, 10, "text", tags = setOf("kept"))
-        val tagged = textRevision(2, 20, "text", base, tags = setOf("kept", "behind"))
-        val deleted = userRevision(3, 30, tagged) { RevisionContent.Tombstone }
-        val all = listOf(base, tagged, deleted)
-        val graph = RevisionGraph(all)
-        assertEquals(setOf(base.id, tagged.id), graph.ancestors(tagged.id) - deleted.id)
-        assertEquals(setOf(deleted.id, tagged.id, base.id), graph.ancestors(deleted.id))
+    fun aTagAddedBehindATombstoneIsNotAnAddition() {
+        val base = textRevision(1, 10, "text", tags = setOf("t"))
+        val removed = textRevision(2, 20, "text", base, tags = emptySet())
+        val addedBack = textRevision(3, 30, "text", removed, tags = setOf("t"))
+        val deleted = userRevision(4, 40, addedBack) { RevisionContent.Tombstone }
+        val other = textRevision(5, 50, "other", base, tags = setOf("t"))
+        val stillRemoved = textRevision(6, 60, "text", removed, tags = emptySet())
+        val all = listOf(base, removed, addedBack, deleted, other, stillRemoved)
+        val back = mergeRevisions(RevisionGraph(all), deleted, other)
+        val graph = RevisionGraph(all + back)
         assertTrue(graph.textAncestors(deleted.id).isEmpty())
+        assertEquals(emptySet(), mergeRevisions(graph, back, stillRemoved).text.tags)
     }
 
     @Test
@@ -461,7 +464,12 @@ class ValidityTest {
             phone.notes.create("", "new")
             phone.report(blobs)
             assertEquals(files, blobs.list(BackendLayout.deviceFolder(old)))
-            assertTrue(blobs.list(BackendLayout.deviceFolder(renewed.new)).size > 1)
+            val path = BackendLayout.segmentPath(renewed.new, 1)
+            val pushed = JsonGzipCodec().decode(blobs.read(path)).revisions
+            assertTrue(
+                pushed.none { it.noteId == early.id || it.noteId == late.id },
+                "What the old folder holds needs no second copy: $pushed",
+            )
         }
 
     @Test

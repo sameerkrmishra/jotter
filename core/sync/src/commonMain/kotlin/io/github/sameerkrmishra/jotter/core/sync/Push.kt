@@ -118,9 +118,8 @@ internal class Pusher(
         }
         val (segments, tooLarge) = batches.split(unpushedRevisions())
         tooLarge.forEach { issues += SyncIssue.RevisionTooLarge(it.id) }
-        val highestListed = listed.maxOrNull() ?: 0
         for (revisions in segments) {
-            if (!publish(record(revisions, highestListed))) return
+            if (!publish(record(revisions))) return
         }
     }
 
@@ -128,16 +127,13 @@ internal class Pusher(
         store.unpushed(backendId).map { id -> checkNotNull(store.revision(id)) { "$id is gone" } }
 
     /**
-     * Numbers the new segment above both what this device ever used and what the folder holds. A
-     * backend that was forgotten and added again keeps its files (PLAN.md §6.5), and those numbers
-     * are taken. A number is never used twice, even if its file is gone: a reader may be past it.
+     * Numbers the new segment above what this device ever used, which includes what its folder
+     * held when the cycle began (ADR-0014). A number is never used twice, even if its file is gone:
+     * a reader may be past it.
      */
-    private fun record(
-        revisions: List<Revision>,
-        highestListed: Long,
-    ): Long =
+    private fun record(revisions: List<Revision>): Long =
         store.write {
-            val number = maxOf(store.lastSegmentNumber(backendId), highestListed) + 1
+            val number = store.lastSegmentNumber(backendId) + 1
             store.recordSegment(backendId, number, revisions.map { it.id })
             number
         }
