@@ -54,10 +54,9 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 | `note_tag` | The current tags of each note. The tag list is a `GROUP BY` over it; there is no `tag` table |
 | `note_fts` | FTS5 index over `note.title` and `note.body` (external content), kept in step by triggers on `note` |
 
-| `sync_cursor`, `sync_gap` | Per backend and device, the last segment processed, and numbers below it that were not applied |
+| `sync_read` | Per backend, the files read in each device folder, by name |
 | `sync_segment`, `backend_revision` | This device's segments on each backend, and what is known to be there |
 | `conflict`, `hidden_head`, `invalid_revision` | Open conflicts with the text that lost, heads a note does not show, and text that does not count: mostly caches of what the revisions say, kept by `core:sync` |
-| `sync_last_number` | The last segment number used on a backend. It survives forgetting the backend, so a number is never used twice |
 
 `backend` (PLAN.md §4) comes with M4, as a migration.
 

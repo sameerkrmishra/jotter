@@ -178,6 +178,16 @@ class SyncEngineTest {
         }
 
     @Test
+    fun aWriterDoesNotReadItsOwnFileBack(): TestResult =
+        runTest {
+            val phone = device("phone")
+            phone.notes.create("t", "body")
+            val blobs = InMemoryBlobStore()
+            assertEquals(1, phone.sync(blobs).pushedSegments)
+            assertEquals(0, phone.sync(blobs).appliedSegments)
+        }
+
+    @Test
     fun concurrentEditsMergeToTheSameRevisionOnBothDevices(): TestResult =
         runTest {
             val phone = device("phone")

@@ -45,7 +45,7 @@ write a new ADR and mark the old one as amended or superseded.
 | [0011](0011-touching-changes-and-merge-format.md) | Touching changes merge, and the merge rules are part of the sync format | Accepted, amended by 0013 |
 | [0012](0012-local-folder-publishing.md) | Publishing files in a local folder, and telling a store from a mount point | Proposed |
 | [0013](0013-merge-base-and-covered-heads.md) | The merge base, covered heads and the canonical form of a merge | Proposed |
-| [0014](0014-sync-failure-handling.md) | Gaps, repairs and limits in the sync cycle | Proposed |
+| [0014](0014-sync-failure-handling.md) | Failures in the sync cycle: validity, content names, repairs, restored backups and limits | Proposed |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.

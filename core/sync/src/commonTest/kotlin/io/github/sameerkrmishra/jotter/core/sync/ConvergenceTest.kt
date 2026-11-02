@@ -45,15 +45,26 @@ class ConvergenceTest {
     private companion object {
         const val FIRST_SEED = 1L
 
-        /** The first seed to catch each bug the simulator found or was shown to find. */
+        /** First catches of real bugs and of mutants, on this generator and on earlier ones. */
         val REGRESSION_SEEDS =
             listOf(
+                1L,
+                10L,
                 11L,
+                19L,
+                23L,
+                37L,
                 40L,
+                62L,
+                93L,
+                156L,
                 263L,
+                296L,
+                376L,
                 384L,
                 715L,
                 1050L,
+                1207L,
                 1236L,
                 2091L,
                 3621L,

@@ -182,8 +182,7 @@ Local SQLite tables (simplified; the schema is in `core/storage`):
   logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
 - `backend`: configured backends and their settings.
-- `sync_cursor`: per backend, per remote device: the last segment processed,
-  with `sync_gap` for numbers below it that were not applied.
+- `sync_read`: per backend, the files read in each device folder.
 - `sync_segment`, `backend_revision`: this device's segments on each backend, and
   the revisions known to be there.
 
@@ -296,13 +295,17 @@ jotter/
 └── devices/
     ├── <deviceId-A>/
     │   ├── device.json                # name, platform, created
-    │   ├── 000000000001.json.gz       # change segment
-    │   └── 000000000002.json.gz
+    │   ├── 000000000001-<hash>.json.gz  # change segment
+    │   └── 000000000002-<hash>.json.gz
     └── <deviceId-B>/...
 ```
 
-A **segment** is an immutable batch of revisions created on one device, numbered
-sequentially per device.
+A **segment** is an immutable batch of revisions created on one device. Its name
+is a number that rises per device, then a hash of its content: the first 16 bytes of
+the SHA-256 of its JSON, as 32 lowercase hex digits. So a path has one possible
+content, a restored device cannot overwrite anything, and a number used twice gives two
+files, which are both read
+([ADR-0014](adr/0014-sync-failure-handling.md)).
 
 ### 6.3 Sync cycle (per backend)
 
@@ -310,10 +313,10 @@ sequentially per device.
    segment under our own device folder. Re-pushing revisions that arrived from
    other devices is allowed, which lets backends relay between devices that
    never share a backend directly.
-2. **Pull:** list every device folder. For each, read segments past our
-   cursor.
+2. **Pull:** list every device folder, our own too. Read every segment not yet
+   read. Names are compared, not numbers.
 3. **Apply:** insert revisions (idempotent by revision id), recompute heads,
-   merge (§5), update the `note` table and FTS, advance cursors. All in one
+   merge (§5), update the `note` table and FTS, record what was read. All in one
    database transaction. What goes wrong with one segment stays with that segment
    ([ADR-0014](adr/0014-sync-failure-handling.md)).
 
@@ -334,7 +337,7 @@ converge on the next successful sync.
 
 - **Add:** a new backend is seeded by pushing the device's full revision
   history, then syncs normally.
-- **Remove:** stops syncing and deletes local cursors. Remote files stay
+- **Remove:** stops syncing and deletes the local sync records. Remote files stay
   unless the user explicitly chooses "also delete remote data".
 
 ### 6.6 Future encryption seam

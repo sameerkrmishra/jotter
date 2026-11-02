@@ -47,7 +47,7 @@ The merge rules are in
   device, no clock. That is the whole argument for convergence: devices with the same
   revisions make the same merges and show the same note.
 - **Every merge is pure.** `mergeRevisions` takes a graph and two revisions. Database
-  and network code stay in `Reconcile`, `Push` and `Pull`.
+  and network code stay in `Reconcile`, `Pusher` and `Puller`.
 - **The merge base** is the highest-stamped best common ancestor that has text.
 - **Covered heads.** A merge head whose user revisions another head also has does not
   count. Without this, devices out of step merge each other's merges for ever.
@@ -60,8 +60,8 @@ The merge rules are in
   revision and its ancestors. Everything readable is stored and passed on, so one bad
   stamp cannot make devices hold different revisions. The UI must show
   `ConflictResolver.invalid`, or that text is out of sight.
-- **A restored backup takes a new device id** and reads its old folder as another
-  device's, which brings back what it lost (`SyncIssue.DeviceRenewed`).
+- **Files are named by their content**, and pull tracks names, not numbers. A restored
+  backup reads what it lost from its own folder, and nothing can overwrite anything.
 - **`okio`** gives SHA-256 and gzip in common code. It adds no new dependency to the
   project, and `kotlinx-serialization-json` was already used by `interop:keep-import`.
 - **`core:storage` exposes `SyncStore`** to this module: plain reads and writes, no
@@ -86,22 +86,21 @@ one seed: ids, clocks, faults and choices, so a failure names a seed that replay
 
 | In a case | |
 |---|---|
-| Devices | 2 to 5, each on one backend; device 0 relays between all of them. Others can die for good, forget a backend and add it again, or go back to an old backup. A backup can also start a further device |
+| Devices | 2 to 5, each on one backend; device 0 relays between all of them. Others can die for good, forget a backend and add it again, or go back to an old backup, also of a whole disk with a backend on it, with text of one length. A backup can also start a further device |
 | Backends | 1 to 3 |
 | Edits | Create, edit, pin, state, tags, delete forever, imports of one source on several devices |
 | Delivery | Partial sync, files held back from a listing, so segments arrive late and out of order |
-| Faults | `list`, `read` and `writeNew` failures, a write that fails after publishing, outages, lost segments, damaged files, forged merges, bad stamps in a segment with good revisions |
+| Faults | `list`, `read` and `writeNew` failures, a write that fails after publishing, outages, lost segments, damaged files, sound files under a wrong hash, forged merges, bad stamps in a segment with good revisions |
 | Crashes | After a write, after recording a segment, inside the apply transaction; plain restarts |
 | Conflicts | Resolved at random, in all four ways |
 
 Then every fault stops and the living sync until a round changes nothing. They must
 then hold the same revisions, live heads, notes, open conflicts and hidden heads, and
 with everything answered each note must have one live head, which it shows. No forged
-merge or bad stamp may count. Lost files of a backed-up id are left out, because of the
-limit in ADR-0014.
+merge or bad stamp may count, and no line of a body and no title may vanish unexplained.
 
-`check` runs 200 seeds on the JVM and 25 on `linuxX64`, whose debug binary took 12 minutes
-for 200. For more, set the environment variables `JOTTER_SIM_CASES` and
+`check` runs 3000 seeds on the JVM, about 3 minutes here, and 25 on `linuxX64`, whose debug
+binary is far slower, plus `REGRESSION_SEEDS` on both. `nightly.yml` runs 50000 seeds, each night a new range, and opens an issue if one fails. By hand, set `JOTTER_SIM_CASES` and
 `JOTTER_SIM_START`:
 
 ```
@@ -115,14 +114,6 @@ missing from a live head must be explained by a person: an edit, a resolution, o
 deletion with no edit beside it. A line that only a conflict's losing side has must have
 an open or answered conflict.
 
-Measured 2026-11-03 on the final code: seeds 50000 to 56999 passed on the JVM, with
-166,036 revisions, 25,780 merges, 3,488 conflicts, 5,510 crashes, 8,396 bad revisions
-and 7,961 restored backups; seeds 70000 to 70039 passed on `linuxX64`.
-
-Whether the tests can fail was checked with 52 source mutations, applied one at a time by a
-throwaway script. All 52 are caught, 19 by the simulator's own assertions at 200 seeds and
-the rest by unit tests. A merge base that walks through tombstones, and a tombstone that
-closes a conflict beside an edit, take more seeds: the simulator finds both within 6000.
 
 The tests of `SyncEngineTest` each pin one failure rule. Android host tests are
 disabled, as in `core:storage`.
