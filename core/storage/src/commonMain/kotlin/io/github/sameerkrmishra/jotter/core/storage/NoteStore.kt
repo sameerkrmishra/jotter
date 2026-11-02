@@ -2,6 +2,8 @@ package io.github.sameerkrmishra.jotter.core.storage
 
 import app.cash.sqldelight.db.SqlDriver
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
+import io.github.sameerkrmishra.jotter.core.model.NoteId
+import io.github.sameerkrmishra.jotter.core.model.RevisionId
 import io.github.sameerkrmishra.jotter.core.sqlite.openSqliteDriver
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlin.coroutines.CoroutineContext
@@ -20,12 +22,14 @@ internal const val JOTTER_APPLICATION_ID = 0x4A4F5452
  *
  * @property deviceId This installation's identity, created with the database and kept for good.
  * @property notes Creates, changes, lists, observes and searches the notes.
+ * @property sync What `core:sync` reads and writes. Nothing else should use it.
  */
 public class NoteStore private constructor(
     internal val driver: SqlDriver,
     internal val database: JotterDatabase,
     public val deviceId: DeviceId,
     public val notes: NoteService,
+    public val sync: SyncStore,
 ) : AutoCloseable {
     /**
      * Closes the database. Waits for a write running on another thread to finish. The store and
@@ -50,6 +54,7 @@ public class NoteStore private constructor(
          *   is created.
          * @param queryContext Where observation flows run their queries, e.g. an IO dispatcher.
          * @param clock The wall clock that the hybrid logical clock follows.
+         * @param ids Where new ids come from. Random, except in a simulation that must replay.
          * @throws StorageBusyException if another process kept the database locked.
          * @throws IllegalStateException if the file was written by a newer version of Jotter, or
          *   is a SQLite database that is not Jotter's, which is left untouched.
@@ -59,6 +64,7 @@ public class NoteStore private constructor(
             deviceName: String,
             queryContext: CoroutineContext,
             clock: Clock = Clock.System,
+            ids: IdSource = RandomIds,
         ): NoteStore {
             val driver =
                 reportingBusy {
@@ -67,10 +73,11 @@ public class NoteStore private constructor(
             var opened = false
             try {
                 val database = JotterDatabase(driver)
-                val deviceId = reportingBusy { readOrCreateDeviceId(database, deviceName) }
-                val notes = NoteService(database, deviceId, clock, queryContext)
+                val deviceId = reportingBusy { readOrCreateDeviceId(database, deviceName, ids) }
+                val notes = NoteService(database, deviceId, clock, queryContext, ids)
+                val sync = SyncStore(database, deviceId, clock, queryContext, ids)
                 opened = true
-                return NoteStore(driver, database, deviceId, notes)
+                return NoteStore(driver, database, deviceId, notes, sync)
             } finally {
                 if (!opened) driver.close()
             }
@@ -80,13 +87,14 @@ public class NoteStore private constructor(
         private fun readOrCreateDeviceId(
             database: JotterDatabase,
             deviceName: String,
+            ids: IdSource,
         ): DeviceId {
             val queries = database.deviceQueries
             val stored =
                 queries.selectDevice().executeAsOneOrNull()
                     ?: run {
                         queries.insertDeviceIfAbsent(
-                            DeviceId.generate().toString(),
+                            ids.newDeviceId().toString(),
                             deviceName.toStorableText(),
                         )
                         queries.selectDevice().executeAsOne()
@@ -94,4 +102,25 @@ public class NoteStore private constructor(
             return DeviceId.parse(stored.id)
         }
     }
+}
+
+/** Where a [NoteStore] gets new ids. */
+public interface IdSource {
+    /** Returns a new id for a device. */
+    public fun newDeviceId(): DeviceId
+
+    /** Returns a new id for a note. */
+    public fun newNoteId(): NoteId
+
+    /** Returns a new id for a user revision. */
+    public fun newRevisionId(): RevisionId
+}
+
+/** The ids of real use: [DeviceId.generate], [NoteId.generate] and [RevisionId.generate]. */
+public object RandomIds : IdSource {
+    override fun newDeviceId(): DeviceId = DeviceId.generate()
+
+    override fun newNoteId(): NoteId = NoteId.generate()
+
+    override fun newRevisionId(): RevisionId = RevisionId.generate()
 }

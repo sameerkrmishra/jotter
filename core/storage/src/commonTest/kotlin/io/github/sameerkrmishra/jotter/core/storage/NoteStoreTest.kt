@@ -8,6 +8,7 @@ import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.db.SqlSchema
 import app.cash.sqldelight.db.use
 import io.github.sameerkrmishra.jotter.core.sqlite.openSqliteDriver
+import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -78,7 +79,7 @@ class NoteStoreTest {
     @Test
     fun aFileWithAnotherApplicationIdIsRejectedAndLeftUntouched() =
         withTempDir { dir ->
-            openSqliteDriver(dir.path, EmptySchemaVersion1, applicationId = 1).use { }
+            openSqliteDriver(dir.path, EmptySchemaOfThisVersion, applicationId = 1).use { }
             val before = dir.bytes()
 
             val error = assertFailsWith<IllegalStateException> { openStore(dir.path) }
@@ -91,7 +92,7 @@ class NoteStoreTest {
     fun aSqliteFileWithTablesButNoVersionIsRejectedAndLeftUntouched() =
         withTempDir { dir ->
             // A mistyped path: a file of some other program, which uses neither pragma.
-            openSqliteDriver(dir.path, EmptySchemaVersion1, applicationId = 1).use { other ->
+            openSqliteDriver(dir.path, EmptySchemaOfThisVersion, applicationId = 1).use { other ->
                 other.execute(null, "CREATE TABLE theirs(id INTEGER PRIMARY KEY)", 0)
                 other.execute(null, "PRAGMA application_id = 0", 0)
                 other.execute(null, "PRAGMA user_version = 0", 0)
@@ -107,7 +108,7 @@ class NoteStoreTest {
     @Test
     fun aDatabaseWithJottersIdButNoneOfItsTablesFailsAndIsClosed() =
         withTempDir { dir ->
-            openSqliteDriver(dir.path, EmptySchemaVersion1, JOTTER_APPLICATION_ID).use { }
+            openSqliteDriver(dir.path, EmptySchemaOfThisVersion, JOTTER_APPLICATION_ID).use { }
 
             val error = assertFailsWith<Exception> { openStore(dir.path) }
             assertContains(error.message.orEmpty(), "no such table: device")
@@ -115,8 +116,8 @@ class NoteStoreTest {
             assertFalse(dir.exists("-wal"))
         }
 
-    private object EmptySchemaVersion1 : SqlSchema<QueryResult.Value<Unit>> {
-        override val version: Long = 1
+    private object EmptySchemaOfThisVersion : SqlSchema<QueryResult.Value<Unit>> {
+        override val version: Long = JotterDatabase.Schema.version
 
         override fun create(driver: SqlDriver): QueryResult.Value<Unit> = QueryResult.Unit
 

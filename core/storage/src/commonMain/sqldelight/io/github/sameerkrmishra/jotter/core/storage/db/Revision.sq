@@ -31,6 +31,9 @@ CREATE TABLE revision (
   state_hlc_counter INTEGER CHECK (state_hlc_counter BETWEEN 0 AND 2147483647),
   state_device_id TEXT,
   state_revision_id TEXT,
+  -- Revision.resolves: the conflicted merge a user revision closes. Migration 1 appended it, so
+  -- it is the last column. SQLDelight rejects a CHECK on an added column; Revision checks this.
+  resolves TEXT,
   CHECK (
     CASE is_tombstone
       WHEN 0 THEN
@@ -76,13 +79,13 @@ CREATE TABLE revision_tag (
 
 insertSnapshot:
 INSERT INTO revision(
-  id, note_id, hlc_physical, hlc_counter, device_id, is_merge, losing_parent, is_tombstone,
-  title, body,
+  id, note_id, hlc_physical, hlc_counter, device_id, is_merge, losing_parent, resolves,
+  is_tombstone, title, body,
   pinned, pinned_hlc_physical, pinned_hlc_counter, pinned_device_id, pinned_revision_id,
   state, state_hlc_physical, state_hlc_counter, state_device_id, state_revision_id
 ) VALUES (
-  :id, :noteId, :hlcPhysical, :hlcCounter, :deviceId, :isMerge, :losingParent, 0,
-  :title, :body,
+  :id, :noteId, :hlcPhysical, :hlcCounter, :deviceId, :isMerge, :losingParent, :resolves,
+  0, :title, :body,
   :pinned, :pinnedHlcPhysical, :pinnedHlcCounter, :pinnedDeviceId, :pinnedRevisionId,
   :state, :stateHlcPhysical, :stateHlcCounter, :stateDeviceId, :stateRevisionId
 );
@@ -106,6 +109,17 @@ SELECT parent_id FROM revision_parent WHERE revision_id = :revisionId;
 
 selectTags:
 SELECT tag FROM revision_tag WHERE revision_id = :revisionId;
+
+-- The revisions built directly on :parentId, which may have arrived before it.
+selectChildren:
+SELECT revision_id FROM revision_parent WHERE parent_id = :parentId;
+
+-- The notes with more than one head: revisions that no stored revision names as a parent.
+selectNotesWithSeveralHeads:
+SELECT note_id FROM revision
+WHERE id NOT IN (SELECT parent_id FROM revision_parent)
+GROUP BY note_id
+HAVING count(*) > 1;
 
 -- In Stamp order: timestamp, then device id, then revision id.
 selectRevisionsOfNote:

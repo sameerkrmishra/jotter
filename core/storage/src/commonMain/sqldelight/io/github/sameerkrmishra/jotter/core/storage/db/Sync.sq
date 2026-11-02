@@ -1,0 +1,130 @@
+-- What sync keeps per backend (PLAN.md §4, ADR-0004). backend_id is opaque here: the `backend`
+-- table of configured backends comes with their management in M4.
+
+-- The highest segment number processed from one device's folder on one backend. Numbers at or
+-- below it that were not applied are in sync_gap.
+CREATE TABLE sync_cursor (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  last_segment INTEGER NOT NULL,
+  PRIMARY KEY (backend_id, device_id)
+) WITHOUT ROWID;
+
+-- A segment number at or below the cursor that was not applied: unreadable, of a future format,
+-- rejected, or not there. It is tried again on every sync, so one bad file costs one read and
+-- blocks nothing behind it.
+CREATE TABLE sync_gap (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  PRIMARY KEY (backend_id, device_id, number)
+) WITHOUT ROWID;
+
+-- A segment this device owns on a backend. It is recorded with its number and revisions before
+-- writeNew, so a retry writes the same content under the same number (ADR-0004). is_published is
+-- set once writeNew succeeded, or found the same content at the path.
+CREATE TABLE sync_segment (
+  backend_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  is_published INTEGER AS kotlin.Boolean NOT NULL CHECK (is_published IN (0, 1)),
+  PRIMARY KEY (backend_id, number)
+) WITHOUT ROWID;
+
+-- The revisions known to be on a backend. segment is this device's own segment that holds the
+-- revision, or NULL if the revision was found there in another device's segment.
+CREATE TABLE backend_revision (
+  backend_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL REFERENCES revision(id),
+  segment INTEGER,
+  PRIMARY KEY (backend_id, revision_id)
+) WITHOUT ROWID;
+
+CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
+
+-- The open conflicts: conflicted merges that nothing closed, with the text that lost. A cache of
+-- what the revisions say, rewritten whenever a note's revisions change. A row needs the losing
+-- revision's text, so a conflict whose loser has not arrived yet has no row.
+CREATE TABLE conflict (
+  merge_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  losing_revision_id TEXT NOT NULL,
+  losing_title TEXT NOT NULL,
+  losing_body TEXT NOT NULL
+) WITHOUT ROWID;
+
+CREATE INDEX conflict_by_note ON conflict(note_id);
+
+selectCursor:
+SELECT last_segment FROM sync_cursor WHERE backend_id = :backendId AND device_id = :deviceId;
+
+upsertCursor:
+INSERT INTO sync_cursor(backend_id, device_id, last_segment)
+VALUES (:backendId, :deviceId, :lastSegment)
+ON CONFLICT (backend_id, device_id) DO UPDATE SET last_segment = excluded.last_segment;
+
+selectGaps:
+SELECT number FROM sync_gap
+WHERE backend_id = :backendId AND device_id = :deviceId
+ORDER BY number;
+
+insertGap:
+INSERT OR IGNORE INTO sync_gap(backend_id, device_id, number)
+VALUES (:backendId, :deviceId, :number);
+
+deleteGap:
+DELETE FROM sync_gap
+WHERE backend_id = :backendId AND device_id = :deviceId AND number = :number;
+
+selectOwnSegments:
+SELECT number, is_published FROM sync_segment WHERE backend_id = :backendId ORDER BY number;
+
+insertOwnSegment:
+INSERT INTO sync_segment(backend_id, number, is_published) VALUES (:backendId, :number, 0);
+
+markSegmentPublished:
+UPDATE sync_segment SET is_published = 1 WHERE backend_id = :backendId AND number = :number;
+
+-- Revisions not yet on a backend, in arrival order, so a device's own edits keep their order.
+selectUnpushed:
+SELECT id FROM revision
+WHERE id NOT IN (SELECT revision_id FROM backend_revision WHERE backend_id = :backendId)
+ORDER BY seq;
+
+selectRevisionsOfSegment:
+SELECT revision.id
+FROM backend_revision JOIN revision ON revision.id = backend_revision.revision_id
+WHERE backend_revision.backend_id = :backendId AND backend_revision.segment = :segment
+ORDER BY revision.seq;
+
+insertPushedRevision:
+INSERT INTO backend_revision(backend_id, revision_id, segment)
+VALUES (:backendId, :revisionId, :segment);
+
+insertPulledRevision:
+INSERT OR IGNORE INTO backend_revision(backend_id, revision_id, segment)
+VALUES (:backendId, :revisionId, NULL);
+
+deleteBackendCursors:
+DELETE FROM sync_cursor WHERE backend_id = :backendId;
+
+deleteBackendGaps:
+DELETE FROM sync_gap WHERE backend_id = :backendId;
+
+deleteBackendSegments:
+DELETE FROM sync_segment WHERE backend_id = :backendId;
+
+deleteBackendRevisions:
+DELETE FROM backend_revision WHERE backend_id = :backendId;
+
+deleteConflictsOfNote:
+DELETE FROM conflict WHERE note_id = :noteId;
+
+insertConflict:
+INSERT INTO conflict(merge_id, note_id, losing_revision_id, losing_title, losing_body)
+VALUES (:mergeId, :noteId, :losingRevisionId, :losingTitle, :losingBody);
+
+selectConflicts:
+SELECT * FROM conflict ORDER BY note_id, merge_id;
+
+selectConflict:
+SELECT * FROM conflict WHERE merge_id = :mergeId;

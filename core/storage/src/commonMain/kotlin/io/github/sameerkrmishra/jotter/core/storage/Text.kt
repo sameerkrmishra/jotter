@@ -18,7 +18,7 @@ private const val REPLACEMENT_CHARACTER = '\uFFFD'
  * made storable before it reaches the database, so that what is stored reads back equal on every
  * platform. U+FEFF anywhere but at the start round-trips and is kept.
  */
-internal fun String.toStorableText(): String {
+public fun String.toStorableText(): String {
     var index = firstUnstorableIndex()
     if (index < 0) return this
     val text = this

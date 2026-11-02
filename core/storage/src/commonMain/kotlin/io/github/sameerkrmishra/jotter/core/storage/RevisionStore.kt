@@ -78,6 +78,14 @@ internal class RevisionStore(
         }
     }
 
+    /** Returns the ids of the stored revisions built directly on [id]. */
+    fun childrenOf(id: RevisionId): List<RevisionId> =
+        queries.selectChildren(id.toString()).executeAsList().map(::revisionId)
+
+    /** Returns the notes with more than one head. */
+    fun notesWithSeveralHeads(): List<NoteId> =
+        queries.selectNotesWithSeveralHeads().executeAsList().map(NoteId::parse)
+
     /** Inserts [revision]'s `revision` row and its `revision_parent` and `revision_tag` rows. */
     private fun insertRows(revision: Revision) {
         val id = revision.id.toString()
@@ -112,6 +120,7 @@ internal class RevisionStore(
                     deviceId = deviceId,
                     isMerge = isMerge,
                     losingParent = losingParent,
+                    resolves = revision.resolves?.toString(),
                     title = content.title,
                     body = content.body,
                     pinned = content.pinned.value,
@@ -149,6 +158,7 @@ private fun RevisionRow.toRevision(
                 RevisionKind.User
             },
         content = if (is_tombstone) RevisionContent.Tombstone else snapshot(tags),
+        resolves = resolves?.let(::revisionId),
     )
 
 // The table's CHECK constraint guarantees that a snapshot row has all of these columns.

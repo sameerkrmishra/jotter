@@ -54,6 +54,7 @@ public class NoteService internal constructor(
     private val deviceId: DeviceId,
     private val clock: Clock,
     private val queryContext: CoroutineContext,
+    private val ids: IdSource,
 ) {
     private val revisions = RevisionStore(database.revisionQueries)
     private val materialiser = NoteMaterialiser(database.noteQueries)
@@ -79,7 +80,7 @@ public class NoteService internal constructor(
                     pinned = Stamped(pinned, stamp),
                     state = Stamped(NoteState.ACTIVE, stamp),
                 )
-            val revision = userRevision(stamp, NoteId.generate(), parent = null, content)
+            val revision = userRevision(stamp, ids.newNoteId(), parent = null, content)
             store(revision)
             noteOf(revision, content, Instant.fromEpochMilliseconds(stamp.timestamp.physicalMillis))
         }
@@ -281,6 +282,9 @@ public class NoteService internal constructor(
             }
             val stamp = nextStamp(hlc, after = current.updatedAt)
             store(userRevision(stamp, current.id, current.revisionId, RevisionContent.Tombstone))
+            // A tombstone closes the conflicts behind it. One beside it comes back with the next
+            // sync, which rebuilds a note's conflicts whenever the note has another head.
+            database.syncQueries.deleteConflictsOfNote(id.toString())
         }
     }
 
@@ -437,11 +441,11 @@ public class NoteService internal constructor(
     private fun nextStamp(
         hlc: HybridLogicalClock,
         after: HybridTimestamp?,
-    ): Stamp = Stamp(hlc.now(after), deviceId, RevisionId.generate())
+    ): Stamp = Stamp(hlc.now(after), deviceId, ids.newRevisionId())
 
     /** The stamp of an imported revision, at a source time instead of a clock reading. */
     private fun importStamp(physicalMillis: Long): Stamp =
-        Stamp(HybridTimestamp(physicalMillis, counter = 0), deviceId, RevisionId.generate())
+        Stamp(HybridTimestamp(physicalMillis, counter = 0), deviceId, ids.newRevisionId())
 
     private fun userRevision(
         stamp: Stamp,

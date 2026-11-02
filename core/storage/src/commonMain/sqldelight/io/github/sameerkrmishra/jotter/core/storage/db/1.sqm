@@ -1,0 +1,42 @@
+-- Schema 2 (M3): a resolution names the conflict it closes, and what sync keeps per backend.
+ALTER TABLE revision ADD COLUMN resolves TEXT;
+
+CREATE TABLE sync_cursor (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  last_segment INTEGER NOT NULL,
+  PRIMARY KEY (backend_id, device_id)
+) WITHOUT ROWID;
+
+CREATE TABLE sync_gap (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  PRIMARY KEY (backend_id, device_id, number)
+) WITHOUT ROWID;
+
+CREATE TABLE sync_segment (
+  backend_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  is_published INTEGER AS kotlin.Boolean NOT NULL CHECK (is_published IN (0, 1)),
+  PRIMARY KEY (backend_id, number)
+) WITHOUT ROWID;
+
+CREATE TABLE backend_revision (
+  backend_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL REFERENCES revision(id),
+  segment INTEGER,
+  PRIMARY KEY (backend_id, revision_id)
+) WITHOUT ROWID;
+
+CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
+
+CREATE TABLE conflict (
+  merge_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  losing_revision_id TEXT NOT NULL,
+  losing_title TEXT NOT NULL,
+  losing_body TEXT NOT NULL
+) WITHOUT ROWID;
+
+CREATE INDEX conflict_by_note ON conflict(note_id);
