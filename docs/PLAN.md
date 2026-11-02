@@ -439,7 +439,7 @@ Tasks inside a milestone that touch different modules run in parallel.
 | M3 | Sync engine | `core/merge` (diff3), `core/sync`, `backend/api` + contract tests, `backend/localfolder`, conflict UI | Property-based tests: N simulated devices with random offline edits always converge |
 | M4 | WebDAV + PC hub | `backend/webdav` (tested against a containerised WebDAV server), `server` peer endpoint, backend management UI (add, remove, status, last sync) | Desktop ↔ mailbox.org ↔ second desktop converge |
 | M5 | Android | `app/android`, Share-to target, WorkManager sync, F-Droid metadata and reproducible build, CI emulator job (API 26 + 36) running `connectedAndroidDeviceTest` (TODO from §8) | Phone and PC converge over Tailscale and over WebDAV |
-| M6 | v1.0 hardening | ADR-0007 and ADR-0008, debug log export, error states, backup/restore docs, user guide, release | Tagged v1.0 on GitHub, APK + AppImage/Flatpak |
+| M6 | v1.0 hardening | ADR-0007 and ADR-0008, debug log export, error states, backup/restore docs (including how to recover a damaged segment: remove the backend on a device that holds its revisions and add it again, ADR-0014), user guide, release | Tagged v1.0 on GitHub, APK + AppImage/Flatpak |
 
 **Later:** web app, E2E encryption, multi-user + login, Dropbox/Drive/S3,
 Neovim/Emacs plugins, log compaction, home-screen widget.

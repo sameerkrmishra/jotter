@@ -10,6 +10,7 @@ import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
 import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import io.github.sameerkrmishra.jotter.core.storage.NoteTooLargeException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
@@ -243,6 +244,52 @@ class LostHistoryTest {
             assertFailsWith<NoSuchHiddenHeadException> {
                 resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepShown)
             }
+        }
+
+    /** Settling builds on the shown head, names the hidden one, and takes its text if asked. */
+    @Test
+    fun settlingAHiddenHeadWithItsOwnTextBuildsOnTheShownHead(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val reader = world.reader
+            val shown = assertNotNull(reader.notes.get(world.note.id))
+            val resolver = ConflictResolver(reader)
+            val hidden = resolver.hidden().single()
+
+            val settled = resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepLosing)
+
+            assertEquals(hidden.body, settled?.body)
+            val revision = assertNotNull(settled?.revisionId?.let(reader.sync::revision))
+            assertEquals(setOf(shown.revisionId), revision.parents)
+            assertEquals(hidden.revisionId, revision.resolves)
+        }
+
+    @Test
+    fun settlingAHiddenHeadByKeepingTheShownTextChangesNoText(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val shown = assertNotNull(world.reader.notes.get(world.note.id))
+            val resolver = ConflictResolver(world.reader)
+            val hidden = resolver.hidden().single()
+            val settled = resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepShown)
+            assertEquals(shown.body, settled?.body)
+            assertTrue(settled?.revisionId != shown.revisionId)
+        }
+
+    @Test
+    fun aHiddenHeadCannotBeSettledWithTextOverTheCap(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val resolver = ConflictResolver(world.reader)
+            val hidden = resolver.hidden().single()
+            val tooLong = ConflictResolution.Edited("", "x".repeat(MAX_NOTE_CHARS + 1))
+            assertFailsWith<NoteTooLargeException> {
+                resolver.settleHidden(hidden.revisionId, tooLong)
+            }
+            assertEquals(hidden, resolver.hidden().single())
         }
 
     @Test

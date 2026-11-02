@@ -28,6 +28,14 @@ kotlin {
     }
 }
 
+// The simulator reads its seed range from these. As task inputs, a new range is a new run, and the
+// result of another range is never taken from the cache. See scripts/simulate.sh.
+tasks.withType<AbstractTestTask>().configureEach {
+    listOf("JOTTER_SIM_START", "JOTTER_SIM_CASES").forEach { name ->
+        inputs.property(name, providers.environmentVariable(name).orElse(""))
+    }
+}
+
 // core:storage's database needs SQLite, whose Android artifact has it only for device ABIs. The
 // same tests run on the JVM target and on linuxX64 (see core/storage/build.gradle.kts).
 tasks.named { it == "testAndroidHostTest" }.configureEach {

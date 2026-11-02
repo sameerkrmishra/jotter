@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.core.sync
 
 import io.github.sameerkrmishra.jotter.backend.api.BlobAlreadyExistsException
+import io.github.sameerkrmishra.jotter.backend.api.BlobNotFoundException
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.Revision
@@ -79,9 +80,11 @@ internal class SegmentBatches(
 /**
  * Step 1 of the sync cycle (ADR-0004): publishes this device's segments on one backend. A segment
  * is recorded with its name and revisions before it is written, and from then on it is never
- * changed or given up: every failure of `writeNew`, a retry's too, may have published the file, so
- * only a success or a file already at that path marks it as published. The name holds the content
- * hash, so a file there is this same segment (ADR-0014).
+ * changed: every failure of `writeNew`, a retry's too, may have published the file, so only a
+ * success or a sound file already at that path marks it as published. `BlobStore.writeNew` asks the
+ * caller to compare such a file. A file there that does not have the name's hash is damaged and can
+ * never be repaired, so the segment is given up, and its revisions go out in a new file with
+ * another number and so another name (ADR-0014).
  */
 internal class Pusher(
     private val store: SyncStore,
@@ -92,6 +95,9 @@ internal class Pusher(
 ) {
     private val batches = SegmentBatches(seams.maxSegmentBytes)
     private val issues = mutableListOf<SyncIssue>()
+
+    /** The highest number known to be taken in this device's folder. */
+    private var highestSeen = 0L
 
     /** The segments published in this cycle. */
     var pushed: Int = 0
@@ -107,15 +113,15 @@ internal class Pusher(
      */
     suspend fun push(listed: List<SegmentFile>) {
         val names = listed.mapTo(HashSet()) { it.name }
+        highestSeen = listed.maxOfOrNull { it.number } ?: 0
         store
             .ownSegments(backendId)
             .filter { !it.isPublished || it.name !in names }
             .forEach { publish(it.number, it.name) }
         val (segments, tooLarge) = batches.split(unpushedRevisions())
         tooLarge.forEach { issues += SyncIssue.RevisionTooLarge(it.id) }
-        val listedNumber = listed.maxOfOrNull { it.number } ?: 0
         for (revisions in segments) {
-            val (number, name) = record(revisions, listedNumber)
+            val (number, name) = record(revisions)
             publish(number, name)
         }
     }
@@ -127,13 +133,10 @@ internal class Pusher(
      * Numbers the new segment above what this device wrote and what its folder holds. Numbers only
      * order the files, so a number used twice after a restore does no harm (ADR-0014).
      */
-    private fun record(
-        revisions: List<Revision>,
-        listedNumber: Long,
-    ): Pair<Long, String> =
+    private fun record(revisions: List<Revision>): Pair<Long, String> =
         store.write {
             val written = store.ownSegments(backendId).maxOfOrNull { it.number } ?: 0
-            val number = maxOf(written, listedNumber) + 1
+            val number = maxOf(written, highestSeen) + 1
             val hash = seams.codec.hash(Segment(device, number, revisions))
             val name = BackendLayout.segmentName(number, hash)
             store.recordSegment(backendId, number, name, revisions.map { it.id })
@@ -146,10 +149,15 @@ internal class Pusher(
     ) {
         seams.probe.at(SyncPoint.SEGMENT_RECORDED)
         val segment = Segment(device, number, store.revisionsOfSegment(backendId, number))
+        val path = BackendLayout.segmentPath(device, name)
         try {
-            blobs.writeNew(BackendLayout.segmentPath(device, name), seams.codec.encode(segment))
+            blobs.writeNew(path, seams.codec.encode(segment))
         } catch (_: BlobAlreadyExistsException) {
-            // The name holds the content hash, so this is the same segment, written before.
+            if (!holdsSegment(path, seams.codec.hash(segment))) {
+                highestSeen = maxOf(highestSeen, number)
+                store.abandonSegment(backendId, number)
+                return
+            }
         }
         seams.probe.at(SyncPoint.SEGMENT_WRITTEN)
         store.write {
@@ -158,4 +166,18 @@ internal class Pusher(
         }
         pushed++
     }
+
+    /** A file was at [path], or something else was: a failure to read it is not an answer. */
+    private suspend fun holdsSegment(
+        path: String,
+        hash: String,
+    ): Boolean =
+        try {
+            seams.codec.decode(blobs.read(path), hash)
+            true
+        } catch (_: SegmentFormatException) {
+            false
+        } catch (_: BlobNotFoundException) {
+            false
+        }
 }

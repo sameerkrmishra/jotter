@@ -4,8 +4,10 @@ import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
+import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import io.github.sameerkrmishra.jotter.core.storage.NoteTooLargeException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
@@ -158,6 +160,40 @@ class ConflictResolverTest {
             val conflict = conflicts.open().single()
             conflicts.resolve(conflict.mergeId, ConflictResolution.Edited("new\u0000", "both"))
             assertEquals("new�", phone.notes.get(note.id)?.title)
+        }
+
+    @Test
+    fun anEditedResolutionOverTheCapIsRefusedAndTheConflictStays(): TestResult =
+        runTest {
+            val (_, conflicts) = conflicted()
+            val mergeId = conflicts.open().single().mergeId
+            val tooLong = ConflictResolution.Edited("", "x".repeat(MAX_NOTE_CHARS + 1))
+            assertFailsWith<NoteTooLargeException> { conflicts.resolve(mergeId, tooLong) }
+            assertEquals(mergeId, conflicts.open().single().mergeId)
+        }
+
+    /** One device deletes and another edits on top of a conflict, in either order of time. */
+    @Test
+    fun theHeadOfAConflictHasTextWhicheverHeadComesFirst(): TestResult =
+        runTest {
+            listOf(true, false).forEach { deletesFirst ->
+                val (note, conflicts) = conflicted()
+                val conflict = conflicts.open().single { it.noteId == note.id }
+                val shown = assertNotNull(pc.notes.get(note.id))
+                val delete = {
+                    phone.notes.setState(note.id, NoteState.TRASHED)
+                    phone.notes.deleteForever(note.id)
+                }
+                if (deletesFirst) delete()
+                pc.notes.edit(note.id, shown.revisionId, "title", "kept")
+                if (!deletesFirst) delete()
+                exchange()
+
+                assertEquals("kept", conflicts.details(conflict.mergeId)?.shownBody)
+                conflicts.resolve(conflict.mergeId, ConflictResolution.KeepShown)
+                assertEquals("kept", phone.notes.get(note.id)?.body)
+                exchange()
+            }
         }
 
     @Test

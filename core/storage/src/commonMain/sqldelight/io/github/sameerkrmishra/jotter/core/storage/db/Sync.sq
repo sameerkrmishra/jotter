@@ -87,6 +87,12 @@ VALUES (:backendId, :number, :name, 0);
 markSegmentPublished:
 UPDATE sync_segment SET is_published = 1 WHERE backend_id = :backendId AND number = :number;
 
+deleteOwnSegment:
+DELETE FROM sync_segment WHERE backend_id = :backendId AND number = :number;
+
+deleteRevisionsOfSegment:
+DELETE FROM backend_revision WHERE backend_id = :backendId AND segment = :segment;
+
 -- Revisions not yet on a backend, in arrival order, so a device's own edits keep their order.
 selectUnpushed:
 SELECT id FROM revision

@@ -74,6 +74,13 @@ internal class LossyBlobStore : BlobStore {
         memory.writeNew(path, bytes)
     }
 
+    /** Changes a published file in place, as bit rot does. Its path and name stay. */
+    suspend fun damage(path: String) {
+        val bytes = read(path)
+        lose(path)
+        rewritten[path] = bytes.copyOf().also { it[it.size / 2] = (it[it.size / 2] + 1).toByte() }
+    }
+
     /** Returns every file: what a disk image of this backend holds. */
     suspend fun image(): Map<String, ByteArray> = list(ROOT).associate { it.path to read(it.path) }
 

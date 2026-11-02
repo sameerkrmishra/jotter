@@ -333,6 +333,149 @@ class SyncEngineTest {
             assertEquals(mapOf(1L to true), phone.sync.published("b"))
         }
 
+    /** `writeNew` failed, and left a damaged file: found there later, it cannot count. */
+    @Test
+    fun aDamagedFileAtAPendingPathIsNotPublishedAndTheNoteGoesOutAgain(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val memory = InMemoryBlobStore()
+            var damaged: String? = null
+            val damaging =
+                object : BlobStore by memory {
+                    override suspend fun writeNew(
+                        path: String,
+                        bytes: ByteArray,
+                    ) {
+                        if (damaged == null && path.endsWith(".json.gz")) {
+                            damaged = path
+                            memory.writeNew(path, bytes.copyOf(bytes.size / 2))
+                            throw BlobStoreFailureException("fsync failed")
+                        }
+                        memory.writeNew(path, bytes)
+                    }
+                }
+            val note = phone.notes.create("t", "body")
+            assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", damaging)))
+
+            phone.sync(damaging)
+
+            assertEquals(mapOf(2L to true), phone.sync.published("b"))
+            assertTrue(phone.sync.unpushed("b").isEmpty())
+            val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(memory).issues.single())
+            assertEquals(SegmentProblem.CORRUPT, issue.problem)
+            assertEquals(1, issue.number)
+            assertEquals("body", pc.notes.get(note.id)?.body)
+        }
+
+    /** The same number would give the same name again, for good. */
+    @Test
+    fun aDamagedFileTheListingDoesNotShowIsNotWrittenToAgain(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val memory = InMemoryBlobStore()
+            val note = phone.notes.create("t", "body")
+            val first = phone.sync.unpushed("b").map { checkNotNull(phone.sync.revision(it)) }
+            val segment = Segment(phone.deviceId, 1, first)
+            val path = pathOf(segment)
+            val blind =
+                object : BlobStore by memory {
+                    override suspend fun list(prefix: String): List<BlobInfo> =
+                        memory.list(prefix).filter { it.path != path }
+                }
+            // The first cycle records and fails, and the damaged file is there for the second.
+            var failing = true
+            val failingOnce =
+                object : BlobStore by blind {
+                    override suspend fun writeNew(
+                        path: String,
+                        bytes: ByteArray,
+                    ) {
+                        if (failing && path.endsWith(".json.gz")) {
+                            failing = false
+                            memory.writeNew(path, bytes.copyOf(bytes.size / 2))
+                            throw BlobStoreFailureException("fsync failed")
+                        }
+                        memory.writeNew(path, bytes)
+                    }
+                }
+            assertIs<SyncResult.Interrupted>(phone.engine().sync(SyncTarget("b", failingOnce)))
+            assertEquals(1, phone.sync(failingOnce).pushedSegments)
+            val pc = device("pc")
+            pc.sync(memory)
+            assertEquals("body", pc.notes.get(note.id)?.body)
+        }
+
+    /** A store can answer that a path exists when no file is there: a directory, for example. */
+    @Test
+    fun aPendingPathThatHoldsNoFileIsGivenUpToo(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val memory = InMemoryBlobStore()
+            var isTaken = true
+            val taken =
+                object : BlobStore by memory {
+                    override suspend fun writeNew(
+                        path: String,
+                        bytes: ByteArray,
+                    ) {
+                        if (isTaken && path.endsWith(".json.gz")) {
+                            isTaken = false
+                            throw BlobAlreadyExistsException(path)
+                        }
+                        memory.writeNew(path, bytes)
+                    }
+                }
+            val note = phone.notes.create("t", "body")
+            assertEquals(0, phone.sync(taken).pushedSegments)
+            assertEquals(1, phone.sync(taken).pushedSegments)
+            pc.sync(memory)
+            assertEquals("body", pc.notes.get(note.id)?.body)
+        }
+
+    /** ADR-0014: a known limit. It stays in sight, and its writer can still recover it. */
+    @Test
+    fun aFileRottedAfterPublishingIsReportedOnEveryCycleAndBlocksNothing(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val blobs = LossyBlobStore()
+            val rotted = phone.notes.create("rotted", "body")
+            phone.sync(blobs)
+            val next = phone.notes.create("next", "body")
+            phone.sync(blobs)
+            blobs.damage(blobs.pathOfNumber(phone.deviceId, 1))
+
+            repeat(2) {
+                val issue = assertIs<SyncIssue.SegmentNotApplied>(pc.sync(blobs).issues.single())
+                assertEquals(SegmentProblem.CORRUPT, issue.problem)
+                assertEquals(phone.deviceId, issue.device)
+                assertEquals(1, issue.number)
+            }
+            assertNull(pc.notes.get(rotted.id))
+            assertNotNull(pc.notes.get(next.id))
+
+            phone.engine().forget("b")
+            phone.sync(blobs)
+            assertEquals(1, pc.sync(blobs).issues.size)
+            assertEquals("body", pc.notes.get(rotted.id)?.body)
+        }
+
+    @Test
+    fun forgettingABackendForgetsWhatWasReadThere(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val blobs = InMemoryBlobStore()
+            phone.notes.create("t", "body")
+            phone.sync(blobs)
+            pc.sync(blobs)
+            pc.engine().forget("b")
+            assertTrue(pc.sync.readFiles("b").isEmpty())
+            assertEquals(1, pc.sync(blobs).appliedSegments)
+        }
+
     @Test
     fun aRetryOfAFreePathWritesTheRecordedSegmentNotANewOne(): TestResult =
         runTest {

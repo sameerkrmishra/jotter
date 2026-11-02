@@ -139,12 +139,13 @@ public class SyncEngine internal constructor(
         targetId: String,
         folders: Map<DeviceId, List<SegmentFile>>,
     ) {
+        val listed =
+            folders.flatMapTo(HashSet()) { (device, files) -> files.map { device to it.name } }
         store.sync.write {
-            store.sync.readFiles(targetId).forEach { (device, name) ->
-                if (folders[device].orEmpty().none { it.name == name }) {
-                    store.sync.forgetFile(targetId, device, name)
-                }
-            }
+            store.sync
+                .readFiles(targetId)
+                .filterNot { it in listed }
+                .forEach { (device, name) -> store.sync.forgetFile(targetId, device, name) }
         }
     }
 

@@ -233,6 +233,20 @@ public class SyncStore internal constructor(
         queries.markSegmentPublished(backend, number)
     }
 
+    /**
+     * Gives up this device's segment [number] on [backend], whose file is damaged. Its revisions
+     * count as not on the backend again, so the next push writes them to a new file.
+     */
+    public fun abandonSegment(
+        backend: String,
+        number: Long,
+    ) {
+        write {
+            queries.deleteRevisionsOfSegment(backend, number)
+            queries.deleteOwnSegment(backend, number)
+        }
+    }
+
     /** Returns the revisions recorded for this device's segment [number], in arrival order. */
     public fun revisionsOfSegment(
         backend: String,

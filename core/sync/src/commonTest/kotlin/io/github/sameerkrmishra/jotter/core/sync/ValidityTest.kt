@@ -300,6 +300,22 @@ class ValidityTest {
             assertEquals(setOf("first copy", "second copy"), listed.map { it.body }.toSet())
         }
 
+    /** The second copy is of another note, so only the stored copy says that this one changed. */
+    @Test
+    fun aCollisionFromAnotherNoteStillEndsTheNoteOfTheStoredCopy(): TestResult =
+        runTest {
+            val first = textRevision(1, 10, "in the first note")
+            val second = first.copy(noteId = NoteId.generate())
+            val store = device("elsewhere")
+            val blobs = InMemoryBlobStore()
+            plant(blobs, listOf(first))
+            store.report(blobs)
+            assertEquals("in the first note", store.notes.get(first.noteId)?.body)
+            plant(blobs, listOf(second))
+            store.report(blobs)
+            assertNull(store.notes.get(first.noteId))
+        }
+
     @Test
     fun aDeletionSharingAnIdWithAnEditEndsNothing(): TestResult =
         runTest {

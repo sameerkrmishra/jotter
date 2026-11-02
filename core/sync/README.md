@@ -90,7 +90,7 @@ one seed: ids, clocks, faults and choices, so a failure names a seed that replay
 | Backends | 1 to 3 |
 | Edits | Create, edit, pin, state, tags, delete forever, imports of one source on several devices |
 | Delivery | Partial sync, files held back from a listing, so segments arrive late and out of order |
-| Faults | `list`, `read` and `writeNew` failures, a write that fails after publishing, outages, lost segments, damaged files, sound files under a wrong hash, forged merges, bad stamps in a segment with good revisions |
+| Faults | `list`, `read` and `writeNew` failures, a write that fails after publishing, outages, lost segments, damaged files, sound files under a wrong hash, forged merges, claims to resolve a conflict from a revision that does not count, bad stamps in a segment with good revisions |
 | Crashes | After a write, after recording a segment, inside the apply transaction; plain restarts |
 | Conflicts | Resolved at random, in all four ways |
 
@@ -99,13 +99,22 @@ then hold the same revisions, live heads, notes, open conflicts and hidden heads
 with everything answered each note must have one live head, which it shows. No forged
 merge or bad stamp may count, and no line of a body and no title may vanish unexplained.
 
-`check` runs 3000 seeds on the JVM, about 3 minutes here, and 25 on `linuxX64`, whose debug
-binary is far slower, plus `REGRESSION_SEEDS` on both. `nightly.yml` runs 50000 seeds, each night a new range, and opens an issue if one fails. By hand, set `JOTTER_SIM_CASES` and
-`JOTTER_SIM_START`:
+Every run then ends on a conflict made for the purpose: a revision that does not count
+claims to resolve it, and one device deletes the note while another edits it. It must stay
+open on every device until it is answered.
+
+`check` runs 3000 seeds on the JVM, about 4 minutes here, and 25 on `linuxX64`, whose debug
+binary is far slower, plus `REGRESSION_SEEDS` on both. `nightly.yml` runs 50000 seeds, each
+night a new range, and opens an issue if a run fails or times out. By hand, use the script,
+which fails unless the test report says that exactly that range ran:
 
 ```
-JOTTER_SIM_START=1000 JOTTER_SIM_CASES=5000 ./gradlew :core:sync:jvmTest --tests ConvergenceTest
+core/sync/scripts/simulate.sh 1000 5000           # START CASES, on the JVM
+core/sync/scripts/simulate.sh 70000 40 linuxX64
 ```
+
+`JOTTER_SIM_START` and `JOTTER_SIM_CASES` are task inputs, so a new range is never answered
+from the cache.
 
 Besides converging, every stored merge must follow from its parents and their
 ancestors: the simulator computes each one again from the final DAG. `LineHistory` follows
@@ -114,6 +123,16 @@ missing from a live head must be explained by a person: an edit, a resolution, o
 deletion with no edit beside it. A line that only a conflict's losing side has must have
 an open or answered conflict.
 
+
+`scripts/mutants.py` shows that the tests can fail: it applies one source mutation at a time
+and runs them, and records what caught each one, with the first seed. A whole run takes hours,
+so run it in chunks on a clean tree, with a limit: it stops between mutations when its budget
+is used, says where to go on, and restores the file it is working on, also when stopped.
+
+```
+python3 core/sync/scripts/mutants.py --list
+timeout -s TERM 110m python3 core/sync/scripts/mutants.py --first 0 --budget-minutes 100
+```
 
 The tests of `SyncEngineTest` each pin one failure rule. Android host tests are
 disabled, as in `core:storage`.

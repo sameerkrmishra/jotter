@@ -85,8 +85,13 @@ pushes what it holds, which costs duplicates and no data.
 **Publishing.** A segment is recorded in one transaction with its name, number and
 revision ids, before `writeNew`. From then on it does not change. Any failure leaves it
 recorded, and the next cycle writes the same file. A success, or
-`BlobAlreadyExistsException`, marks it published and records it as read, as it holds
-nothing this device lacks.
+`BlobAlreadyExistsException` with a file there that has the name's hash, marks it published
+and records it as read, as it holds nothing this device lacks. `BlobStore.writeNew` asks the
+caller to compare, as a failed write can leave a bad file, and the store cannot help. If
+the file does not have that hash, or no file is there, the segment is given up: its row
+goes, its revisions count as not on the backend, and they go out in a new file, with a
+higher number and so another name. The damaged file stays, as nothing may delete it, and
+readers report it.
 
 **Numbers.** A new segment is numbered above both what this device wrote on the backend
 and the highest number in its folder when the cycle began. That keeps numbers rising after
@@ -192,6 +197,17 @@ other use a compile error.
 - A settled head's edit is merged by hand or not at all, and a missing ancestor that
   comes later does not undo that.
 - A user revision whose parent never arrives can never be judged, so it counts.
+- **Known limit: bit rot after publishing (v1).** The writer lists names, not content, so
+  it does not notice a file that decays later, and nothing repairs it. Every reader
+  reports `SegmentNotApplied` with `CORRUPT` for that backend on every cycle, for good: it
+  is never hidden, and it blocks no other segment. What a user can do: the writer still holds
+  those revisions, and so does any device that read the file before it decayed. Removing
+  the backend on such a device and adding it again (`SyncEngine.forget`, PLAN.md §6.5) marks
+  all its revisions as not on the backend, so it pushes them in new files and the readers
+  get them. A second backend that holds them does the same through a relay. This costs a
+  full copy of that device's history, and the issue stays, as the file does. It needs no
+  repair command, and M6's backup docs describe it. If the writer and every such device are
+  gone, those revisions are lost.
 - **Known limit: a relay carries one copy of a collided id.** A device that never sees the
   second copy keeps the first as a normal revision, while one that saw both counts neither.
   They disagree for as long as that lasts. It takes a repeated random id, which only a bug

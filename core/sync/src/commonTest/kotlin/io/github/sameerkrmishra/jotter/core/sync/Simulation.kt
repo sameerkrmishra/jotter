@@ -177,6 +177,7 @@ internal class Simulation(
             settle()
             val first = assertConverged()
             assertTextSurvives()
+            challengeAConflict()
             resolveEverything()
             assertSingleHeads()
             assertTextSurvives()
@@ -235,6 +236,7 @@ internal class Simulation(
             7 -> importShared(device)
             8, 9 -> organise(device)
             10, 26, 27, 28, 29 -> delete(device)
+            30 -> plantClaimOnOpenConflict(device)
             11, 12, 13, 14, 15 -> syncOnce(device, device.links.keys.random(random))
             16 -> resolveOne(device)
             17 -> loseSegment()
@@ -363,6 +365,78 @@ internal class Simulation(
         backend.plant(pathOf(segment), JsonGzipCodec().encode(segment))
     }
 
+    /**
+     * A revision that says it resolves a conflict, on a parent in another note. It does not count,
+     * so the conflict stays open, on every device.
+     */
+    private suspend fun plantForeignClaim(
+        device: SimDevice,
+        mergeId: RevisionId,
+    ) {
+        val merge = checkNotNull(device.store.sync.revision(mergeId)) { "$mergeId is gone" }
+        val others = sortedRevisions(device).filter { it.noteId != merge.noteId }
+        val foreign = others.randomOrNull(random)
+        val backend = backends[device.links.keys.random(random)]
+        if (foreign == null || !backend.reachable) return
+        val ids = SimIds(random)
+        val stranger = ids.newDeviceId()
+        val claim =
+            merge.copy(
+                id = ids.newRevisionId(),
+                parents = setOf(foreign.id),
+                timestamp = HybridTimestamp(merge.timestamp.physicalMillis + 1, 0),
+                deviceId = stranger,
+                kind = RevisionKind.User,
+                resolves = mergeId,
+            )
+        forged += claim.id
+        val segment = Segment(stranger, 1, listOf(claim))
+        backend.plant(pathOf(segment), JsonGzipCodec().encode(segment))
+    }
+
+    private suspend fun plantClaimOnOpenConflict(device: SimDevice) {
+        val conflict = device.conflicts.open().randomOrNull(random) ?: return
+        plantForeignClaim(device, conflict.mergeId)
+    }
+
+    /**
+     * Every run ends on one conflict for sure, as open ones are rare: nothing but an answer may
+     * close it. Not a claim from a revision that does not count, and not a deletion beside an edit.
+     * This function made that history, so it knows the conflict must still be open everywhere.
+     */
+    private suspend fun challengeAConflict() {
+        if (alive.size < 2) return
+        val (first, second) = alive
+        val note = first.store.notes.create(newTitle(), newLine())
+        first.store.notes.create(newTitle(), newLine())
+        settle()
+        val body = listOf(first, second).map { device -> device to newLine() }
+        body.forEach { (device, line) ->
+            device.store.notes.edit(note.id, note.revisionId, note.title, line)
+        }
+        settle()
+        val conflict = first.conflicts.open().firstOrNull { it.noteId == note.id }
+        val mergeId = checkNotNull(conflict) { "Seed $seed: two edits made no conflict" }.mergeId
+        plantForeignClaim(first, mergeId)
+        settle()
+        assertConflictStands(mergeId)
+        val shown = checkNotNull(second.store.notes.get(note.id)) { "Seed $seed: the note is gone" }
+        second.store.notes.edit(note.id, shown.revisionId, shown.title, newLine())
+        delete(first, note.id)
+        settle()
+        assertConflictStands(mergeId)
+    }
+
+    private fun assertConflictStands(mergeId: RevisionId) {
+        alive.forEach { device ->
+            val isListed = device.conflicts.open().any { it.mergeId == mergeId }
+            check(isListed) { "Seed $seed: device ${device.index} closed $mergeId unanswered" }
+            checkNotNull(device.conflicts.details(mergeId)) {
+                "Seed $seed: device ${device.index} has no details of $mergeId"
+            }
+        }
+    }
+
     private fun hasText(revision: Revision): Boolean = revision.content is RevisionContent.Snapshot
 
     /** In a fixed order: a hash of a [Revision] holds an enum's, which differs between runs. */
@@ -436,10 +510,17 @@ internal class Simulation(
 
     private fun delete(device: SimDevice) {
         val note = allNotes(device).randomOrNull(random) ?: return
+        delete(device, note.id)
+    }
+
+    private fun delete(
+        device: SimDevice,
+        noteId: NoteId,
+    ) {
         val notes = device.store.notes
-        notes.setState(note.id, NoteState.TRASHED)
+        notes.setState(noteId, NoteState.TRASHED)
         try {
-            notes.deleteForever(note.id)
+            notes.deleteForever(noteId)
         } catch (_: NoSuchNoteException) {
             error("The note was read just now, seed $seed")
         }
@@ -595,7 +676,7 @@ internal class Simulation(
             }
         }
         expected.groupBy { it.noteId }.forEach { (noteId, revisions) ->
-            val graph = RevisionGraph(revisions)
+            val graph = storedGraph(reference.store.sync, noteId)
             // Only a dead writer or a restored backup can leave a hole.
             val mayLack = alive.size < devices.size || restores > 0
             check(graph.isComplete || mayLack) { "Seed $seed: $noteId lacks an ancestor" }
@@ -625,7 +706,7 @@ internal class Simulation(
         val open = device.conflicts.open().mapTo(HashSet()) { it.mergeId }
         val listed = device.conflicts.invalid().mapTo(HashSet()) { it.revisionId }
         revisions(device).groupBy { it.noteId }.values.forEach { note ->
-            val graph = RevisionGraph(note)
+            val graph = storedGraph(device.store.sync, note.first().noteId)
             val answered = open + note.mapNotNull { it.resolves }
             val texts =
                 note
@@ -701,7 +782,7 @@ internal class Simulation(
         knownNotes().sortedBy { it.toString() }.map { id ->
             listOf(
                 device.store.notes.get(id),
-                RevisionGraph(device.store.sync.revisions(id)).liveHeads.map { it.id },
+                storedGraph(device.store.sync, id).liveHeads.map { it.id },
             )
         } +
             listOf(
@@ -742,7 +823,7 @@ internal class Simulation(
         check(device.conflicts.open().isEmpty()) { "Seed $seed: conflicts stayed open" }
         check(device.conflicts.hidden().isEmpty()) { "Seed $seed: heads stayed hidden" }
         knownNotes().forEach { id ->
-            val graph = RevisionGraph(device.store.sync.revisions(id))
+            val graph = storedGraph(device.store.sync, id)
             val live = graph.liveHeads
             check(live.size <= 1) { "Seed $seed: note $id has $live" }
             val shown = device.store.notes.get(id)
@@ -778,7 +859,7 @@ internal class Simulation(
         const val MAX_CLONES = 2
         const val MIN_STEPS = 30
         const val MAX_STEPS = 140
-        const val ACTIONS = 31
+        const val ACTIONS = 32
         const val KILL_ODDS = 3
         const val SHORT_ID = 6
         const val SOURCE_NOTES = 3
