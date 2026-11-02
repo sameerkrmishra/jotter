@@ -14,6 +14,7 @@ import kotlinx.coroutines.IO
 import okio.FileSystem
 import okio.IOException
 import okio.Path
+import platform.posix.EACCES
 import platform.posix.EEXIST
 import platform.posix.EINTR
 import platform.posix.EINVAL
@@ -21,6 +22,7 @@ import platform.posix.ENOENT
 import platform.posix.ENOSYS
 import platform.posix.ENOTSUP
 import platform.posix.EOPNOTSUPP
+import platform.posix.EPERM
 import platform.posix.F_LOCK
 import platform.posix.O_CREAT
 import platform.posix.O_DIRECTORY
@@ -91,8 +93,17 @@ internal actual fun systemHardLink(
     when {
         link(source.toString(), target.toString()) == 0 -> LinkResult.LINKED
         errno == EEXIST -> LinkResult.TARGET_EXISTS
-        else -> LinkResult.NOT_LINKED
+        isUnsupportedLinkError(errno) -> LinkResult.NOT_SUPPORTED
+        else -> throw IOException("Cannot link $target: ${lastError()}")
     }
+
+/** Whether [error] means that hard links do not exist here, not that this one link failed. */
+internal fun isUnsupportedLinkError(error: Int): Boolean =
+    error == EPERM ||
+        error == EACCES ||
+        error == ENOTSUP ||
+        error == EOPNOTSUPP ||
+        error == ENOSYS
 
 // lockf is fcntl(F_SETLKW) from offset 0 to the end of any file size, the range and the lock family
 // of FileChannel.lock() on the JVM. flock() would not conflict with that lock.

@@ -187,7 +187,7 @@ class LocalFolderBlobStoreTest {
             ).forEach { (what, operation) ->
                 val root = readyFolder()
                 val fileSystem = FaultyFileSystem { name, _ -> name == operation }
-                val noLinks = FolderAccess(hardLink = { _, _ -> LinkResult.NOT_LINKED })
+                val noLinks = FolderAccess(hardLink = { _, _ -> LinkResult.NOT_SUPPORTED })
                 val store = storeWith(root, noLinks, fileSystem)
                 val failure =
                     assertFailsWith<BlobStoreFailureException>(what) {
@@ -255,7 +255,7 @@ class LocalFolderBlobStoreTest {
                     root,
                     FolderAccess(hardLink = { _, target ->
                         target.write("first")
-                        LinkResult.NOT_LINKED
+                        LinkResult.NOT_SUPPORTED
                     }),
                 )
             assertFailsWith<BlobAlreadyExistsException> { store.writeNew("f", byteArrayOf(1)) }

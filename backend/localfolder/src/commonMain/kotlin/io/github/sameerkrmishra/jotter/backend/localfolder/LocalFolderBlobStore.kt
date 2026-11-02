@@ -48,9 +48,10 @@ public class LocalFolderBlobStore internal constructor(
     private val missing = Reachability.Unreachable(UnreachableReason.MISSING, "$root is missing")
 
     /**
-     * Sets [root], which must exist, up as a store. Doing so again is harmless. Call this once,
-     * when the user adds the folder as a backend. Never call it because [ping] said
-     * [UnreachableReason.NOT_INITIALIZED] during sync, or a bare mount point becomes a store.
+     * Sets [root], which must exist, up as a store. Doing so again is harmless, and is how to
+     * retry after a failure. Call this when the user adds the folder as a backend. Never call it
+     * because [ping] said [UnreachableReason.NOT_INITIALIZED] during sync, or a bare mount point
+     * becomes a store.
      *
      * @throws BackendUnavailableException if [root] does not exist.
      * @throws BlobStoreFailureException if the file system fails.
@@ -61,8 +62,9 @@ public class LocalFolderBlobStore internal constructor(
             if (access.stat(root / MARKER_NAME) == null) {
                 // Not mustCreate: a concurrent initialize has the same aim.
                 fileSystem.write(root / MARKER_NAME, mustCreate = false) { }
-                access.syncDirectory(root)
             }
+            // Also when the marker is there: a retry may follow a failed sync.
+            access.syncDirectory(root)
         }
 
     override suspend fun list(prefix: String): List<BlobInfo> {
@@ -126,8 +128,7 @@ public class LocalFolderBlobStore internal constructor(
                 // The drive may have gone while a large file was being written.
                 writer.write(segments, bytes, beforePublishing = ::requireReachable)
             } catch (e: BlobAlreadyExistsException) {
-                // This may be the retry of a write that failed to sync, which relies on this
-                // answer to mean that the file is there for good. See BlobStore.writeNew.
+                // This may be the retry of a write that failed to sync. See BlobStore.writeNew.
                 writer.syncAbove(segments)
                 throw e
             }

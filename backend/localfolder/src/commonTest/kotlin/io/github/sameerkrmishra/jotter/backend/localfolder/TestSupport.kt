@@ -36,7 +36,7 @@ internal fun linkingStore(root: Path) = LocalFolderBlobStore(root)
 
 /** A store on the real file system, as on one without hard links, such as a FAT USB stick. */
 internal fun renamingStore(root: Path) =
-    storeWith(root, FolderAccess(hardLink = { _, _ -> LinkResult.NOT_LINKED }))
+    storeWith(root, FolderAccess(hardLink = { _, _ -> LinkResult.NOT_SUPPORTED }))
 
 /** A store where the lock cannot be taken, as on storage without `fcntl` locks. */
 internal fun locklessStore(root: Path) = storeWith(root, FolderAccess(lock = ::failToLock))

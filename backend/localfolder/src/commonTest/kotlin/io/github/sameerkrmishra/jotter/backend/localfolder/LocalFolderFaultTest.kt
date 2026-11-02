@@ -213,7 +213,7 @@ class LocalFolderFaultTest {
                 FolderAccess(
                     hardLink = { _, _ ->
                         fs.write(target) { writeUtf8("first") }
-                        LinkResult.NOT_LINKED
+                        LinkResult.NOT_SUPPORTED
                     },
                     stat = { path ->
                         if (path == target && fs.exists(path)) simulatedEio()
@@ -224,6 +224,58 @@ class LocalFolderFaultTest {
                 storeWith(root, access).writeNew("f", byteArrayOf(1))
             }
             assertEquals("first", fs.read(target) { readUtf8() })
+        }
+
+    // Another writer, without the lock, has just linked B's file. A passing link error here must
+    // not lead to the rename, which would replace it.
+    @Test
+    fun aTransientLinkErrorFailsTheWriteAndKeepsTheFileOfAWriterWithoutTheLock() =
+        runTest {
+            val root = folders.newFolder().also { linkingStore(it).initialize() }
+            val target = root / "f"
+            val access =
+                FolderAccess(hardLink = { _, _ ->
+                    fs.write(target) { writeUtf8("B") }
+                    simulatedEio()
+                })
+            assertFailsWith<BlobStoreFailureException> {
+                storeWith(root, access).writeNew("f", byteArrayOf(1))
+            }
+            assertEquals("B", fs.read(target) { readUtf8() })
+        }
+
+    @Test
+    fun aRealLinkErrorIsNotTakenForUnsupportedHardLinks() {
+        val root = folders.newFolder()
+        // ENOENT stands for any error that says nothing about hard links.
+        assertFailsWith<IOException> { systemHardLink(root / "missing", root / "target") }
+    }
+
+    @Test
+    fun aRealLinkReportsATakenTarget() {
+        val root = folders.newFolder()
+        fs.write(root / "a") { }
+        fs.write(root / "b") { }
+        assertEquals(LinkResult.LINKED, systemHardLink(root / "a", root / "c"))
+        assertEquals(LinkResult.TARGET_EXISTS, systemHardLink(root / "a", root / "b"))
+    }
+
+    @Test
+    fun aRetryOfInitializeRedoesTheFailedSync() =
+        runTest {
+            val root = folders.newFolder()
+            var syncFails = true
+            var synced = 0
+            val access =
+                FolderAccess(syncDirectory = {
+                    if (syncFails) simulatedEio()
+                    synced++
+                })
+            val store = storeWith(root, access)
+            assertFailsWith<BlobStoreFailureException> { store.initialize() }
+            syncFails = false
+            store.initialize()
+            assertEquals(1, synced)
         }
 
     @Test
@@ -241,7 +293,7 @@ class LocalFolderFaultTest {
         runTest {
             val root = folders.newFolder().also { linkingStore(it).initialize() }
             val access =
-                FolderAccess(lock = ::failToLock, hardLink = { _, _ -> LinkResult.NOT_LINKED })
+                FolderAccess(lock = ::failToLock, hardLink = { _, _ -> LinkResult.NOT_SUPPORTED })
             val failure =
                 assertFailsWith<BlobStoreFailureException> {
                     storeWith(root, access).writeNew("dir/file", byteArrayOf(1))

@@ -26,10 +26,10 @@ internal enum class LinkResult {
     TARGET_EXISTS,
 
     /**
-     * The link was not made for any other reason. Usually the file system or a security policy has
-     * no hard links, but it can be a real I/O error, which the fallback then runs into as well.
+     * The file system or a security policy has no hard links. Nothing else may give this result: it
+     * leads to a rename, which replaces, so a passing error must fail the write instead.
      */
-    NOT_LINKED,
+    NOT_SUPPORTED,
 }
 
 /**
@@ -141,7 +141,7 @@ internal class NoReplaceWriter(
         when (access.hardLink(temporary, target)) {
             LinkResult.LINKED -> Unit
             LinkResult.TARGET_EXISTS -> throw BlobAlreadyExistsException(path)
-            LinkResult.NOT_LINKED -> publishByRename(temporary, target, path, lockFailure)
+            LinkResult.NOT_SUPPORTED -> publishByRename(temporary, target, path, lockFailure)
         }
     }
 

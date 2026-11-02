@@ -48,30 +48,56 @@ appear again, and would make every other device's notes look gone.
    of one process, and closing the file in any thread drops it.
 4. Check that the store is still there, then try `link(temp, final)`. If the
    target exists, the write fails with `BlobAlreadyExistsException`.
-5. If the link failed in any other way and the lock is held, look up the target
-   and `rename` the temporary file onto it only if the system says that nothing
-   is there. Any other result of the lookup fails the write. If the lock is not
-   held, the write fails: the check and the rename are never done without it.
-6. Release the lock, delete the temporary name if it is still there, and `fsync`
+5. If the link failed because hard links are unsupported here (`EPERM`, `EACCES`,
+   `ENOTSUP`, `EOPNOTSUPP`, `ENOSYS`) and the lock is held, look up the target and
+   `rename` the temporary file onto it only if the system says that nothing is
+   there. Any other result of the lookup fails the write. If the lock is not held,
+   the write fails: the check and the rename are never done without it.
+6. Any other link error, such as `EIO` or `ENOSPC`, fails the write. It says
+   nothing about hard links, and a rename here could replace another writer's file.
+7. Release the lock, delete the temporary name if it is still there, and `fsync`
    the directories up to the root.
 
-With hard links the lock adds nothing for the race, and the guarantee holds even
-for writers on several machines. Without them (FAT, exFAT, Android) the check and
-the rename in step 5 are safe because every writer holds the lock.
+On the JVM `EACCES` has an exception type, but the others arrive as a
+`FileSystemException` with only text. Exactly three texts count, in English, and
+so does any error on a file store of type `vfat`, `msdos` or `exfat`, which covers
+a translated system. Any other text, such as a translated `EPERM` on another file
+system without hard links, or exFAT through FUSE (`fuseblk`) on such a system,
+fails the write. That is loud, but it replaces nothing.
 
-Any link failure leads to step 5, because the JDK reports `EPERM` and the like
-with no error code to look at. A real I/O error then hits the rename as well.
+**Where the guarantee holds.** Exactly one writer wins a path if all the writers
+of one folder, on one file system, fall under one of these:
+
+- **Hard links work for every writer.** The file system's `link` decides, so this
+  holds with or without locks, and across machines if a shared file system makes
+  `link` atomic on its server, as NFS does. A link error then fails the write.
+- **Hard links are unsupported for every writer, and all of them are on one
+  machine.** The lock decides. A writer that cannot get it fails.
+- **Hard links are unsupported for every writer, on several machines, and the
+  shared file system passes `fcntl` locks between them.** NFS with a working lock
+  manager or NFSv4 can.
+
+It does **not** hold, and a file can be replaced, in these cases:
+
+- Hard links are unsupported and locks are local to each machine, as on a mount
+  with `nolock` or `nobrl`, or through FUSE: each machine's writers hold a lock of
+  their own.
+- Writers disagree on whether hard links work, for example through different
+  security policies or mount options, and one that links does not hold the lock.
+  It lacks the lock if taking it failed (`EMFILE`, `ENOLCK`, a `.jotter-lock` owned
+  by another user and not writable) or if locks are local. The one that renames
+  then cannot see it. A writer that links while holding the lock is safe.
+- Folders replicated by a tool such as Syncthing or Dropbox are not one file
+  system. Nothing here applies across the copies: ADR-0004's per-device folders are
+  what keeps writers apart there.
 
 **A lock failure does not block hard links.** A link never replaces anything, so
 it needs no lock, and storage that has hard links but no working `fcntl` locks
 stays usable. Only a rename needs the lock. So on storage with neither, every
 write fails with an error, and the backend is unusable there; `ping`, `list` and
-`read` still work. The one remaining mix is a writer that only links, because its
-lock failed, against a writer that renames, because its link failed, on one folder
-for one path at once. That needs locks to work for one process and not for the
-other on the same storage, while hard links do the reverse. We know of no such
-setup. `writeNew` takes the lock first even so, so that it is held wherever it
-can be.
+`read` still work. The price is the second case above. The alternative, failing
+every write without the lock, would make hard-link storage unusable to protect
+against writers that disagree about hard links, which needs an unusual setup.
 
 The kernel drops the lock when a process dies, so a crash leaves no stale lock.
 `.jotter-lock` itself stays, as an empty file.
@@ -92,11 +118,17 @@ only if the file system says it has no such operation (`EINVAL`, `ENOTSUP`,
 `writeNew` fail after the file has appeared. The file stays: it is complete and
 immutable, and a reader may have seen it. The retry is defined in the KDoc of
 `BlobStore.writeNew`. A retry that finds the file syncs the same directories again
-before it throws `BlobAlreadyExistsException`, so that exception means the file is
-there for good, and the comparison that ADR-0004 prescribes can rely on it. If the
-sync still fails, so does the retry. The JDK gives the error only as text, which
-can be translated. A translated "unsupported" then fails loudly, which is the safe
-way round.
+before it throws `BlobAlreadyExistsException`. If that sync fails, so does the
+retry. If it reports no error, that is no proof: Linux can report a failed
+writeback once and then let `fsync` return 0, so the entry may still not be on
+disk. So a retry cannot honestly report success for a file it found, and it does
+not: it cannot tell whose file that is, and it knows no more about durability than
+the failed call did. The caller gets `BlobAlreadyExistsException`, compares the
+content (ADR-0004), and must allow for a segment that was on the backend and is
+lost by a later power cut. Segment numbers are sequential, so such a hole shows; M3's
+sync has to deal with it. The JDK gives the error only as text, which can be
+translated. A translated "unsupported" then fails loudly, which is the safe way
+round.
 
 **Stale temporary files.** They have random names and are never read, and `list`
 skips every name starting with `.jotter-`, at any depth. Nothing removes them: a
@@ -140,9 +172,8 @@ M5 must decide how Android users reach a USB stick or shared folder: a separate
 ### Negative
 
 - Without hard links the guarantee is only as wide as `fcntl` locks are. That
-  covers all processes on one machine, which is the USB stick case. Two machines
-  on a network share without hard links would need the share to pass locks on,
-  and a share mounted with local locks only would not.
+  covers all processes on one machine, which is the USB stick case. "Where the
+  guarantee holds" lists the setups that lose it.
 - On storage with neither hard links nor working `fcntl` locks every write fails,
   so the backend cannot be used there.
 - Android `content://` folders are not supported.

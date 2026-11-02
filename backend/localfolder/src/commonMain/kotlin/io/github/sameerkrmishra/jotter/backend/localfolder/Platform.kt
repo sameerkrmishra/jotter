@@ -42,7 +42,12 @@ internal expect fun strictStat(path: Path): FolderEntry?
  */
 internal expect fun strictListNames(directory: Path): List<String>
 
-/** Makes [target] a hard link to [source], atomically and without replacing anything. */
+/**
+ * Makes [target] a hard link to [source], atomically and without replacing anything.
+ *
+ * @throws IOException if linking failed for a reason other than the two in [LinkResult], such as
+ *   `EIO` or `ENOSPC`.
+ */
 internal expect fun systemHardLink(
     source: Path,
     target: Path,

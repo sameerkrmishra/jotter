@@ -41,13 +41,21 @@ makes the store unreachable until it is initialised again.
   during a call raises `BackendUnavailableException`, never an empty or partial
   list or a missing file.
 - **`writeNew` on FAT or exFAT** has the same guarantee as elsewhere for all
-  processes on one machine, through a lock file instead of a hard link. Two
-  machines on a network share without hard links are not covered. See ADR-0012.
+  processes on one machine, through a lock file instead of a hard link. ADR-0012
+  lists exactly which setups keep it, and which do not, such as several machines
+  on a share with local locks and no hard links.
+- **Link errors.** Only "hard links are unsupported here" leads to the rename. Any
+  other link error fails the write, as a rename could replace a file.
 - **Locks.** Hard links work without the lock. Without hard links a lock failure
   fails every write, so on storage with neither the backend cannot write at all.
 - **A failed directory `fsync` fails `writeNew`**, but the file stays in place. A
-  retry that finds it syncs again before it throws `BlobAlreadyExistsException`.
-  Only "not supported" results are tolerated. See the KDoc of `BlobStore.writeNew`.
+  retry that finds it syncs again, then throws `BlobAlreadyExistsException`, and
+  the caller compares the content. That is no proof of durability, as Linux can
+  report a failed writeback only once. Only "not supported" results are tolerated.
+  See the KDoc of `BlobStore.writeNew`.
+- **Names this process cannot express**, such as a non-ASCII name under `LC_ALL=C`
+  on the JVM, are skipped by `list` like other invalid names, and `read` and
+  `writeNew` of such a path fail with `BlobStoreFailureException`.
 - **Android `content://` folders are not supported**, because the store needs a
   real file path. M5 must address them.
 - **Case.** On FAT `a` and `A` are one file, so the second write fails with

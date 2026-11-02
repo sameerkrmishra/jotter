@@ -53,12 +53,14 @@ public interface BlobStore {
      * WebDAV implements this with `PUT` plus `If-None-Match: *`.
      *
      * A failure does not say that nothing was written. The whole file can have appeared without
-     * the store being sure that it lasts, for example if a power cut could still lose it. It then
+     * the store knowing that it lasts, for example if a power cut could still lose it. It then
      * stays in place, because a reader may have seen it. So the caller retries with the same [path]
-     * and [bytes]. If the retry succeeds, the file is there. If it throws
-     * [BlobAlreadyExistsException], a file is there and the store has made sure that it stays, and
-     * the caller compares it with what it meant to write (ADR-0004). If it fails again, nothing
-     * has changed.
+     * and [bytes]. If the retry succeeds, nothing was there, and the file now is. If it throws
+     * [BlobAlreadyExistsException], a file is there and the store has asked again for it to be made
+     * durable, without an error. That is not proof: Linux can report a failed writeback once and
+     * then report success. The caller compares the file with what it meant to write (ADR-0004). A
+     * retry never reports success for a file it found, because it cannot tell whose file that is
+     * and has no better news about its durability. If the retry fails too, nothing has changed.
      *
      * @throws InvalidBlobPathException if [path] is not valid.
      * @throws BlobAlreadyExistsException if [path] exists, as a file or as a directory.
