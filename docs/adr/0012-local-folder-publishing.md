@@ -70,7 +70,10 @@ of one folder, on one file system, fall under one of these:
 
 - **Hard links work for every writer.** The file system's `link` decides, so this
   holds with or without locks, and across machines if a shared file system makes
-  `link` atomic on its server, as NFS does. A link error then fails the write.
+  `link` atomic on its server, as NFS does. A link error then fails the write,
+  except one that step 5 counts as unsupported: `EPERM` or `EACCES` on a file system
+  that does have hard links, such as from a permission problem, leads to the rename.
+  Such a writer belongs under the second case below where it does not hold.
 - **Hard links are unsupported for every writer, and all of them are on one
   machine.** The lock decides. A writer that cannot get it fails.
 - **Hard links are unsupported for every writer, on several machines, and the
@@ -209,6 +212,10 @@ Read and directory `fsync` errors cannot be injected from a Kotlin test. The tes
 replace those calls, and real `EACCES` comes from `chmod`. Real `EIO` from `readdir`
 and from `fsync` on a directory was checked once by hand on the JVM and `linuxX64`,
 with an `LD_PRELOAD` shim. That is not part of `check`.
+
+What this record says about NFS (atomic `link`, locks passed between machines),
+about `nolock` and `nobrl` mounts and about FUSE (local locks, `fuseblk` for exFAT)
+is from knowledge of those systems. None of it has been tested.
 
 ## Alternatives considered
 

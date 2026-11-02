@@ -226,22 +226,18 @@ class LocalFolderFaultTest {
             assertEquals("first", fs.read(target) { readUtf8() })
         }
 
-    // Another writer, without the lock, has just linked B's file. A passing link error here must
-    // not lead to the rename, which would replace it.
+    // A real link call with a real error that says nothing about hard links. If it counted as
+    // "unsupported", the rename would run and publish, and could replace another writer's file.
     @Test
-    fun aTransientLinkErrorFailsTheWriteAndKeepsTheFileOfAWriterWithoutTheLock() =
+    fun aLinkErrorThatSaysNothingAboutHardLinksNeverLeadsToTheRename() =
         runTest {
             val root = folders.newFolder().also { linkingStore(it).initialize() }
-            val target = root / "f"
             val access =
-                FolderAccess(hardLink = { _, _ ->
-                    fs.write(target) { writeUtf8("B") }
-                    simulatedEio()
-                })
+                FolderAccess(hardLink = { _, target -> systemHardLink(root / "missing", target) })
             assertFailsWith<BlobStoreFailureException> {
                 storeWith(root, access).writeNew("f", byteArrayOf(1))
             }
-            assertEquals("B", fs.read(target) { readUtf8() })
+            assertFalse(fs.exists(root / "f"))
         }
 
     @Test
