@@ -25,18 +25,25 @@ the merging is the rule on covered heads below. All of it is part of the sync fo
 
 **The merge base.** To merge `a` and `b`:
 
-1. `C` is every revision that is an ancestor of both, a revision counting as its own
-   ancestor, without tombstones. A tombstone has no text. It stays in the graph, so
-   ancestors reached only through it still count.
-2. The best common ancestors are the members of `C` that are not a proper ancestor
-   of another member of `C`.
-3. The base is the one of these with the highest `Stamp`.
-4. If `C` is empty, ADR-0009's rule applies to `body` and `title`, and tags have an
-   empty base.
+1. The *text ancestors* of a revision are itself and what its text came from: the
+   walk down its parents stops at a tombstone, which is not one of them. A merge of a
+   deletion with an edit holds the edit's text alone, so what lies behind the deletion
+   says nothing about it, and using it as a base would read that text as removed.
+2. `C` is every revision that is a text ancestor of both.
+3. The best common ancestors are the members of `C` that are not a proper text
+   ancestor of another member of `C`.
+4. The base is the one of these with the highest `Stamp`.
+5. If `C` is empty, ADR-0009's rule applies to `body` and `title`, over the roots among
+   the text ancestors of `a` and `b`, and tags have an empty base.
 
-The base is used for `body`, `title` and tags alike. All of this reads only the
+The base is used for `body`, `title` and tags alike, and a tag counts as added only by a
+user revision among the text ancestors of one side alone. All of this reads only the
 ancestors of `a` and `b`, so devices that know different things agree. The order of
-`a` and `b` does not matter.
+`a` and `b` does not matter. Whether `a` and `b` can be merged at all is in
+[ADR-0014](0014-sync-failure-handling.md).
+
+Only `U` below walks through tombstones: it is about who wrote what, not about text,
+and a merge must have all the user revisions of its parents for the merging to end.
 
 **Covered heads.** Let `U(r)` be the user revisions among the ancestors of `r`. A
 head counts as *live* unless it is an automatic merge that does not descend from an
@@ -62,9 +69,9 @@ and no head with text does, other than through a tombstone. With an edit beside 
 deletion the conflict stays open, as the text that lost would otherwise be shown
 nowhere. A merge of the tombstone with an unrelated edit descends from the conflict
 only through the tombstone, holds nothing of it, and leaves it closed. Any open
-conflict pauses the fold of the whole note, also
-for heads that do not descend from it, as ADR-0003 says. So does a parent that has not
-arrived. A head named by `resolves` is not live ([ADR-0014](0014-sync-failure-handling.md)).
+conflict pauses the fold of the whole note, also for heads that do not descend from it,
+as ADR-0003 says. A head named by `resolves` is not live
+([ADR-0014](0014-sync-failure-handling.md)).
 
 **Field rules made exact.**
 
