@@ -1,6 +1,6 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
-/** A kind of secret that a backend may need (ADR-0015). */
+/** A kind of secret that a backend may need (ADR-0016). */
 public enum class SecretKind {
     /** The app password of a WebDAV account, made for Jotter alone so that it can be revoked. */
     APP_PASSWORD,
@@ -39,7 +39,7 @@ public class Secret(
 
 /**
  * Where the secrets of backends live, outside the notes database and never in a log
- * (ADR-0015). Implementations block on I/O only inside these suspending calls.
+ * (ADR-0016). Implementations block on I/O only inside these suspending calls.
  */
 public interface SecretStore {
     /**
@@ -75,7 +75,7 @@ public class SecretStoreException(
 
 /**
  * The secret store of an app whose backends need no secrets: today's, as local folders need none.
- * It holds nothing, and refuses to store anything. ADR-0015 says what replaces it.
+ * It holds nothing, and refuses to store anything. ADR-0016 says what replaces it.
  */
 public object NoSecretStore : SecretStore {
     override suspend fun read(key: SecretKey): Secret? = null

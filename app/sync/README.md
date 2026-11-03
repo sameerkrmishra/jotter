@@ -31,7 +31,7 @@ each backend implementation it can open, today `backend:localfolder`. No UI.
 | `BackendFactory`, `StandardBackendFactory` | Opens the `BlobStore` of a backend |
 | `BackendManager`, `AddResult` | Adds a local folder, removes a backend, syncs one or all, and reports status |
 | `SyncScheduler`, `SyncTiming` | When the desktop app syncs |
-| `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `NoSecretStore`, `SecretStoreException` | Where backend secrets live ([ADR-0015](../../docs/adr/0015-where-secrets-live.md)) |
+| `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `NoSecretStore`, `SecretStoreException` | Where backend secrets live ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)) |
 | `describe(Reachability)` | Reachability in plain words |
 
 ## Adding a kind of backend

@@ -1,4 +1,4 @@
-# 0015. Where backend secrets live on Linux
+# 0016. Where backend secrets live on Linux
 
 - **Status:** Proposed
 - **Date:** 2026-11-03
@@ -46,19 +46,33 @@ reaches it through libsecret's `secret-tool`, with the secret on its standard in
 `application=jotter`, `backend=<id>`, `kind=<kind>`. The label names the backend, not the
 secret. A locked keyring is unlocked by the desktop's own prompt; without one,
 `secret-tool` fails and so does that sync, with the reason on the status screen.
+`secret-tool` runs with D-Bus autolaunch disabled (`DBUS_SESSION_BUS_ADDRESS` passed
+through only if set, and `DBUS_SESSION_BUS_ADDRESS=disabled:` otherwise), so that
+without a session bus it fails at once instead of starting a bus and a keyring daemon
+of its own, whose secrets would not be the user's keyring and would be gone after.
+It fails closed: no bus means no secret, and the file below only if the user chose it.
 
 **The fallback is a file, and only when the user chooses it.** If no Secret Service
 answers (no session bus, no provider, no `secret-tool`), adding a backend that needs a
 secret fails with a plain message that offers the file instead: the desktop app's add
 dialog has a choice for it, and the CLI an option. The file is
 `$XDG_CONFIG_HOME/jotter/secrets.json` (by default `~/.config/jotter/`), in a directory
-created with mode 0700, the file with 0600, written to a temporary file in the same
-directory and renamed into place. Jotter refuses to read it if it is readable by
-group or others, or owned by another user. The backend's status says that its secret
+created with mode 0700. Every version of the file is written to a temporary file in the
+same directory that is **created with mode 0600** (`open` with `O_CREAT | O_EXCL` and
+mode 0600, or on the JVM `Files.createFile` with the `PosixFilePermissions` attribute,
+which passes the mode to that same call), and then renamed into place. It is never
+created with wider permissions and narrowed with `chmod` afterwards, as the secret
+would be readable in between. Jotter refuses to read it if it is readable by group or
+others, or owned by another user. The backend's status says that its secret
 is in that file, in plain text.
 
 Android (M5) will keep secrets with a key from the Android Keystore; that is M5's
 decision.
+
+**This record is a design until a backend needs a secret.** The Secret Service store
+and the file are built, with their tests, by the first of WebDAV and the PC hub to
+need them, and must follow this record; until then only the interface, the test
+double and `NoSecretStore` exist.
 
 ## Consequences
 

@@ -12,7 +12,7 @@ import kotlin.time.Instant
 
 /**
  * A backend this device syncs with, as stored. [kind] and [settings] are `app:sync`'s, and this
- * module does not read them. They never hold a secret (ADR-0015).
+ * module does not read them. They never hold a secret (ADR-0016).
  *
  * @property id Its lasting local name, which the sync tables use as `backend_id`.
  * @property kind What sort of backend it is, such as `local-folder`.

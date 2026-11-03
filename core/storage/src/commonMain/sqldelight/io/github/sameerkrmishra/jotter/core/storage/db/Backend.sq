@@ -1,6 +1,6 @@
 -- The backends this device syncs with (PLAN.md §4 and §6.5), and how their last sync went. kind and
 -- settings belong to app:sync, which reads and writes them: this module does not interpret them.
--- Never a secret: those live in a secret store outside the database (ADR-0015). id is the
+-- Never a secret: those live in a secret store outside the database (ADR-0016). id is the
 -- backend_id of the sync tables. A backend added again gets a new id.
 CREATE TABLE backend (
   id TEXT NOT NULL PRIMARY KEY,

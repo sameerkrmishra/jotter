@@ -195,7 +195,7 @@ the same file: steps 2 to 4 are `linuxDatabasePath` in `core:storage`.
   coverage gate in `jotter.root`.
 - **Sync.** `SyncCommands.kt` builds an `app:sync` `BackendManager` for the one
   command that needs it, with `NoSecretStore`, as folders need no secrets
-  ([ADR-0015](../../docs/adr/0015-where-secrets-live.md)), and runs it on the
+  ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)), and runs it on the
   command's own thread with `runBlocking`. `jotter add` runs none of it.
 - **`clikt-core`, not `clikt`.** The usual `CliktCommand` prints through the Mordant
   terminal library, which expands tabs and so would break the columns above, and

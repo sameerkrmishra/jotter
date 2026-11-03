@@ -38,7 +38,7 @@ or holds it exclusively.
   UI thread. Exit cancels the scope, which stops a running sync where it is
   (`SyncEngine` is safe to stop anywhere), and waits for it before the store closes.
   Backends need no secrets yet, so the app passes `NoSecretStore`
-  ([ADR-0015](../../docs/adr/0015-where-secrets-live.md)).
+  ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)).
 - **`--autoclose`** closes the app a few seconds after the window appears and prints
   `jotter: window shown, closing`, to prove that a build starts. It also closes the
   window for a database that cannot be opened.

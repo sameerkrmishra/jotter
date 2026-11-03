@@ -7,7 +7,7 @@ import kotlinx.serialization.json.Json
 /**
  * Where a backend is and how to reach it, apart from its secrets. Each kind of backend has its own
  * class. It is stored as the `kind` and `settings` of the `backend` table, so it must never hold a
- * secret: those are in a [SecretStore] (ADR-0015).
+ * secret: those are in a [SecretStore] (ADR-0016).
  *
  * To add a kind of backend: a class here with its settings in the `dto` package, a branch in
  * [BackendKinds] to store it, and one in [StandardBackendFactory] to open it.

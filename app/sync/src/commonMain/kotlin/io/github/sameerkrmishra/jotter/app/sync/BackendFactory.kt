@@ -18,7 +18,7 @@ public fun interface BackendFactory {
 
 /**
  * The backends of this version: local folders. A backend that needs a secret reads it from a
- * [SecretStore] here, when WebDAV and the PC hub arrive (ADR-0015).
+ * [SecretStore] here, when WebDAV and the PC hub arrive (ADR-0016).
  */
 public object StandardBackendFactory : BackendFactory {
     override suspend fun open(backend: Backend): BlobStore =

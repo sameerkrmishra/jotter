@@ -183,7 +183,7 @@ Local SQLite tables (simplified; the schema is in `core/storage`):
   logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
 - `backend`: configured backends, their settings (never a secret,
-  [ADR-0015](adr/0015-where-secrets-live.md)) and the outcome of their last sync.
+  [ADR-0016](adr/0016-where-secrets-live.md)) and the outcome of their last sync.
 - `sync_read`: per backend, the files read in each device folder.
 - `sync_segment`, `backend_revision`: this device's segments on each backend, and
   the revisions known to be there.
@@ -402,8 +402,8 @@ codec. Documented as ADR-0007 in M6.
   (M3); 0012 [local folder publishing](adr/0012-local-folder-publishing.md) (M3);
   0013
   [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
-  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0015
-  [where backend secrets live](adr/0015-where-secrets-live.md) (M4).
+  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0016
+  [where backend secrets live](adr/0016-where-secrets-live.md) (M4).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.
