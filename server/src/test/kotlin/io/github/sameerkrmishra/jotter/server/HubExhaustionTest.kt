@@ -3,7 +3,6 @@
 
 package io.github.sameerkrmishra.jotter.server
 
-import com.sun.management.OperatingSystemMXBean
 import io.github.sameerkrmishra.jotter.backend.api.BackendUnavailableException
 import io.github.sameerkrmishra.jotter.backend.api.BlobInfo
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
@@ -36,8 +35,10 @@ import kotlin.time.TimeSource
 
 /**
  * Clients that never read their answers, and failures inside the hub. These measure what such
- * clients cost the process, not only what the hub reports: open file descriptors, CPU time, heap
- * after a collection, and slots. Linux only, for `/proc/self/fd`.
+ * clients cost the process, not only what the hub reports: open file descriptors, the hub's
+ * threads and their CPU time, heap after a collection, and slots. Linux only, for `/proc/self/fd`.
+ * CPU time is counted on the hub's own threads, not the process's, which a busy machine's garbage
+ * collection and JIT compilation would add to.
  */
 class HubExhaustionTest {
     private val hubs = TestHubs()
@@ -92,6 +93,7 @@ class HubExhaustionTest {
             val hub = hubs.start(limits)
             hub.localStore.writeNew("four", ByteArray(4 * 1024 * 1024))
             val baseline = openDescriptors()
+            val threadsBefore = connectionThreads()
             repeat(4) {
                 repeat(10) { requestWithoutReading(hub, "four") }
                 delay(300.milliseconds)
@@ -103,9 +105,11 @@ class HubExhaustionTest {
                     "the hub holds $held descriptors",
                 )
             }
-            // While they wait, nothing spins.
-            val cpu = cpuSeconds { delay(2.seconds) }
-            println("repro A: CPU $cpu s in 2 s")
+            // While they wait, nothing spins, and each connection has one thread.
+            val threads = connectionThreads() - threadsBefore
+            assertTrue(threads <= limits.maxConnections, "$threads connection threads")
+            val cpu = hubCpuSeconds { delay(2.seconds) }
+            println("repro A: $threads connection threads, hub CPU $cpu s in 2 s")
             assertTrue(cpu < MAX_IDLE_CPU_SECONDS, "$cpu s of CPU in 2 s while clients do not read")
             // The deadline cuts them: their descriptors are closed, though the clients keep theirs.
             eventually(1.minutes) {
@@ -172,7 +176,7 @@ class HubExhaustionTest {
                 hubDescriptors(baseline) <= 0,
                 "the hub still holds ${hubDescriptors(baseline)}",
             )
-            val cpu = cpuSeconds { delay(1.seconds) }
+            val cpu = hubCpuSeconds { delay(1.seconds) }
             println(
                 "stop: $stopTime, hub descriptors after ${hubDescriptors(
                     baseline,
@@ -268,8 +272,13 @@ class HubExhaustionTest {
         const val SLACK_DESCRIPTORS = 6
         const val HEAP_SLACK = 48 * MIB
 
-        // A spinning thread would take about a second of CPU per second.
-        const val MAX_IDLE_CPU_SECONDS = 0.5
+        // A spinning thread would take about a second of CPU per second, and the watch's looks
+        // take milliseconds.
+        const val MAX_IDLE_CPU_SECONDS = 0.25
+
+        /** The hub's threads are named so: accept, watch and connection threads. */
+        const val HUB_THREADS = "jotter-hub-"
+        const val CONNECTION_THREAD = "jotter-hub-connection"
 
         fun openDescriptors(): Int = File("/proc/self/fd").list()!!.size
 
@@ -279,11 +288,31 @@ class HubExhaustionTest {
             return runtime.totalMemory() - runtime.freeMemory()
         }
 
-        suspend fun cpuSeconds(during: suspend () -> Unit): Double {
-            val bean = ManagementFactory.getOperatingSystemMXBean() as OperatingSystemMXBean
-            val before = bean.processCpuTime
+        fun connectionThreads(): Int = hubThreads().count { it.name == CONNECTION_THREAD }
+
+        /** The hub's live threads, of every hub in this process. */
+        fun hubThreads(): List<Thread> =
+            Thread.getAllStackTraces().keys.filter { it.name.startsWith(HUB_THREADS) }
+
+        /** The CPU time of each of the hub's live threads, by thread ID. */
+        fun hubCpuNanos(): Map<Long, Long> {
+            val bean = ManagementFactory.getThreadMXBean()
+            check(bean.isThreadCpuTimeSupported) { "This JVM does not measure threads' CPU time" }
+            // -1 for a thread that has just ended: it takes no more CPU.
+            return hubThreads()
+                .associate { it.threadId() to bean.getThreadCpuTime(it.threadId()) }
+                .filterValues { it >= 0 }
+        }
+
+        /**
+         * The CPU time that the hub's threads take [during], counting a thread that starts
+         * meanwhile from nothing. Other threads, such as the garbage collector's, are not counted.
+         */
+        suspend fun hubCpuSeconds(during: suspend () -> Unit): Double {
+            val before = hubCpuNanos()
             during()
-            return (bean.processCpuTime - before) / NANOS_PER_SECOND
+            val taken = hubCpuNanos().entries.sumOf { (id, now) -> now - (before[id] ?: 0) }
+            return taken / NANOS_PER_SECOND
         }
 
         const val NANOS_PER_SECOND = 1e9
