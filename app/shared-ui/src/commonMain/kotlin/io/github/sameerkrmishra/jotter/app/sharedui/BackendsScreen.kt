@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.sharedui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
 import io.github.sameerkrmishra.jotter.app.sync.Backend
 import io.github.sameerkrmishra.jotter.app.sync.PeerConfig
 import io.github.sameerkrmishra.jotter.app.sync.WebDavConfig
@@ -45,6 +47,37 @@ internal const val BACKENDS_TITLE = "Sync"
 internal const val NO_BACKENDS =
     "This device syncs with no backend yet. Add a folder, such as a USB stick or a folder " +
         "that another program keeps in step with other computers."
+
+/** [NO_BACKENDS] on a device that cannot add a folder. */
+internal const val NO_BACKENDS_NOR_FOLDERS =
+    "This device syncs with no backend yet. Add a WebDAV server, or the hub on your PC."
+
+/** Below this width, as on a phone, a form's fields go one under another. */
+internal val NARROW_FORM = 600.dp
+
+/**
+ * A form's fields and button: side by side, each field as wide as its weight says, or one under
+ * another at full width where the screen is narrower than [NARROW_FORM].
+ *
+ * @param content Gets the modifier of a field of a given weight.
+ */
+@Composable
+internal fun Form(content: @Composable (field: (weight: Float) -> Modifier) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < NARROW_FORM) {
+            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+                content { Modifier.fillMaxWidth() }
+            }
+        } else {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                content { weight -> Modifier.weight(weight) }
+            }
+        }
+    }
+}
 
 /** The test tag of the card of the backend [id]. */
 internal fun backendTag(id: String) = "backend-$id"
@@ -74,7 +107,7 @@ internal fun BackendsScreen(
             Message(it) { TextButton(onClick = backends::dismissMessage) { Text("Dismiss") } }
         }
         BackendList(backends)
-        AddFolder(backends)
+        backends.foldersUnavailable?.let { Text(it) } ?: AddFolder(backends)
         AddServer(backends)
         AddHub(backends)
         backends.hub?.let { HubSection(it) }
@@ -98,7 +131,9 @@ internal fun BackendsScreen(
 
 @Composable
 private fun BackendList(backends: BackendsViewModel) {
-    if (backends.backends.isEmpty()) Text(NO_BACKENDS)
+    if (backends.backends.isEmpty()) {
+        Text(if (backends.foldersUnavailable == null) NO_BACKENDS else NO_BACKENDS_NOR_FOLDERS)
+    }
     backends.backends.forEach { backend ->
         key(backend.id) {
             BackendCard(
@@ -218,28 +253,25 @@ private fun PasswordDialog(
 
 @Composable
 private fun AddServer(backends: BackendsViewModel) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(spacing),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Form { field ->
         OutlinedTextField(
             value = backends.davUrl,
             onValueChange = { backends.editServer(url = it) },
-            modifier = Modifier.weight(2f).testTag(SERVER_URL_FIELD),
+            modifier = field(2f).testTag(SERVER_URL_FIELD),
             label = { Text("WebDAV folder URL, https://…") },
             singleLine = true,
         )
         OutlinedTextField(
             value = backends.davUser,
             onValueChange = { backends.editServer(user = it) },
-            modifier = Modifier.weight(1f).testTag(SERVER_USER_FIELD),
+            modifier = field(1f).testTag(SERVER_USER_FIELD),
             label = { Text("User name") },
             singleLine = true,
         )
         PasswordField(
             backends.davPassword,
             { backends.editServer(password = it) },
-            Modifier.weight(1f).testTag(SERVER_PASSWORD_FIELD),
+            field(1f).testTag(SERVER_PASSWORD_FIELD),
         )
         Button(
             onClick = backends::addServer,
@@ -272,14 +304,11 @@ private fun PasswordField(
 
 @Composable
 private fun AddFolder(backends: BackendsViewModel) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(spacing),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Form { field ->
         OutlinedTextField(
             value = backends.folder,
             onValueChange = backends::editFolder,
-            modifier = Modifier.weight(1f).testTag(FOLDER_FIELD),
+            modifier = field(1f).testTag(FOLDER_FIELD),
             label = { Text("Folder, such as /run/media/you/STICK") },
             singleLine = true,
         )

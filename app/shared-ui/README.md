@@ -26,8 +26,8 @@ such as the backend list, adding and removing backends and the sync scheduler, i
 
 | Type | What it is |
 |---|---|
-| `AppViewModel` | The main public class: the list, the open editor, `refresh` and `requestExit`. Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
-| `SyncControls` | The backend manager and scheduler of `app:sync`, for `AppViewModel`. Without it the app shows no backend screen |
+| `AppViewModel` | The main public class: the list, the open editor, `refresh` and `requestExit`; for a phone, `back` (Back from any screen, saving the editor first) and `keep` (stores the draft and the combined texts without closing anything, when the app goes to the background). Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
+| `SyncControls` | The backend manager and scheduler of `app:sync`, for `AppViewModel`. Without it the app shows no backend screen. `foldersUnavailable` replaces the folder form with a plain sentence, on Android ([ADR-0018](../../docs/adr/0018-android-app.md)) |
 | `JotterApp` | The one public composable, which calls `refresh` whenever its window gains focus |
 | `CannotOpenNotes` | What an app shows instead if the database could not be opened |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
@@ -177,6 +177,12 @@ not worth it for six lines.
   keeps the scheduler from syncing (`SyncScheduler.problem`). A backend that the
   screen finds reachable again after a failed try syncs at once. The screen's
   coroutines are a child of the app's scope, which closing it leaves running.
+  Its forms put their fields side by side, or one under another below 600 dp, as on a
+  phone (`Form`).
+- **On a phone** the Activity calls `back` for the system's Back and `keep` when it goes
+  to the background, where Android may end the process without warning. `back` closes the
+  screen on top as its own Back button does; on the note list it returns false and the
+  app closes. `PhoneTest` covers both, a device without folders and the narrow forms.
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
   or until dismissed. A failed read keeps what the list showed.
