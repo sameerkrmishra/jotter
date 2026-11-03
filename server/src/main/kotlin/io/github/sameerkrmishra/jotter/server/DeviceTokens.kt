@@ -16,6 +16,8 @@ import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.use
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.encoding.Base64
 import kotlin.uuid.Uuid
 
@@ -165,10 +167,10 @@ internal class DeviceTokens(
     private fun write(next: List<DeviceDto>) {
         val bytes = json.encodeToString(TokenFileDto(FORMAT_VERSION, next)).encodeToByteArray()
         val directory = file.parent ?: ".".toPath()
-        fileSystem.createDirectories(directory)
         val temporary = directory / "${file.name}.${Uuid.random().toHexString()}.tmp"
         try {
-            fileSystem.openReadWrite(temporary, mustCreate = true).use { handle ->
+            createPrivately(directory, temporary)
+            fileSystem.openReadWrite(temporary, mustExist = true).use { handle ->
                 handle.write(0, bytes, 0, bytes.size)
                 handle.flush()
             }
@@ -178,8 +180,33 @@ internal class DeviceTokens(
         }
     }
 
+    /**
+     * Creates [temporary] empty, readable by this user alone from the call that creates it, and
+     * [directory] with mode 0700 if it is missing. Another file system, as in tests, gets plain
+     * files.
+     */
+    private fun createPrivately(
+        directory: Path,
+        temporary: Path,
+    ) {
+        if (fileSystem !== FileSystem.SYSTEM) {
+            fileSystem.createDirectories(directory)
+            fileSystem.openReadWrite(temporary, mustCreate = true).close()
+            return
+        }
+        val nioDirectory = directory.toNioPath()
+        if (!Files.isDirectory(nioDirectory)) {
+            Files.createDirectories(nioDirectory, attributeOf("rwx------"))
+        }
+        Files.createFile(temporary.toNioPath(), attributeOf("rw-------"))
+    }
+
     private companion object {
         val json = Json { prettyPrint = true }
+
+        fun attributeOf(permissions: String) =
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString(permissions))
+
         val base64Url = Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT)
         val SHA256_HEX = Regex("[0-9a-f]{64}")
 

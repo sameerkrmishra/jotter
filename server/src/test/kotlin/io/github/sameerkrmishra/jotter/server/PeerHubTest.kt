@@ -35,6 +35,29 @@ class PeerHubTest {
     }
 
     @Test
+    fun theDevicesFileIsThisUsersAloneFromTheStart(): TestResult =
+        test {
+            val root = hubs.newPath()
+            val tokens = root / "config" / "devices.json"
+            val hub = PeerHub(HubConfig(root / "store", tokens))
+            hub.pair("Phone")
+
+            fun mode(path: okio.Path) =
+                java.nio.file.attribute.PosixFilePermissions.toString(
+                    java.nio.file.Files
+                        .getPosixFilePermissions(path.toNioPath()),
+                )
+            assertEquals("rw-------", mode(tokens))
+            assertEquals("rwx------", mode(tokens.parent!!))
+            hub.pair("Laptop")
+            assertEquals("rw-------", mode(tokens))
+            assertEquals(
+                listOf("devices.json"),
+                FileSystem.SYSTEM.list(tokens.parent!!).map { it.name },
+            )
+        }
+
+    @Test
     fun startStopAndStatus(): TestResult =
         test {
             val hub = PeerHub(config())
