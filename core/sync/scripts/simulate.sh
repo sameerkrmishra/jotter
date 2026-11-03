@@ -14,7 +14,7 @@ results=core/sync/build/test-results/${target}Test
 rm -f "$results"/*ConvergenceTest.xml
 
 JOTTER_SIM_START=$start JOTTER_SIM_CASES=$cases \
-    ./gradlew ":core:sync:${target}Test" --rerun --tests ConvergenceTest
+    ./gradlew ":core:sync:${target}Test" --rerun --tests "*ConvergenceTest"
 
 expected="Simulated seeds $start until $((start + cases)):"
 if ! grep -h "$expected" "$results"/*ConvergenceTest.xml; then
