@@ -9,7 +9,8 @@ out of `app:shared-ui`.
 
 ```kotlin
 val engine = SyncEngine(store, DeviceInfo("Linux", "linux"), Dispatchers.IO)
-val manager = BackendManager(store, engine, StandardBackendFactory, NoSecretStore, Dispatchers.IO)
+val secrets = linuxSecretStores(System::getenv, System.getProperty("user.home"), Dispatchers.IO)
+val manager = BackendManager(store, engine, StandardBackendFactory(secrets), secrets, Dispatchers.IO)
 when (val result = manager.addLocalFolder("/media/stick")) {
     is AddResult.NotAStoreYet -> // ask the user, then:
         manager.addLocalFolder("/media/stick", setUpNewStore = true)
@@ -20,18 +21,20 @@ SyncScheduler(manager::syncAll).start(scope, store.notes.observeRevisionMark())
 ```
 
 **Dependency rule:** `core:storage`, `core:sync`, `backend:api` (all in its API) and
-each backend implementation it can open, today `backend:localfolder`. No UI.
+each backend implementation it can open, today `backend:localfolder` and
+`backend:webdav`. No UI.
 
 ## API
 
 | Type | What it is |
 |---|---|
-| `BackendConfig`, `LocalFolderConfig`, `UnknownConfig` | Where a backend is and what secrets it needs. Stored as `kind` and JSON `settings` in the `backend` table, never with a secret. `UnknownConfig` is a kind this version cannot read, listed so that it can be removed, never synced |
+| `BackendConfig`, `LocalFolderConfig`, `WebDavConfig`, `UnknownConfig` | Where a backend is and what secrets it needs. Stored as `kind` and JSON `settings` in the `backend` table, never with a secret. `UnknownConfig` is a kind this version cannot read, listed so that it can be removed, never synced |
 | `Backend`, `Attempt`, `Outcome`, `BackendSync`, `BackendStatus` | A configured backend, how its last sync went, what one sync did, and its reachability now |
-| `BackendFactory`, `StandardBackendFactory` | Opens the `BlobStore` of a backend |
-| `BackendManager`, `AddResult` | Adds a local folder, removes a backend, syncs one or all, and reports status |
+| `BackendFactory`, `StandardBackendFactory`, `MissingSecretException` | Opens the `BlobStore` of a backend, reading its password |
+| `BackendManager`, `AddResult`, `PasswordChange` | Adds a local folder or a WebDAV server, replaces a password, removes a backend, syncs one or all, and reports status |
 | `SyncScheduler`, `SyncTiming` | When the desktop app syncs |
-| `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `NoSecretStore`, `SecretStoreException` | Where backend secrets live ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)) |
+| `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `SecretPlace`, `SecretStores`, `NoSecretStore`, `SecretStoreException`, `SecretStoreUnavailableException` | Where backend secrets live ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)) |
+| `SecretServiceStore`, `SecretFileStore`, `linuxSecretStores` | JVM only: the keyring through `secret-tool`, and the 0600 file the user may choose |
 | `describe(Reachability)` | Reachability in plain words |
 
 ## Adding a kind of backend
@@ -49,6 +52,39 @@ Then an `add` function in `BackendManager` for what adding one involves (for Web
 storing the app password, then checking that the server answers), and the forms in the
 apps. An older version lists a backend of a newer kind as `UnknownConfig` and never
 syncs it.
+
+## WebDAV and secrets
+
+- **Adding a WebDAV server** pings the collection with the password. A store is
+  added; a collection that is not one yet answers `NotAStoreYet`, and only a second
+  call with `setUpNewStore` runs `initialize()`, which refuses a server that ignores
+  `If-None-Match` (ADR-0017). Plain `http` is refused except to loopback. A missing
+  collection, a refused password or an unreachable server is `Refused` with the
+  reason in plain words. The password is stored before the backend's row, under
+  the new id, and deleted again if setting up or the row fails. Where no keyring
+  answers, nothing is added and the result is `NoKeyring`: the app offers the file
+  and calls again with `SecretPlace.FILE`.
+- **Where a password is** is a setting of the backend (`secrets: keyring|file` in its
+  JSON), never the password. `whereSecretsAre` says it for the status screen.
+- **A refused password** (`UnreachableReason.UNAUTHORIZED`, at `ping` or in the middle
+  of a cycle) ends a sync as `Outcome.UNAUTHORIZED`, which says to make a new app
+  password. The scheduler then waits its longest backoff, 30 minutes, instead of
+  retrying quickly; "Sync now" still tries at once. A password missing from its store,
+  as after restoring the database elsewhere, is `UNAUTHORIZED` too.
+  `changePassword` checks a new password with the server before storing it.
+- **Removing** deletes the passwords first: if the keyring cannot be reached, nothing
+  is removed and the `SecretStoreException` says why, so no password is left behind.
+- **`SecretServiceStore`** runs `secret-tool` with the secret on stdin (`store`) or
+  stdout (`lookup`), never in an argument or the environment, with
+  `DBUS_SESSION_BUS_ADDRESS` set to the session's bus or to `disabled:`, so it fails
+  closed and never starts a bus or keyring of its own. No `secret-tool`, no bus or no
+  provider is `SecretStoreUnavailableException`.
+- **`SecretFileStore`** writes each version to a new file created 0600 with `O_EXCL`
+  (`Files.createFile` with the permission attribute), then renames it into place, in
+  a directory created 0700, under a lock file. It refuses a file that others may read,
+  that is not the user's, or that is a link, and never quotes the file in an error.
+- **WebDAV stores are closed** after each sync and status, as each holds an HTTP
+  client.
 
 ## Design
 
@@ -107,6 +143,12 @@ syncs it.
 
 ## Tests
 
+`WebDavBackendTest` adds, changes and removes WebDAV backends against a stand-in
+server. `SecretServiceStoreTest` uses a stand-in `secret-tool` that logs its arguments
+and bus, to show that the secret is never in either, and runs the real `secret-tool`
+against a private `dbus-daemon` the test starts, with no keyring on it, to show it
+fails closed (no keyring daemon is installed here, so storing in a real keyring is not
+tested). `SecretFileStoreTest` checks the modes, links, damage and the XDG paths.
 `BackendManagerTest` uses real databases and real folders in a temporary directory:
 two devices converge through a folder, an unplugged folder and an empty mount point
 read as unreachable and are never set up, removing leaves the files, and failures of a

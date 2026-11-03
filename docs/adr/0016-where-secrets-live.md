@@ -69,7 +69,12 @@ is in that file, in plain text.
 Android (M5) will keep secrets with a key from the Android Keystore; that is M5's
 decision.
 
-**This record is a design until a backend needs a secret.** The Secret Service store
+**Built for WebDAV (M4).** `SecretServiceStore` and `SecretFileStore` in `app:sync`
+(JVM) implement this record; see `app/sync/README.md`. The fallback is offered when
+the keyring reports no bus, no provider or no `secret-tool`; a keyring that refuses
+otherwise, such as a dismissed unlock prompt, is an error and offers nothing.
+
+**This record was a design until a backend needed a secret.** The Secret Service store
 and the file are built, with their tests, by the first of WebDAV and the PC hub to
 need them, and must follow this record; until then only the interface, the test
 double and `NoSecretStore` exist.
