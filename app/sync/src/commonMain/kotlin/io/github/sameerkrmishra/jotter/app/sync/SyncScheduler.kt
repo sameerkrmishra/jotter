@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +23,17 @@ import kotlin.time.TimeSource
 
 /** The shortest wait before a retry of failed backends, whatever their state says. */
 private val MIN_RETRY = 1.seconds
+
+/** Sends [item] to [channel] after [wait], unless the returned job is cancelled first. */
+private fun <T> CoroutineScope.sendLater(
+    channel: SendChannel<T>,
+    wait: Duration,
+    item: T,
+): Job =
+    launch {
+        delay(wait)
+        channel.send(item)
+    }
 
 /**
  * When [SyncScheduler] syncs.
@@ -184,20 +196,13 @@ public class SyncScheduler(
             if (request is Request.Mark) {
                 if (marks.isNew(request.mark)) {
                     pendingEdit?.cancel()
-                    pendingEdit = scope.launch { later(timing.afterEdit, Request.Scheduled) }
+                    pendingEdit = scope.sendLater(requests, timing.afterEdit, Request.Scheduled)
                 }
                 continue
             }
             // Requests that queued up meanwhile are all served by this one round.
-            var kind = request
             val waiting = mutableListOf<CompletableDeferred<Unit>>()
-            if (request is Request.Waited) waiting += request.done
-            while (true) {
-                val next = requests.tryReceive().getOrNull() ?: break
-                if (next is Request.Mark) marks.isNew(next.mark)
-                if (next is Request.Waited) waiting += next.done
-                kind = maxOf(kind, next, compareBy { it.reach })
-            }
+            val kind = withQueued(request, marks, waiting)
             if (kind != Request.Retry) {
                 pendingEdit?.cancel()
                 marks.syncing()
@@ -209,16 +214,28 @@ public class SyncScheduler(
                 waiting.forEach { if (!scope.isActive) it.cancel() else it.complete(Unit) }
             }
             retry?.cancel()
-            retry = nextRetry()?.let { wait -> scope.launch { later(wait, Request.Retry) } }
+            retry = nextRetry()?.let { wait -> scope.sendLater(requests, wait, Request.Retry) }
         }
     }
 
-    private suspend fun later(
-        wait: Duration,
-        request: Request,
-    ) {
-        delay(wait)
-        requests.send(request)
+    /**
+     * Takes every request queued behind [first], and returns the one of widest reach. Marks go to
+     * [marks], and whoever waits for this round goes to [waiting].
+     */
+    private fun withQueued(
+        first: Request,
+        marks: Marks,
+        waiting: MutableList<CompletableDeferred<Unit>>,
+    ): Request {
+        var kind = first
+        var next: Request? = first
+        while (next != null) {
+            if (next is Request.Mark) marks.isNew(next.mark)
+            if (next is Request.Waited) waiting += next.done
+            kind = maxOf(kind, next, compareBy { it.reach })
+            next = requests.tryReceive().getOrNull()
+        }
+        return kind
     }
 
     /**
