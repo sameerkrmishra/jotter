@@ -100,6 +100,8 @@ module. The same `commonTest` suite runs on a device or emulator:
 ./gradlew :core:sqlite:connectedAndroidDeviceTest
 ```
 
-CI has no emulator, so this is run by hand when the module changes. The Kotlin
-code is common to all targets, so the JVM and linuxX64 runs cover it; the
-device run checks the Android packaging and native library.
+CI's `android-device` job runs it on API 26 and 36 emulators. The Kotlin code
+is common to all targets, so the JVM and linuxX64 runs cover it; the device run
+checks the Android packaging and native library. `BundledSqliteTest`, on the
+device only, checks that the driver runs the bundled SQLite with FTS5, not
+Android's own.
