@@ -71,8 +71,9 @@ Gradle user home, the second an empty one of its own that reads only downloaded 
 from it, so no library dexed by the first is reused. On 2026-11-04 five builds of the same
 sources gave the same APK, SHA-256 `06981c62…fdab0061`: three local ones with Temurin
 21.0.12.1+1, in a worktree and in two exported trees, and two in CI (run 41722235749, whose log
-resolves Temurin `21.0.13+9` and Zulu `21.0.13`). The release build needs no Kotlin/Native
-toolchain.
+resolves Temurin `21.0.13+9` and Zulu `21.0.13`). With EmojiCompat's initializer removed from
+the manifest, the APK became `385c2961…df698a83`, again the same in two runs of the script with
+the second build's own Gradle home. The release build needs no Kotlin/Native toolchain.
 
 ## Consequences
 
