@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.sync
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
@@ -356,6 +357,74 @@ class SyncSchedulerTest {
             testScheduler.runCurrent()
             assertFalse(scheduler.syncing.value)
             assertEquals(0, backends.rounds.size)
+        }
+
+    @Test
+    fun syncAndWaitReturnsAfterARoundThatStartedLater() =
+        runTest {
+            val backends = Backends(listOf(usb, dav))
+            val gate = CompletableDeferred<Unit>()
+            backends.blockNext = gate
+            val (scheduler, _) = start(backends)
+            // The round on start is running: it does not count for a call made now.
+            val waited = backgroundScope.async { scheduler.syncAndWait() }
+            val second = backgroundScope.async { scheduler.syncAndWait() }
+            testScheduler.runCurrent()
+            gate.complete(Unit)
+            testScheduler.runCurrent()
+            assertTrue(waited.isCompleted)
+            assertTrue(second.isCompleted)
+            // Both were served by one more round.
+            assertEquals(2, backends.rounds.size)
+        }
+
+    @Test
+    fun syncAndWaitLeavesOutBackendsThatWait() =
+        runTest {
+            val backends = Backends(listOf(usb, dav))
+            backends.failing["dav"] = Outcome.UNREACHABLE
+            val (scheduler, _) = start(backends)
+            backends.failing.clear()
+            val waited = backgroundScope.async { scheduler.syncAndWait() }
+            testScheduler.runCurrent()
+            assertTrue(waited.isCompleted)
+            assertEquals(listOf("usb"), backends.rounds.last())
+        }
+
+    @Test
+    fun syncAndWaitIsCancelledWhenTheSchedulerStops() =
+        runTest {
+            val backends = Backends(listOf(usb))
+            backends.blockNext = CompletableDeferred()
+            val scheduler = SyncScheduler(backends::syncAll, timing, testScheduler.timeSource)
+            val job = scheduler.start(backgroundScope, MutableStateFlow(1L))
+            testScheduler.runCurrent()
+            // One waits for the next round, one is in the running round's queue.
+            val queued = backgroundScope.async { scheduler.syncAndWait() }
+            testScheduler.runCurrent()
+            job.cancel()
+            testScheduler.runCurrent()
+            assertTrue(queued.isCancelled)
+            // And a call after the stop does not wait for ever.
+            val late = backgroundScope.async { scheduler.syncAndWait() }
+            testScheduler.runCurrent()
+            assertTrue(late.isCancelled)
+        }
+
+    @Test
+    fun syncAndWaitIsCancelledWhenItsRoundIsStopped() =
+        runTest {
+            val backends = Backends(listOf(usb))
+            val scheduler = SyncScheduler(backends::syncAll, timing, testScheduler.timeSource)
+            val job = scheduler.start(backgroundScope, MutableStateFlow(1L))
+            testScheduler.runCurrent()
+            backends.blockNext = CompletableDeferred()
+            val waited = backgroundScope.async { scheduler.syncAndWait() }
+            testScheduler.runCurrent()
+            assertTrue(scheduler.syncing.value)
+            job.cancel()
+            testScheduler.runCurrent()
+            assertTrue(waited.isCancelled)
         }
 
     private companion object {

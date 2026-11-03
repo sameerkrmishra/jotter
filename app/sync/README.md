@@ -32,7 +32,7 @@ each backend implementation it can open: `backend:localfolder`, `backend:webdav`
 | `Backend`, `Attempt`, `Outcome`, `BackendSync`, `BackendStatus` | A configured backend, how its last sync went, what one sync did, and its reachability now |
 | `BackendFactory`, `StandardBackendFactory`, `MissingSecretException` | Opens the `BlobStore` of a backend, reading its password |
 | `BackendManager`, `AddResult`, `PasswordChange` | Adds a local folder or a WebDAV server, replaces a password, removes a backend, syncs one or all, and reports status |
-| `SyncScheduler`, `SyncTiming` | When the desktop app syncs |
+| `SyncScheduler`, `SyncTiming` | When the desktop and Android apps sync |
 | `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `SecretPlace`, `SecretStores`, `NoSecretStore`, `SecretStoreException`, `SecretStoreUnavailableException` | Where backend secrets live ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)) |
 | `SecretServiceStore`, `SecretFileStore`, `linuxSecretStores` | JVM only: the keyring through `secret-tool`, and the 0600 file the user may choose |
 | `describe(Reachability)` | Reachability in plain words |
@@ -147,6 +147,11 @@ syncs it.
   `SyncEngine` allows. Nothing else stops the scheduler: a round that throws, or a
   revision mark flow that fails (it is collected again after 30 s), shows in
   `SyncScheduler.problem` in plain words until it works again.
+- **Background jobs.** `syncAndWait` asks for a scheduled round and returns once a
+  round that started after the call has ended, so that a job such as Android's
+  WorkManager worker (`app:android`) does not end before its sync. It goes through the
+  same queue, so it never runs beside another round and honours the backoff above. A
+  round already running does not count, and stopping the scheduler cancels the wait.
 - **Coroutines.** Database calls run on the `io` context given; `SyncEngine` and each
   backend use their own dispatchers. Nothing blocks the caller's thread.
 

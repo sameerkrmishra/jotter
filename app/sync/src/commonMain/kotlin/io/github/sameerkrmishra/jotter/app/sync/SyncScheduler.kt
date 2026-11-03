@@ -1,15 +1,18 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.updateAndGet
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.time.ComparableTimeMark
 import kotlin.time.Duration
@@ -42,8 +45,9 @@ public data class SyncTiming(
 )
 
 /**
- * Decides when the desktop app syncs (PLAN.md §6.3): on start, a little after edits, every
- * [SyncTiming.period], and when the user asks. It runs one round at a time, over every backend in
+ * Decides when an app syncs (PLAN.md §6.3): on start, a little after edits, every
+ * [SyncTiming.period], when the user asks, and when a background job, such as Android's
+ * WorkManager, asks with [syncAndWait]. It runs one round at a time, over every backend in
  * turn, so a database never has two syncs of this process at once.
  *
  * A backend whose sync failed is left out of the following rounds for a while, a longer while
@@ -102,12 +106,41 @@ public class SyncScheduler(
                     requests.send(Request.Scheduled)
                 }
             }
-            serve(this)
+            try {
+                serve(this)
+            } finally {
+                // Nobody serves what is still asked for, so whoever waits for it is told.
+                requests.close()
+                while (true) {
+                    val left = requests.tryReceive().getOrNull() ?: break
+                    if (left is Request.Waited) left.done.cancel()
+                }
+            }
         }
 
     /** Syncs every backend as soon as the running round is over, failed ones included. */
     public fun syncNow() {
         requests.trySend(Request.Now)
+    }
+
+    /**
+     * Asks for a round, as the period does, and returns once a round that started after this call
+     * has ended: for a background job that must not end before its sync, such as Android's
+     * WorkManager. Backends still waiting after a failure are left out, as in any scheduled round,
+     * and how each backend's sync went is in its outcome. A round that is already running does not
+     * count, as it may have read the backends before this call.
+     *
+     * @throws CancellationException if the scheduler stops before such a round ends. Call it after
+     *   [start]: before, it waits for the round that the start brings.
+     */
+    public suspend fun syncAndWait() {
+        val done = CompletableDeferred<Unit>()
+        try {
+            requests.send(Request.Waited(done))
+        } catch (e: ClosedSendChannelException) {
+            throw CancellationException("The sync scheduler has stopped", e)
+        }
+        done.await()
     }
 
     @Suppress("TooGenericExceptionCaught") // Whatever fails, sync after edits must come back.
@@ -157,16 +190,24 @@ public class SyncScheduler(
             }
             // Requests that queued up meanwhile are all served by this one round.
             var kind = request
+            val waiting = mutableListOf<CompletableDeferred<Unit>>()
+            if (request is Request.Waited) waiting += request.done
             while (true) {
                 val next = requests.tryReceive().getOrNull() ?: break
                 if (next is Request.Mark) marks.isNew(next.mark)
+                if (next is Request.Waited) waiting += next.done
                 kind = maxOf(kind, next, compareBy { it.reach })
             }
             if (kind != Request.Retry) {
                 pendingEdit?.cancel()
                 marks.syncing()
             }
-            round(kind)
+            try {
+                round(kind)
+            } finally {
+                // When the scheduler stops in the middle, cancelled: the round did not end.
+                waiting.forEach { if (!scope.isActive) it.cancel() else it.complete(Unit) }
+            }
             retry?.cancel()
             retry = nextRetry()?.let { wait -> scope.launch { later(wait, Request.Retry) } }
         }
@@ -296,6 +337,11 @@ public class SyncScheduler(
         data object Retry : Request(Reach.FAILED)
 
         data object Scheduled : Request(Reach.DUE)
+
+        /** A scheduled round that [done] waits for. */
+        class Waited(
+            val done: CompletableDeferred<Unit>,
+        ) : Request(Reach.DUE)
 
         data object Now : Request(Reach.ALL)
     }
