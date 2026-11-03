@@ -141,7 +141,7 @@ Each module has one job and a small public API. Internal details are marked
 | License | Apache-2.0 | Free use; attribution required via LICENSE + NOTICE; patent grant |
 | UI | Compose Multiplatform | One UI codebase for Android and Linux |
 | DB | SQLDelight + bundled SQLite (FTS5) | §2 |
-| HTTP | Ktor client; Ktor's sockets and HTTP parser for the hub ([ADR-0015](adr/0015-pc-hub-peer-protocol.md)) | KMP-native, used for WebDAV, peer and server |
+| HTTP | Ktor client; JDK sockets and Ktor's HTTP parser for the hub ([ADR-0015](adr/0015-pc-hub-peer-protocol.md)) | KMP-native, used for WebDAV, peer and server |
 | Serialization | kotlinx.serialization (JSON) | Readable change files, easy to debug |
 | Markdown | JetBrains `markdown` parser + a Compose renderer | KMP, maintained |
 | DI | Manual constructor injection with one composition root per app | Easiest to read. No framework to learn |

@@ -39,7 +39,7 @@ write a new ADR and mark the old one as amended or superseded.
 | [0003](0003-revision-dag-and-three-way-merge.md) | Revision DAG with three-way merge | Accepted, amended by 0009, 0011, 0013 |
 | [0004](0004-immutable-change-segments.md) | Immutable change segments on dumb blob stores | Accepted, amended by 0014 |
 | [0005](0005-manual-dependency-injection.md) | Manual constructor injection | Accepted |
-| [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted, amended by 0010 |
+| [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted, amended by 0010, 0015 |
 | [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
 | [0010](0010-compose-ui-outside-linuxx64-rule.md) | Compose UI stays outside the linuxX64 rule | Accepted |
 | [0011](0011-touching-changes-and-merge-format.md) | Touching changes merge, and the merge rules are part of the sync format | Accepted, amended by 0013 |

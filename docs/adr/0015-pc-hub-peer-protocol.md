@@ -20,8 +20,9 @@ users' devices, or a compromised machine. So security is the main risk, followed
 by a bad client exhausting the PC that the user is working on.
 
 Shared modules build for linuxX64 too
-([ADR-0006](0006-native-compatible-shared-modules.md)), so the client and the
-server must as well, and must be tested on every target.
+([ADR-0006](0006-native-compatible-shared-modules.md)), so the client must as
+well, and must be tested on every target. The server runs only inside the desktop
+app's JVM; whether it must follow the rule is decided below.
 
 ## Decision
 
@@ -136,37 +137,63 @@ HTTP/1.1 over TCP, plain text, version 1. All of it is in
 A bad or broken client must not exhaust the PC, which runs the user's desktop app
 in the same process.
 
-**The hub keeps its own accept loop** over Ktor's sockets (`ktor-network`) and
-HTTP/1.1 parser (`ktor-http-cio`), not Ktor's CIO server engine. The engine has no
-limit on connections, no time limit for a request's head, and no way to count a
-connection until its socket has really closed; each of those is a limit below.
-This was reviewed and kept: the loop is short, and the parsing is still Ktor's.
+**The hub's socket layer is the JDK's blocking sockets, and the server module is
+JVM-only.** A first version used Ktor's raw sockets (`ktor-network`) under an accept
+loop of its own. Review showed that it could not be bounded: Ktor's socket writer
+takes a whole answer at once, so writing "finished" while a client read nothing; its
+`dispose()` left the descriptor open and the writer spinning a core until the client
+closed; and 40 clients that never read left about 40 descriptors, 450 to 500 MiB of
+heap and about 700% CPU behind, while the hub reported no open connections. Since the
+hub runs only inside the desktop app's JVM, it now uses `java.net.ServerSocket` and
+`Socket`, with one thread per connection under the connection cap:
+
+- `Socket.close()` frees the descriptor at once and ends any blocked read or write
+  on it, on its thread, with an exception. That is the one operation everything
+  else rests on, and it is the JDK's.
+- A blocked thread uses no CPU. With at most 16 connections, at most 16 threads, an
+  accept thread and a watch thread exist.
+- Answers are written in 64 KiB parts to a blocking stream, so a write blocks while
+  the client does not read, and the hub knows exactly how far each answer got.
+- A watch thread looks at every connection every 50 ms and closes the socket of one
+  that is past its head's time, past the idle time since bytes last moved in either
+  direction, or past its request's deadline.
+
+NIO with a selector would need fewer threads, but its correctness is harder to show,
+and 16 threads cost little. Ktor's HTTP/1.1 parser (`ktor-http-cio`) still parses
+request heads, and the protocol is unchanged. The server keeps its own loop rather
+than an HTTP server library for the reasons above: no library offered all of these
+limits together.
+
+**ADR-0006.** The `server` module leaves the linuxX64 rule, as an app module may:
+it is not shared, has no caller outside the desktop app (or a later JVM CLI
+command), and uses JDK sockets. `backend:peer`, the client, stays multiplatform and
+is tested on the JVM, the Android host and linuxX64. A native CLI that wanted to run
+the hub would need its own socket layer.
 
 Defaults, in `HubLimits`:
 
 | Limit | Default | What it bounds |
 |---|---|---|
-| `maxConnections` | 16 | Sockets. A connection counts until its socket has closed, not until its answer was handed to Ktor, which buffers it. The loop accepts the next connection only when one ends, so further clients wait in the kernel's listen queue, not in memory |
-| `maxConnectionsPerClient` | 8 | Connections from one address, with a token or not. Further ones are cut at once, so one tailnet node cannot take every slot |
+| `maxConnections` | 16 | Sockets and threads. A connection's slot comes back only after its socket is closed. The accept thread takes the next connection only when a slot is free, so further clients wait in the kernel's listen queue, not in memory |
+| `maxConnectionsPerClient` | 8 | Connections from one address, with a token or not. Further ones are closed at once, so one tailnet node cannot take every slot |
 | request head | 16 KiB, in `headerTimeout` = 10 s | Memory and time before authentication |
 | body | 32 MiB, with a plain `Content-Length` | Checked before reading; chunked bodies are refused (411) |
-| `idleTimeout` | 30 s | A body that stalls is dropped, and nothing is written |
+| `idleTimeout` | 30 s | A body, or an answer, that moves no bytes for this long is cut, and nothing is written |
 | `requestDeadline` | 15 min | One request in all, from its first byte until the client has taken the whole answer; 32 MiB at about half a megabit per second |
-| `maxTransfers` | 4 | Files held in memory at once. A read keeps its transfer until the client has taken the answer or the deadline cuts it |
+| `maxTransfers` | 4 | Files held in memory at once. A read keeps its transfer until its answer is written or its socket is closed |
 
 A body is read whole into memory and only then passed to `writeNew`, so a body
-that breaks off or stalls writes nothing. Answers are not streamed: `BlobStore.read`
-returns a whole file, so the hub holds it, and Ktor's write buffer may hold a copy.
-Memory for files is so bounded by about 2 × `maxTransfers` × 32 MiB. A client that
-never reads its answer holds a connection and a transfer until the deadline, then
-is cut; when the hub is done with a connection it closes it and cuts it if it has
-not closed within a second.
+that breaks off or stalls writes nothing. Answers are not streamed from the store:
+`BlobStore.read` returns a whole file, which the hub holds while writing it from the
+same array. Memory for files is so bounded by `maxTransfers` × 32 MiB. A client that
+never reads its answer holds a slot and a transfer until the idle time or the
+deadline, and then its socket is closed and both come back.
 
-Each connection runs on its own in a supervisor, so an exception or `Error` in one,
-such as running out of memory, ends that connection only. If the accept loop itself
-ends for any reason other than `stop`, the status becomes `Failed` with the reason,
-and `start` serves again. `stop` ends every connection within about five seconds,
-cutting those that do not end.
+Each connection runs on its own thread; an exception or `Error` there, such as
+running out of memory, ends that connection only. If the accept thread ends for any
+reason other than `stop`, the status becomes `Failed` with the reason, and `start`
+serves again. `stop` closes the listening socket and every connection's socket, and
+waits at most five seconds for their threads, which closing has already woken.
 
 The client bounds what it reads the same way: 32 MiB for a file or a listing, and
 64 KiB for an error.
@@ -225,8 +252,11 @@ There is no discovery, broadcast or QR code in this decision.
 ### Positive
 
 - The contract suite runs end to end, client to server to local folder, on the
-  JVM, the Android host and linuxX64, with the hub stopped and with its folder
-  gone. Through the hub, a store behaves exactly as a local one.
+  JVM, with the hub stopped and with its folder gone. Through the hub, a store
+  behaves exactly as a local one. The client's own tests run on the JVM, the
+  Android host and linuxX64.
+- Descriptors, threads, CPU and memory of the hub are bounded and measured in tests
+  with clients that never read.
 - Nothing reaches the store without a token, a lost device is unpaired alone, and
   the hub keeps no secret worth stealing.
 - The hub cannot be bound to the LAN or the internet by a configuration slip.
@@ -244,6 +274,8 @@ There is no discovery, broadcast or QR code in this decision.
   notes. The same process could read the notes on disk.
 - A hand-written accept loop and request handling is code to maintain and get
   right, though the parsing is Ktor's.
+- The hub is JVM-only: a native CLI could not run it without a socket layer of its
+  own (ADR-0006 exemption above).
 - One connection per request costs a TCP handshake per file; a first sync of
   thousands of segments opens thousands of connections.
 - Slow clients on two or more addresses can hold every connection for up to the
@@ -282,6 +314,9 @@ There is no discovery, broadcast or QR code in this decision.
   would make tokens unnecessary between the user's own nodes, but ties the hub to a
   Tailscale API and daemon, and `tsnet` is a Go library.
 - **One shared pairing secret:** simpler, but a lost device means re-pairing all.
+- **Ktor's raw sockets under our own loop:** the first version. Not chosen after
+  review: a socket could not be truly closed, and answers could not be held
+  back, as "The hub's socket layer" says.
 - **Ktor's server engine (CIO) with routing:** less code, but no cap on
   connections and no time limit for the request head; an idle or slow client
   costs a coroutine and a socket for as long as it likes.
