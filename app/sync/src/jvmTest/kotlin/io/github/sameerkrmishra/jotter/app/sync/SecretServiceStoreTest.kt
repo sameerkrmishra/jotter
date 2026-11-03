@@ -101,6 +101,27 @@ class SecretServiceStoreTest {
         }
 
     @Test
+    fun aClearThatSaysNothingIsCheckedWithALookup() =
+        runTest {
+            val store = store()
+            // Nothing to delete: clear ends with 1 silently, and a lookup confirms it.
+            store.delete(key)
+
+            store.write(key, Secret(password))
+            directory.resolve("dismiss").writeText("")
+            val locked = assertFailsWith<SecretStoreException> { store.delete(key) }
+            assertFalse(locked is SecretStoreUnavailableException)
+            assertTrue(locked.message!!.contains("the keyring may be locked"), locked.message)
+            assertTrue(locked.message!!.contains("Unlock your keyring"), locked.message)
+            assertFalse(password in locked.message!!)
+            assertEquals(password, store.read(key)?.reveal())
+
+            directory.resolve("dismiss").toFile().delete()
+            store.delete(key)
+            assertNull(store.read(key))
+        }
+
+    @Test
     fun withoutASessionBusItFailsClosed() =
         runTest {
             directory.resolve("fail").writeText("Unknown or unsupported transport")
@@ -250,7 +271,9 @@ class SecretServiceStoreTest {
         /**
          * Stands in for `secret-tool`: keeps each item in a file next to itself, and logs its
          * arguments and its bus. A file `fail` makes it print that and exit with 1 (or what `exit`
-         * says), and `hang` makes it wait.
+         * says), and `hang` makes it wait. Like the real one, `clear` ends with 1 and says nothing
+         * when there is no such item; a file `dismiss` makes it do so as though an unlock prompt
+         * was dismissed, deleting nothing.
          */
         val FAKE_TOOL =
             """
@@ -271,7 +294,10 @@ class SecretServiceStoreTest {
             case "${'$'}op" in
                 store) cat > "${'$'}item" ;;
                 lookup) [ -f "${'$'}item" ] || exit 1; cat "${'$'}item" ;;
-                clear) rm -f "${'$'}item" ;;
+                clear)
+                    [ -f "${'$'}item" ] || exit 1
+                    if [ -f "${'$'}dir/dismiss" ]; then exit 1; fi
+                    rm "${'$'}item" ;;
             esac
             """.trimIndent() + "\n"
     }

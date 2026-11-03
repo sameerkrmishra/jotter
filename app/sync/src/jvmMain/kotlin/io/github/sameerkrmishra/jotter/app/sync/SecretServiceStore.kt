@@ -63,7 +63,27 @@ public class SecretServiceStore(
 
     override suspend fun delete(key: SecretKey) {
         val result = run(listOf("clear") + attributes(key), input = null)
-        if (result.exit != 0 && !result.isNothingFound) throw failure("delete", result)
+        val problem =
+            when {
+                result.exit == 0 -> null
+                result.isNothingFound -> stillThere(key)
+                else -> failure("delete", result)
+            }
+        if (problem != null) throw problem
+    }
+
+    /**
+     * After `clear` ended with 1 without a word, which is nothing to delete or an unlock prompt
+     * the user dismissed: null if a lookup confirms that [key] is gone, else why it may still be
+     * there, so that the caller does not go on as if it were deleted.
+     */
+    private suspend fun stillThere(key: SecretKey): SecretStoreException? {
+        val check = run(listOf("lookup") + attributes(key), input = null)
+        return when {
+            check.isNothingFound -> null
+            check.exit == 0 -> SecretStoreException(MAY_BE_LOCKED)
+            else -> failure("delete", check)
+        }
     }
 
     private fun attributes(key: SecretKey) =
@@ -180,6 +200,10 @@ public class SecretServiceStore(
         const val NO_SESSION =
             "Jotter cannot reach a keyring: there is no desktop session here, as over SSH or in " +
                 "a cron job."
+
+        const val MAY_BE_LOCKED =
+            "The keyring did not confirm that the password was deleted: the keyring may be " +
+                "locked. Unlock your keyring and try again."
 
         const val NO_PROVIDER =
             "Jotter cannot reach a keyring: no keyring program, such as GNOME Keyring, KWallet " +
