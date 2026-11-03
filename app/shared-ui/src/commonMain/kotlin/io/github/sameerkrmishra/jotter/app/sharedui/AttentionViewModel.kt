@@ -10,6 +10,7 @@ import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
 import io.github.sameerkrmishra.jotter.core.storage.InvalidRevision
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.OpenConflict
+import io.github.sameerkrmishra.jotter.core.storage.ResolutionDraft
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +26,7 @@ import kotlinx.coroutines.withContext
 internal const val CONFLICT_LABEL = "conflicting edits"
 internal const val WAITING_LABEL = "an edit is waiting"
 internal const val SET_ASIDE_LABEL = "text set aside"
+internal const val UNSAVED_LABEL = "a combined text is not saved"
 internal const val UNTITLED = "Untitled note"
 
 /**
@@ -36,6 +38,7 @@ internal const val UNTITLED = "Untitled note"
  * @property conflicts Open conflicts: two edits of the same lines.
  * @property hidden Edits the note does not show yet, with their text.
  * @property invalid Text that sync does not use, kept so that it is not lost.
+ * @property drafts Texts the user is combining by hand, kept on this device.
  */
 internal data class NoteAttention(
     val noteId: NoteId,
@@ -43,6 +46,7 @@ internal data class NoteAttention(
     val conflicts: List<OpenConflict>,
     val hidden: List<HiddenHead>,
     val invalid: List<InvalidRevision>,
+    val drafts: List<ResolutionDraft>,
 ) {
     /** A few words for the card and the editor, such as "conflicting edits". */
     val label: String
@@ -56,13 +60,15 @@ internal data class NoteAttention(
                     }
                 },
                 SET_ASIDE_LABEL.takeIf { invalid.isNotEmpty() },
+                UNSAVED_LABEL.takeIf { drafts.isNotEmpty() },
             ).joinToString(", ")
 }
 
 /**
  * The notes that need the user's attention after a sync, from core:sync's lists of open conflicts,
- * hidden heads and text that does not count. Nothing on these lists may stay out of sight, which
- * is why the grid marks each note and the "Needs attention" view lists them all.
+ * hidden heads, text that does not count, and combined texts the user has not saved yet. Nothing
+ * on these lists may stay out of sight, which is why the grid marks each note and the "Needs
+ * attention" view lists them all.
  */
 @Stable
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -93,8 +99,9 @@ internal class AttentionViewModel(
                         conflicts.observeOpen(),
                         conflicts.observeHidden(),
                         conflicts.observeInvalid(),
-                    ) { open, hidden, invalid -> Triple(open, hidden, invalid) }
-                        .mapLatest { (open, hidden, invalid) -> group(open, hidden, invalid) }
+                        conflicts.observeDrafts(),
+                        ::Lists,
+                    ).mapLatest(::group)
                         .catch { failed = true }
                 }.collect {
                     entries = it
@@ -104,17 +111,20 @@ internal class AttentionViewModel(
         }
     }
 
-    private suspend fun group(
-        open: List<OpenConflict>,
-        hidden: List<HiddenHead>,
-        invalid: List<InvalidRevision>,
-    ): List<NoteAttention> {
-        val ids = (open.map { it.noteId } + hidden.map { it.noteId } + invalid.map { it.noteId })
+    private suspend fun group(lists: Lists): List<NoteAttention> {
+        val open = lists.open
+        val hidden = lists.hidden
+        val invalid = lists.invalid
+        val drafts = lists.drafts
+        val ids =
+            open.map { it.noteId } + hidden.map { it.noteId } + invalid.map { it.noteId } +
+                drafts.map { it.noteId }
         return ids.distinct().sortedBy { it.toString() }.map { id ->
             val texts =
                 open.filter { it.noteId == id }.map { it.losingTitle to it.losingBody } +
                     hidden.filter { it.noteId == id }.map { it.title to it.body } +
-                    invalid.filter { it.noteId == id }.map { it.title to it.body }
+                    invalid.filter { it.noteId == id }.map { it.title to it.body } +
+                    drafts.filter { it.noteId == id }.map { it.title to it.body }
             val note = withContext(io) { notes.get(id) }
             NoteAttention(
                 noteId = id,
@@ -122,9 +132,17 @@ internal class AttentionViewModel(
                 conflicts = open.filter { it.noteId == id },
                 hidden = hidden.filter { it.noteId == id },
                 invalid = invalid.filter { it.noteId == id },
+                drafts = drafts.filter { it.noteId == id },
             )
         }
     }
+
+    private data class Lists(
+        val open: List<OpenConflict>,
+        val hidden: List<HiddenHead>,
+        val invalid: List<InvalidRevision>,
+        val drafts: List<ResolutionDraft>,
+    )
 }
 
 /** The first title, or else first line of a body, that has text among [texts]. */

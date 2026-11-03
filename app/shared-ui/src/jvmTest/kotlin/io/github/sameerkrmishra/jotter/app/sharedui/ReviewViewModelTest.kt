@@ -7,9 +7,10 @@ import io.github.sameerkrmishra.jotter.core.storage.HiddenHead
 import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
 import io.github.sameerkrmishra.jotter.core.storage.InvalidReason
 import io.github.sameerkrmishra.jotter.core.storage.InvalidRevision
-import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
 import io.github.sameerkrmishra.jotter.core.storage.OpenConflict
+import io.github.sameerkrmishra.jotter.core.storage.ResolutionDraft
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolution
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,6 +21,7 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /** The review of a note's sync problems, on states that core:sync itself made. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ReviewViewModelTest : EditorTest() {
     private val world = SyncWorld()
 
@@ -43,6 +45,27 @@ class ReviewViewModelTest : EditorTest() {
     private fun ReviewViewModel.conflict() =
         Decision.Conflict(conflictDetails.single().conflict.mergeId)
 
+    private fun ReviewViewModel.shownHead() = conflictDetails.single().shownHeadId
+
+    /** Answers the one conflict on what the review shows now. */
+    private fun ReviewViewModel.answer(resolution: ConflictResolution) =
+        decide(conflict(), resolution, shownHead())
+
+    private fun Fixture.combined(review: ReviewViewModel): CombinedDraft {
+        review.combineByHand(review.conflict(), review.shownHead())
+        settle()
+        return assertNotNull(review.draftFor(review.conflict()))
+    }
+
+    /** Edits the note as the editor or the CLI would, on what it shows now. */
+    private fun Fixture.editMeanwhile(
+        note: NoteId,
+        body: String,
+    ): Note {
+        val shown = assertNotNull(notes.get(note))
+        return notes.edit(note, shown.revisionId, shown.title, body).also { settle() }
+    }
+
     @Test
     fun aConflictShowsBothVersionsAndTheTextWithMarkers() =
         test {
@@ -54,6 +77,7 @@ class ReviewViewModelTest : EditorTest() {
             )
             assertTrue(details.markedBody.contains("<<<<<<< shown"))
             assertEquals(details.shownBody, review.note?.body)
+            assertEquals(review.note?.revisionId, details.shownHeadId)
             assertEquals(
                 CONFLICT_LABEL,
                 app.attention.byNote
@@ -75,7 +99,7 @@ class ReviewViewModelTest : EditorTest() {
             val (note, review) = conflicted()
             val shown = review.conflictDetails.single().shownBody
 
-            review.decide(review.conflict(), ConflictResolution.KeepShown)
+            review.answer(ConflictResolution.KeepShown)
             settle()
 
             assertEquals(shown, notes.get(note.id)?.body)
@@ -93,7 +117,7 @@ class ReviewViewModelTest : EditorTest() {
                     .single()
                     .conflict.losingBody
 
-            review.decide(review.conflict(), ConflictResolution.KeepLosing)
+            review.answer(ConflictResolution.KeepLosing)
             settle()
 
             assertEquals(other, notes.get(note.id)?.body)
@@ -106,7 +130,7 @@ class ReviewViewModelTest : EditorTest() {
             val (note, review) = conflicted()
             val details = review.conflictDetails.single()
 
-            review.decide(review.conflict(), ConflictResolution.KeepBoth)
+            review.answer(ConflictResolution.KeepBoth)
             settle()
 
             assertEquals(details.shownBody, notes.get(note.id)?.body)
@@ -118,85 +142,48 @@ class ReviewViewModelTest : EditorTest() {
         }
 
     @Test
-    fun aTextCombinedByHandResolvesTheConflict() =
+    fun keepingTheOtherVersionAfterAnEditMeanwhileIsRefused() =
         test {
             val (note, review) = conflicted()
-            review.combineByHand(review.conflict())
-            settle()
-            val draft = assertNotNull(review.draft)
-            assertTrue(draft.hasMarkers)
-            assertFalse(draft.isChanged)
-            assertEquals(review.conflictDetails.single().markedBody, draft.body)
+            val seen = review.shownHead()
+            editMeanwhile(note.id, "NEW LINE")
 
-            draft.body = "eggs\noat milk\nsoy milk\nbread"
-            assertTrue(draft.isChanged)
-            draft.title = "Shopping"
-            assertTrue(draft.isChanged)
-            assertFalse(draft.hasMarkers)
-            review.saveDraft()
+            review.decide(review.conflict(), ConflictResolution.KeepLosing, seen)
             settle()
 
-            assertEquals("eggs\noat milk\nsoy milk\nbread", notes.get(note.id)?.body)
-            assertEquals("Shopping", notes.get(note.id)?.title)
-            assertNull(review.draft)
-            assertTrue(review.isDone)
+            assertEquals(SHOWN_CHANGED_MESSAGE, review.message)
+            assertEquals("NEW LINE", notes.get(note.id)?.body)
+            assertEquals("NEW LINE", review.conflictDetails.single().shownBody)
         }
 
+    /** The reviewer's case: an edit saved while the user combines must not vanish. */
     @Test
-    fun cancellingTheCombinedTextLeavesTheConflictOpen() =
-        test {
-            val (_, review) = conflicted()
-            review.saveDraft() // No draft: nothing happens.
-            review.combineByHand(review.conflict())
-            settle()
-
-            review.cancelDraft()
-
-            assertNull(review.draft)
-            assertEquals(1, review.conflictDetails.size)
-        }
-
-    @Test
-    fun aConflictResolvedElsewhereLeavesTheDraftAndSaysSo() =
-        test {
-            val (_, review) = conflicted()
-            val decision = review.conflict()
-            review.combineByHand(decision)
-            settle()
-            conflicts.resolve(decision.mergeId, ConflictResolution.KeepShown)
-
-            review.saveDraft()
-            settle()
-
-            assertEquals(ALREADY_RESOLVED_MESSAGE, review.message)
-            assertNotNull(review.draft)
-            assertTrue(review.isDone)
-            review.dismissMessage()
-            assertNull(review.message)
-        }
-
-    @Test
-    fun aCombinedTextTooLongToSaveStays() =
+    fun aCombinedTextIsNotSavedOverAnEditMadeMeanwhile() =
         test {
             val (note, review) = conflicted()
-            review.combineByHand(review.conflict())
-            settle()
-            val draft = assertNotNull(review.draft)
-            draft.body = "x".repeat(MAX_NOTE_CHARS + 1)
+            val draft = combined(review)
+            draft.body = "my combination"
+            val newer = editMeanwhile(note.id, "eggs\nNEW LINE")
 
-            review.saveDraft()
+            review.saveDraft(draft)
             settle()
 
-            assertEquals(COMBINED_TOO_LARGE_MESSAGE, review.message)
-            assertSame(draft, review.draft)
+            assertEquals("eggs\nNEW LINE", notes.get(note.id)?.body)
             assertEquals(1, review.conflictDetails.size)
-            assertTrue(
-                notes
-                    .get(note.id)
-                    ?.body
-                    .orEmpty()
-                    .length < MAX_NOTE_CHARS,
-            )
+            assertEquals("eggs\nNEW LINE", review.conflictDetails.single().shownBody)
+            assertSame(draft, review.draftFor(review.conflict()))
+            assertTrue(draft.isOutdated)
+            assertEquals("my combination", draft.body)
+            assertEquals(newer.revisionId, draft.baseId)
+            assertEquals(newer.revisionId, conflicts.drafts().single().baseId)
+            assertEquals(SHOWN_CHANGED_MESSAGE, review.message)
+
+            draft.body = "eggs\nNEW LINE\nmy combination"
+            review.saveDraft(draft)
+            settle()
+
+            assertEquals("eggs\nNEW LINE\nmy combination", notes.get(note.id)?.body)
+            assertTrue(review.isDone)
         }
 
     @Test
@@ -205,13 +192,15 @@ class ReviewViewModelTest : EditorTest() {
             val (_, review) = conflicted()
             database.failWrites()
 
-            review.decide(review.conflict(), ConflictResolution.KeepShown)
+            review.answer(ConflictResolution.KeepShown)
             settle()
 
             assertTrue(review.message.orEmpty().startsWith(RESOLVE_FAILED_MESSAGE))
             assertTrue(review.message.orEmpty().contains("disk full"))
             assertEquals(1, review.conflictDetails.size)
             database.allowWrites()
+            review.dismissMessage()
+            assertNull(review.message)
         }
 
     @Test
@@ -220,7 +209,7 @@ class ReviewViewModelTest : EditorTest() {
             val (_, review) = conflicted()
 
             database.whileLocked {
-                review.decide(review.conflict(), ConflictResolution.KeepShown)
+                review.answer(ConflictResolution.KeepShown)
                 settle()
             }
 
@@ -242,8 +231,8 @@ class ReviewViewModelTest : EditorTest() {
             io.release()
             settle()
 
-            review.decide(review.conflict(), ConflictResolution.KeepShown)
-            held.closeReview()
+            review.answer(ConflictResolution.KeepShown)
+            review.close()
             io.release()
             settle()
 
@@ -266,19 +255,19 @@ class ReviewViewModelTest : EditorTest() {
             io.release()
             settle()
             val decision = review.conflict()
+            val head = review.shownHead()
 
-            review.decide(decision, ConflictResolution.KeepShown)
+            review.decide(decision, ConflictResolution.KeepShown, head)
             assertTrue(review.isWorking)
-            review.decide(decision, ConflictResolution.KeepLosing)
-            io.release()
-            settle()
-            io.release()
-            settle()
+            review.decide(decision, ConflictResolution.KeepLosing, head)
+            repeat(3) {
+                io.release()
+                settle()
+            }
 
             assertFalse(review.isWorking)
             assertNull(review.message) // The second click did nothing: no "already resolved".
             assertEquals(review.note?.body, notes.get(note.id)?.body)
-            held.closeReview()
         }
 
     @Test
@@ -307,7 +296,11 @@ class ReviewViewModelTest : EditorTest() {
         settle()
         val review = review(note.id)
         val waiting = review.waiting.single()
-        review.decide(Decision.Waiting(waiting.revisionId), resolution)
+        review.decide(
+            Decision.Waiting(waiting.revisionId),
+            resolution,
+            assertNotNull(review.note).revisionId,
+        )
         settle()
         assertTrue(review.isDone)
         return note to waiting.body
@@ -335,29 +328,6 @@ class ReviewViewModelTest : EditorTest() {
             assertEquals(2, notes.list().size)
         }
 
-    @Test
-    fun aWaitingEditCanBeCombinedByHand() =
-        test {
-            val note = world.waiting(store)
-            settle()
-            val review = review(note.id)
-            val waiting = review.waiting.single()
-            val shown = assertNotNull(review.note)
-
-            review.combineByHand(Decision.Waiting(waiting.revisionId))
-            settle()
-            val draft = assertNotNull(review.draft)
-            assertEquals("Plans", draft.title) // The same on both sides: no markers.
-            assertTrue(draft.body.contains("<<<<<<< shown\n${shown.body}\n=======\n"))
-            assertTrue(draft.body.contains("${waiting.body}\n>>>>>>> other device"))
-            draft.body = "both"
-            review.saveDraft()
-            settle()
-
-            assertEquals("both", notes.get(note.id)?.body)
-            assertTrue(review.isDone)
-        }
-
     /** Three devices change one line, so one edit waits for the conflict of the other two. */
     private suspend fun Fixture.queued(): Pair<Note, ReviewViewModel> {
         val note = notes.create("Plans", "start")
@@ -382,7 +352,11 @@ class ReviewViewModelTest : EditorTest() {
                     .label,
             )
 
-            review.decide(Decision.Waiting(queued.revisionId), ConflictResolution.KeepShown)
+            review.decide(
+                Decision.Waiting(queued.revisionId),
+                ConflictResolution.KeepShown,
+                assertNotNull(review.note).revisionId,
+            )
             settle()
 
             assertEquals(WAITS_FOR_CONFLICT_MESSAGE, review.message)
@@ -396,16 +370,31 @@ class ReviewViewModelTest : EditorTest() {
             settle()
             val review = review(note.id)
             val head = review.waiting.single().revisionId
-            conflicts.settleHidden(head, ConflictResolution.KeepShown)
+            val shown = assertNotNull(review.note).revisionId
+            conflicts.settleHidden(head, ConflictResolution.KeepShown, shown)
 
-            review.decide(Decision.Waiting(head), ConflictResolution.KeepLosing)
+            review.decide(Decision.Waiting(head), ConflictResolution.KeepLosing, shown)
             settle()
 
             assertEquals(ALREADY_RESOLVED_MESSAGE, review.message)
         }
 
     @Test
-    fun textThatDoesNotFitTheHistoryIsSetAsideAndCanBeSaved() =
+    fun aConflictResolvedElsewhereSaysSo() =
+        test {
+            val (_, review) = conflicted()
+            val decision = review.conflict()
+            val head = review.shownHead()
+            conflicts.resolve(decision.mergeId, ConflictResolution.KeepShown, head)
+
+            review.decide(decision, ConflictResolution.KeepLosing, head)
+            settle()
+
+            assertEquals(ALREADY_RESOLVED_MESSAGE, review.message)
+        }
+
+    @Test
+    fun textThatDoesNotFitTheHistoryIsSetAsideAndCanBeSavedOnce() =
         test {
             val note = notes.create("Plans", "start")
             world.forge(note.id, note.revisionId, "Plans", "from a bad clock", millis = 1)
@@ -426,25 +415,35 @@ class ReviewViewModelTest : EditorTest() {
 
             review.saveAsNewNote(text)
             settle()
+            review.saveAsNewNote(text) // A second press, from a screen that had not caught up.
+            settle()
 
             assertEquals(SAVED_AS_NEW_NOTE, review.notice)
-            assertTrue(notes.list().any { it.body == "from a bad clock" })
+            assertEquals(1, notes.list().count { it.body == "from a bad clock" })
+            assertEquals(emptyList(), review.setAside)
+            assertEquals(emptyList(), app.attention.entries)
             review.dismissNotice()
             assertNull(review.notice)
         }
 
     @Test
-    fun damagedTextIsSetAside() =
+    fun damagedTextIsSetAsideAndCanBeDismissed() =
         test {
             val note = notes.create("Plans", "start")
             world.forge(note.id, note.revisionId, "Plans", "damaged", state = "SHREDDED")
             world.sync(store)
             settle()
-
-            val text = review(note.id).setAside.single()
-
+            val review = review(note.id)
+            val text = review.setAside.single()
             assertEquals(InvalidReason.MALFORMED, text.reason)
             assertEquals("damaged", text.body)
+
+            review.dismiss(text)
+            settle()
+
+            assertTrue(review.isDone)
+            assertEquals(emptyList(), app.attention.entries)
+            assertEquals(listOf("start"), notes.list().map { it.body })
         }
 
     @Test
@@ -502,6 +501,7 @@ class ReviewViewModelTest : EditorTest() {
             settle()
             assertTrue(review !== app.review)
             app.closeReview()
+            settle()
             assertNull(app.review)
             app.closeReview() // A second Back finds nothing to close.
             assertSame(editor, app.editor)
@@ -549,8 +549,12 @@ class ReviewViewModelTest : EditorTest() {
                     listOf(
                         InvalidRevision(revision, note, InvalidReason.MALFORMED, "t", "b"),
                     ),
+                drafts = listOf(ResolutionDraft(revision, note, true, revision, "t", "b")),
             )
-        assertEquals("$CONFLICT_LABEL, $WAITING_LABEL, $SET_ASIDE_LABEL", all.label)
+        assertEquals(
+            "$CONFLICT_LABEL, $WAITING_LABEL, $SET_ASIDE_LABEL, $UNSAVED_LABEL",
+            all.label,
+        )
         // A head that waits for a conflict that is gone, as the lists can lag a moment.
         val lagging =
             NoteAttention(
@@ -558,6 +562,7 @@ class ReviewViewModelTest : EditorTest() {
                 "t",
                 emptyList(),
                 listOf(waiting(HiddenReason.OPEN_CONFLICT)),
+                emptyList(),
                 emptyList(),
             )
         assertEquals(WAITING_LABEL, lagging.label)

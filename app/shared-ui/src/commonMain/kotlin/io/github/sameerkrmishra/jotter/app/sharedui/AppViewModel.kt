@@ -64,13 +64,14 @@ public class AppViewModel(
     }
 
     /**
-     * Closes the app: saves the open editor's text and then calls [exit]. If the text cannot be
-     * saved, [JotterApp] asks the user whether to keep editing or to exit without it, so [exit] may
-     * run later or not at all.
+     * Closes the app: keeps the review's combined texts, saves the open editor's text and then
+     * calls [exit]. If either fails, [JotterApp] asks the user whether to keep editing or to exit
+     * without it, so [exit] may run later or not at all.
      */
     public fun requestExit(exit: () -> Unit) {
         scope.launch {
-            if (editor?.finish() != false) exit() else pendingExit = exit
+            val kept = review?.flush() != false
+            if (kept && editor?.finish() != false) exit() else pendingExit = exit
         }
     }
 
@@ -94,17 +95,25 @@ public class AppViewModel(
      */
     internal fun openReview(noteId: NoteId) {
         scope.launch {
-            if (editor?.saveAll() != false) {
+            if (editor?.saveAll() != false && review?.flush() != false) {
                 review?.close()
                 review = ReviewViewModel(noteId, notes, conflicts, scope, io, refreshes)
             }
         }
     }
 
-    /** Closes the review, back to the editor or the list. */
+    /**
+     * Closes the review, back to the editor or the list, once its combined texts are kept on disk.
+     * If they cannot be, it stays open with its message.
+     */
     internal fun closeReview() {
-        review?.close()
-        review = null
+        val leaving = review ?: return
+        scope.launch {
+            if (leaving.flush() && review === leaving) {
+                leaving.close()
+                review = null
+            }
+        }
     }
 
     /** Answers the question that [pendingExit] asks: the user stays with their text. */

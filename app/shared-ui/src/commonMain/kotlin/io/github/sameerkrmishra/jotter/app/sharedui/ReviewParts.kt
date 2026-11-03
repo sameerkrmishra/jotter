@@ -21,36 +21,41 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontStyle
+import io.github.sameerkrmishra.jotter.core.model.RevisionId
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolution
 
-/** The four answers, or the combined text while the user writes it. */
+/**
+ * The four answers, made on the version [shownHead] shows, or the combined text while the user
+ * writes it. [labels] name the first two: keeping the shown text, and taking the other.
+ */
 @Composable
 internal fun Choices(
     review: ReviewViewModel,
     decision: Decision,
-    keepShown: String,
-    keepOther: String,
+    shownHead: RevisionId,
+    labels: Pair<String, String>,
+    ask: (Confirmation) -> Unit,
 ) {
-    val draft = review.draft
-    if (draft?.decision == decision) {
-        CombinedEditor(review, draft)
+    val draft = review.draftFor(decision)
+    if (draft != null) {
+        CombinedEditor(review, draft, ask)
         return
     }
-    val enabled = !review.isWorking && draft == null
+    val enabled = !review.isWorking
     FlowRow(horizontalArrangement = Arrangement.spacedBy(spacing)) {
         Button(
-            onClick = { review.decide(decision, ConflictResolution.KeepShown) },
+            onClick = { review.decide(decision, ConflictResolution.KeepShown, shownHead) },
             enabled = enabled,
-        ) { Text(keepShown) }
+        ) { Text(labels.first) }
         Button(
-            onClick = { review.decide(decision, ConflictResolution.KeepLosing) },
+            onClick = { review.decide(decision, ConflictResolution.KeepLosing, shownHead) },
             enabled = enabled,
-        ) { Text(keepOther) }
+        ) { Text(labels.second) }
         OutlinedButton(
-            onClick = { review.decide(decision, ConflictResolution.KeepBoth) },
+            onClick = { review.decide(decision, ConflictResolution.KeepBoth, shownHead) },
             enabled = enabled,
         ) { Text(KEEP_BOTH) }
-        OutlinedButton(onClick = { review.combineByHand(decision) }, enabled = enabled) {
+        OutlinedButton(onClick = { review.combineByHand(decision, shownHead) }, enabled = enabled) {
             Text(COMBINE)
         }
     }
@@ -60,7 +65,11 @@ internal fun Choices(
 internal fun CombinedEditor(
     review: ReviewViewModel,
     draft: CombinedDraft,
+    ask: (Confirmation) -> Unit,
 ) {
+    if (draft.isOutdated) {
+        Message(OUTDATED_HINT) {}
+    }
     OutlinedTextField(
         value = draft.title,
         onValueChange = { draft.title = it },
@@ -76,9 +85,25 @@ internal fun CombinedEditor(
     if (draft.hasMarkers) {
         Text(MARKERS_HINT, style = MaterialTheme.typography.bodySmall)
     }
+    Buttons(
+        review,
+        SAVE_COMBINED to { review.saveDraft(draft) },
+        Confirmation(DISCARD_DRAFT_TITLE, DISCARD_DRAFT_TEXT) { review.discardDraft(draft) },
+        ask,
+    )
+}
+
+/** A button that keeps text, and one that discards it after the user said yes to [discard]. */
+@Composable
+internal fun Buttons(
+    review: ReviewViewModel,
+    keep: Pair<String, () -> Unit>,
+    discard: Confirmation,
+    ask: (Confirmation) -> Unit,
+) {
     Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-        Button(onClick = review::saveDraft, enabled = !review.isWorking) { Text(SAVE_COMBINED) }
-        TextButton(onClick = review::cancelDraft) { Text("Cancel") }
+        Button(onClick = keep.second, enabled = !review.isWorking) { Text(keep.first) }
+        TextButton(onClick = { ask(discard) }, enabled = !review.isWorking) { Text(DISCARD) }
     }
 }
 

@@ -27,7 +27,7 @@ public API alone. Only `app/*` may depend on it.
 | `CannotOpenNotes` | What an app shows instead if the database could not be opened |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
 | `EditorViewModel`, `EditorScreen` | The text editor with its Markdown preview, and adding and removing tags |
-| `AttentionViewModel` | The notes that sync left something on, from `ConflictResolver`'s three lists: open conflicts, hidden heads and text that does not count |
+| `AttentionViewModel` | The notes that sync left something on, from `ConflictResolver`'s lists: open conflicts, hidden heads, text that does not count, and combined texts not yet saved |
 | `ReviewViewModel`, `ReviewScreen`, `ReviewParts` | The review of one such note: what happened in plain words, every text in full, and the answers |
 | `regionsOf` | Where two conflicting versions agree and where they differ, read back from core:sync's marked text |
 | `parseMarkdown`, `MarkdownDocument` | The `markdown` package: a note's text as plain blocks and spans, with no Compose in it |
@@ -132,13 +132,22 @@ not worth it for six lines.
   | An open conflict | Both versions in full, and where they differ in two colours | Keep the shown version, keep the other, keep both as separate notes, or combine by hand from core:sync's text with conflict markers |
   | A hidden head, `MISSING_ANCESTOR` | The shown version and the waiting edit, and that earlier changes have not arrived | The same four, through `settleHidden`, or wait for the next sync |
   | A hidden head, `OPEN_CONFLICT` | The waiting edit's text, which merges once the conflict is resolved | Nothing: `settleHidden` refuses it |
-  | Text that does not count: `BAD_HISTORY`, `MALFORMED`, `ID_COLLISION` | The text, and why sync does not use it: another device's clock or software was wrong, it arrived damaged, or two versions of one change arrived | Save it as a new note. It stays listed, as core:sync has no way to dismiss it |
+  | Text that does not count: `BAD_HISTORY`, `MALFORMED`, `ID_COLLISION` | The text, and why sync does not use it: another device's clock or software was wrong, it arrived damaged, or two versions of one change arrived | Save it as a new note, once: it then leaves the list. Or discard it, after a question that says it is only removed from this device's list |
+  | A combined text whose conflict was answered elsewhere | The text, and that what it combined was dealt with | Save it as a new note, or discard it after a question |
 
   Each answer is one call to `ConflictResolver`, which writes one revision; the
   editor has no undo, so neither has this. Every text stays on screen until that
-  call has worked, and a combined text stays if it fails. Back asks before dropping
-  a combined text the user typed in. Opening the review from the editor saves the
-  draft first, so that the review shows it. A segment that could not be read is not
+  call has worked. An answer names the version it was made on, and core:sync refuses
+  it if the note shows another one by then, for example after an edit in the editor:
+  a combined text then stays, marked, with the version now shown above it, and the
+  next save is made on that version. Opening the review from the editor saves the
+  editor's draft first, so that the review shows it.
+- **Combined texts are kept** by core:sync in the local database (`combined_draft`), not
+  synced: at once when combining starts, 1 s after typing pauses, on Back and on
+  closing the app. They come back when the note is reviewed again, after a restart too,
+  and the note stays under "Needs attention" meanwhile. They go when their answer is
+  written, saved as a note or discarded. If keeping one fails, Back stays and closing
+  the app asks first. A segment that could not be read is not
   about one note, and waits for the backend screens of M4.
 - **Conflict regions.** `ConflictDetails` gives the merged text with conflict
   markers, which core:merge makes for a person and not to be parsed. `regionsOf` reads

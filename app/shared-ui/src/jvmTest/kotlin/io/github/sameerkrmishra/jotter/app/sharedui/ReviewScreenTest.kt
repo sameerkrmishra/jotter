@@ -13,6 +13,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -26,12 +27,14 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import io.github.sameerkrmishra.jotter.core.sync.ConflictResolution
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 private const val TIMEOUT_MS = 10_000L
@@ -213,29 +216,90 @@ class ReviewScreenTest {
         }
 
     @Test
-    fun leavingACombinedTextAsksFirst() =
+    fun aCombinedTextOutlivesTheReviewAndIsDiscardedOnlyAfterAsking() =
         app { store ->
             conflict(store)
             reviewFromTheList()
             click(COMBINE)
             await(SAVE_COMBINED)
-            click("Cancel") // Nothing typed: it simply goes.
-            awaitNo(SAVE_COMBINED)
-            click(COMBINE)
-            await(SAVE_COMBINED)
             onNodeWithTag(COMBINED_TITLE_FIELD).performTextInput("My ")
 
             click("Back")
-            await("Discard the combined text?")
-            click("Keep editing")
-            awaitNo("Discard the combined text?")
-            fieldShows(COMBINED_TITLE_FIELD, "My Groceries")
-            click("Back")
-            await("Discard the combined text?")
-            click("Discard")
-
             await(NEEDS_ATTENTION, substring = true)
+            await("Needs attention: $CONFLICT_LABEL, $UNSAVED_LABEL")
+            click("Review")
+            await(SAVE_COMBINED)
+            fieldShows(COMBINED_TITLE_FIELD, "My Groceries")
+
+            click(DISCARD)
+            await(DISCARD_DRAFT_TITLE)
+            click("Keep it")
+            awaitNo(DISCARD_DRAFT_TITLE)
+            fieldShows(COMBINED_TITLE_FIELD, "My Groceries")
+            click(DISCARD)
+            await(DISCARD_DRAFT_TITLE)
+            onNode(hasText(DISCARD) and hasAnyAncestor(isDialog())).performClick()
+
+            awaitNo(SAVE_COMBINED)
+            assertEquals(emptyList(), ConflictResolver(store).drafts())
             assertEquals(1, ConflictResolver(store).open().size)
+        }
+
+    /** The reviewer's case, on screen: an edit saved meanwhile shows beside the kept text. */
+    @Test
+    fun aCombinedTextIsNotSavedOverAnEditMadeMeanwhile() =
+        app { store ->
+            val note = conflict(store)
+            reviewFromTheList()
+            click(COMBINE)
+            await(SAVE_COMBINED)
+            onNodeWithTag(COMBINED_BODY_FIELD).performTextClearance()
+            onNodeWithTag(COMBINED_BODY_FIELD).performTextInput("my combination")
+            val shown = assertNotNull(store.notes.get(note.id))
+            store.notes.edit(note.id, shown.revisionId, shown.title, "eggs\nNEW LINE")
+            await("NEW LINE", substring = true)
+
+            click(SAVE_COMBINED)
+
+            await(OUTDATED_HINT)
+            fieldShows(COMBINED_BODY_FIELD, "my combination")
+            assertEquals("eggs\nNEW LINE", store.notes.get(note.id)?.body)
+            onNodeWithTag(COMBINED_BODY_FIELD).performTextInput(" and NEW LINE")
+            click(SAVE_COMBINED)
+
+            await(NOTHING_TO_REVIEW)
+            assertEquals("my combination and NEW LINE", store.notes.get(note.id)?.body)
+        }
+
+    @Test
+    fun aCombinedTextStaysWhenItsConflictIsResolvedElsewhere() =
+        app { store ->
+            conflict(store)
+            reviewFromTheList()
+            click(COMBINE)
+            await(SAVE_COMBINED)
+            onNodeWithTag(COMBINED_BODY_FIELD).performTextClearance()
+            onNodeWithTag(COMBINED_BODY_FIELD).performTextInput("my combination")
+            waitUntil(timeoutMillis = TIMEOUT_MS) {
+                ConflictResolver(store).drafts().singleOrNull()?.body == "my combination"
+            }
+            val resolver = ConflictResolver(store)
+            val details = assertNotNull(resolver.details(resolver.open().single().mergeId))
+            resolver.resolve(
+                details.conflict.mergeId,
+                ConflictResolution.KeepShown,
+                details.shownHeadId,
+            )
+
+            await(ORPHAN_HEADING)
+            shows(ORPHAN_EXPLANATION)
+            shows("my combination")
+            awaitNo(NOTHING_TO_REVIEW)
+            click(SAVE_AS_NEW)
+
+            await(NOTHING_TO_REVIEW)
+            assertTrue(store.notes.list().any { it.body == "my combination" })
+            assertEquals(emptyList(), resolver.drafts())
         }
 
     @Test
@@ -250,7 +314,7 @@ class ReviewScreenTest {
             assertEquals(0, onAllNodesWithTag(DIFFERS_REGION).fetchSemanticsNodes().size)
             click(COMBINE)
             await(SAVE_COMBINED)
-            click("Back") // Nothing typed: nothing to lose, so no question.
+            click("Back")
             await(NEEDS_ATTENTION, substring = true)
         }
 
@@ -352,10 +416,30 @@ class ReviewScreenTest {
                 .performClick()
 
             await(SAVED_AS_NEW_NOTE)
-            assertTrue(store.notes.list().any { it.body == "from a bad clock" })
+            assertEquals(1, store.notes.list().count { it.body == "from a bad clock" })
+            awaitNo(BAD_HISTORY_EXPLANATION) // Saved, so no longer listed: no second copy.
             click("OK")
             awaitNo(SAVED_AS_NEW_NOTE)
-            shows("from a bad clock") // Still listed: core:sync keeps it.
+
+            val damaged = ConflictResolver(store).invalid().single { it.body == "damaged" }
+            onNode(hasText(DISCARD) and hasAnyAncestor(hasTestTag(setAsideTag(damaged))))
+                .performScrollTo()
+                .performClick()
+            await(DISCARD_SET_ASIDE_TITLE)
+            shows(DISCARD_SET_ASIDE_TEXT)
+            onNode(hasText(DISCARD) and hasAnyAncestor(isDialog())).performClick()
+
+            awaitNo("damaged")
+            assertEquals(1, ConflictResolver(store).invalid().size)
+            assertEquals(
+                listOf("start", "from a bad clock"),
+                store.notes
+                    .list()
+                    .map {
+                        it.body
+                    }.sorted()
+                    .reversed(),
+            )
         }
 
     @Test
