@@ -7,6 +7,7 @@ import io.github.sameerkrmishra.jotter.backend.localfolder.LocalFolderBlobStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,7 +73,7 @@ public class PeerHub internal constructor(
         config,
         LocalFolderBlobStore(config.storeRoot),
         FileSystem.SYSTEM,
-        Dispatchers.Default,
+        Dispatchers.IO,
     )
 
     private constructor(
@@ -139,7 +140,7 @@ public class PeerHub internal constructor(
         mutex.withLock {
             (mutableStatus.value as? HubStatus.Running)?.let { return@withLock it }
             // A server whose accept loop died is still there, holding its connections.
-            server?.stop()
+            server?.let { withContext(dispatcher) { it.stop() } }
             server = null
             val handler =
                 PeerHandler(
@@ -149,7 +150,7 @@ public class PeerHub internal constructor(
                 )
             lateinit var next: PeerServer
             next =
-                PeerServer(handler, config.limits, dispatcher) { reason ->
+                PeerServer(handler, config.limits) { reason ->
                     // The status must not say Running when nothing is served.
                     if (server ===
                         next
@@ -163,13 +164,15 @@ public class PeerHub internal constructor(
                 try {
                     tokens.load()
                     HubStatus
-                        .Running(config.host, next.start(config.host, config.port))
-                        .also { started = true }
+                        .Running(
+                            config.host,
+                            withContext(dispatcher) { next.start(config.host, config.port) },
+                        ).also { started = true }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (
-                    // okio's, kotlinx-io's and, on Native, the socket layer's own exceptions: every
-                    // failure to start is the same to the user.
+                    // okio's and the JDK's exceptions alike: every failure to start is the same to
+                    // the user.
                     @Suppress("TooGenericExceptionCaught") e: Exception,
                 ) {
                     val where = "${config.host}:${config.port}"
@@ -177,7 +180,7 @@ public class PeerHub internal constructor(
                     mutableStatus.value = HubStatus.Failed(message)
                     throw HubStartException(message, e)
                 } finally {
-                    if (!started) next.stop()
+                    if (!started) withContext(NonCancellable + dispatcher) { next.stop() }
                 }
             server = next
             mutableStatus.value = running
@@ -187,7 +190,7 @@ public class PeerHub internal constructor(
     /** Stops listening and drops every connection. Stopping a stopped hub does nothing. */
     public suspend fun stop() {
         mutex.withLock {
-            server?.stop()
+            server?.let { withContext(dispatcher) { it.stop() } }
             server = null
             mutableStatus.value = HubStatus.Stopped
         }

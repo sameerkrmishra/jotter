@@ -6,19 +6,12 @@ package io.github.sameerkrmishra.jotter.server
 import io.github.sameerkrmishra.jotter.backend.localfolder.LocalFolderBlobStore
 import io.github.sameerkrmishra.jotter.backend.peer.PeerAddress
 import io.github.sameerkrmishra.jotter.backend.peer.PeerBlobStore
-import io.ktor.network.selector.SelectorManager
-import io.ktor.network.sockets.Socket
-import io.ktor.network.sockets.aSocket
-import io.ktor.network.sockets.openReadChannel
-import io.ktor.network.sockets.openWriteChannel
-import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.readBuffer
-import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.io.readByteArray
 import okio.FileSystem
 import okio.Path
+import java.io.InputStream
+import java.net.Socket
 import kotlin.random.Random
 import kotlin.random.nextULong
 import kotlin.time.Duration.Companion.milliseconds
@@ -106,10 +99,29 @@ internal class StartedHub(
 internal const val LOOPBACK = "127.0.0.1"
 
 /** A raw connection to [port], for requests the peer client would never send. */
-internal suspend fun rawConnection(port: Int): Socket =
-    aSocket(selector).tcp().connect(LOOPBACK, port)
+internal fun rawConnection(port: Int): Socket = Socket(LOOPBACK, port)
 
-private val selector = SelectorManager(Dispatchers.Default)
+/** The sending side of a raw connection. */
+internal class RawOutput(
+    private val socket: Socket,
+) {
+    fun writeFully(bytes: ByteArray) = socket.getOutputStream().write(bytes)
+
+    fun flush() = socket.getOutputStream().flush()
+
+    /** Sends the rest, then stops sending, as a client that breaks off. */
+    fun flushAndClose() {
+        flush()
+        socket.shutdownOutput()
+    }
+}
+
+internal fun Socket.openWriteChannel() = RawOutput(this)
+
+internal fun Socket.openReadChannel(): InputStream = getInputStream()
+
+/** Everything [this] holds until it ends. */
+internal fun InputStream.readAll(): ByteArray = readBytes()
 
 /**
  * Sends [request] as is over a new connection to [port], then returns everything the hub sends
@@ -121,7 +133,7 @@ internal suspend fun rawExchange(
     request: ByteArray,
     close: Boolean = false,
 ): String =
-    withContext(Dispatchers.Default) {
+    withContext(Dispatchers.IO) {
         rawConnection(port).use { socket ->
             val output = socket.openWriteChannel()
             output.writeFully(request)
@@ -129,9 +141,6 @@ internal suspend fun rawExchange(
             socket.openReadChannel().readAll().decodeToString()
         }
     }
-
-/** Everything [this] holds until it ends. */
-internal suspend fun ByteReadChannel.readAll(): ByteArray = readBuffer().readByteArray()
 
 /** A request with the usual line endings, and with [token] in `Authorization` unless it is null. */
 internal fun request(

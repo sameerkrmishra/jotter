@@ -3,16 +3,14 @@ package io.github.sameerkrmishra.jotter.server
 import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
 import io.ktor.http.cio.parseRequest
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.ByteWriteChannel
-import io.ktor.utils.io.readAvailable
-import io.ktor.utils.io.readByte
-import io.ktor.utils.io.writeFully
-import kotlinx.coroutines.withTimeout
-import kotlinx.io.EOFException
-import kotlin.time.Duration
+import java.io.InputStream
+import java.io.OutputStream
 
 /** The most a request line and its headers may take, in bytes. */
 internal const val MAX_HEAD_BYTES = 16 * 1024
+
+/** The part in which bodies are read and written. */
+internal const val PART_BYTES = 64 * 1024
 
 /**
  * What the hub needs of a request's line and headers. A header that may appear once and appears
@@ -39,27 +37,24 @@ internal class MalformedRequestException(
 ) : Exception(message, cause)
 
 /**
- * Reads a request's line and headers from [input], up to the empty line, and parses them. Returns
- * null if the client closed the connection before sending anything.
+ * Reads a request's line and headers from [input], up to the empty line, and returns their bytes.
+ * Returns null if the client closed the connection before sending anything.
  *
- * @throws MalformedRequestException if they take more than [MAX_HEAD_BYTES], end early or do not
- *   parse.
+ * @throws MalformedRequestException if they take more than [MAX_HEAD_BYTES] or end early.
  */
-internal suspend fun readRequestHead(input: ByteReadChannel): RequestHead? {
+internal fun readRequestHead(input: InputStream): ByteArray? {
     val head = ByteArray(MAX_HEAD_BYTES)
     var size = 0
     while (!endsWithEmptyLine(head, size)) {
         if (size == head.size) throw MalformedRequestException("The request's head is too long")
-        head[size] =
-            try {
-                input.readByte()
-            } catch (_: EOFException) {
-                if (size == 0) return null
-                throw MalformedRequestException("The request ended in its head")
-            }
-        size++
+        val byte = input.read()
+        if (byte < 0) {
+            if (size == 0) return null
+            throw MalformedRequestException("The request ended in its head")
+        }
+        head[size++] = byte.toByte()
     }
-    return parseHead(head.copyOf(size))
+    return head.copyOf(size)
 }
 
 /** Whether the [size] bytes of [head] end with the empty line that ends a head. */
@@ -72,7 +67,12 @@ private fun endsWithEmptyLine(
 
 private val END_OF_HEAD = "\r\n\r\n".encodeToByteArray()
 
-private suspend fun parseHead(bytes: ByteArray): RequestHead {
+/**
+ * Parses the bytes of a head from [readRequestHead] with Ktor's parser.
+ *
+ * @throws MalformedRequestException if they do not parse.
+ */
+internal suspend fun parseHead(bytes: ByteArray): RequestHead {
     val request =
         try {
             parseRequest(ByteReadChannel(bytes))
@@ -102,26 +102,26 @@ private fun io.ktor.http.cio.HttpHeadersMap.single(name: String): String? {
 }
 
 /**
- * Reads exactly [length] bytes of body from [input]. Each read must bring bytes within
- * [idleTimeout], so a client that stalls is dropped without holding the connection.
+ * Reads exactly [length] bytes of body from [input], reporting each part to [progress].
  *
  * @throws MalformedRequestException if the body ends early.
  */
-internal suspend fun readBody(
-    input: ByteReadChannel,
+internal fun readBody(
+    input: InputStream,
     length: Int,
-    idleTimeout: Duration,
+    progress: () -> Unit,
 ): ByteArray {
     val body = ByteArray(length)
     var offset = 0
     while (offset < length) {
-        val read = withTimeout(idleTimeout) { input.readAvailable(body, offset, length - offset) }
+        val read = input.read(body, offset, minOf(PART_BYTES, length - offset))
         if (read <
             0
         ) {
             throw MalformedRequestException("The body ended after $offset of $length bytes")
         }
         offset += read
+        progress()
     }
     return body
 }
@@ -138,10 +138,16 @@ internal class Reply(
     val release: () -> Unit = {},
 )
 
-/** Writes [reply] to [output], with the protocol header that marks the hub. */
-internal suspend fun writeReply(
-    output: ByteWriteChannel,
+/**
+ * Writes [reply] to [output], with the protocol header that marks the hub, in parts of
+ * [PART_BYTES], each flushed to the socket and reported to [progress]. A blocking socket takes a
+ * part only when the client has made room for it, so a client that stops reading stops the write,
+ * and the watch over the connection can tell.
+ */
+internal fun writeReply(
+    output: OutputStream,
     reply: Reply,
+    progress: () -> Unit,
 ) {
     val head =
         buildString {
@@ -153,9 +159,17 @@ internal suspend fun writeReply(
             append("Connection: close\r\n")
             append("\r\n")
         }
-    output.writeFully(head.encodeToByteArray())
-    output.writeFully(reply.body)
+    output.write(head.encodeToByteArray())
     output.flush()
+    progress()
+    var offset = 0
+    while (offset < reply.body.size) {
+        val length = minOf(PART_BYTES, reply.body.size - offset)
+        output.write(reply.body, offset, length)
+        output.flush()
+        offset += length
+        progress()
+    }
 }
 
 private fun reasonPhrase(status: Int): String =

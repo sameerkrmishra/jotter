@@ -20,9 +20,10 @@ The PC's own sync uses the same folder directly, as a `LocalFolderBlobStore`
 backend, so the PC is a device on its own hub.
 
 **Dependency rule:** depends on `backend:peer` (the protocol), `backend:localfolder`
-(the store), Ktor's sockets and HTTP parser, okio, atomicfu, coroutines and
+(the store), Ktor's HTTP parser, okio, atomicfu, coroutines and
 kotlinx.serialization. No other Jotter module, and no app module depends on it
-yet.
+yet. **JVM only**: the hub runs inside the desktop app's JVM on JDK sockets, outside
+the linuxX64 rule (ADR-0015 amends ADR-0006 for this module).
 
 ## API
 
@@ -64,21 +65,22 @@ yet.
 
 ## Design
 
-- **`PeerHub`** is the lifecycle and the API. **`PeerServer`** is the accept loop:
-  it takes a connection only when it has a slot, and drops a connection on any
-  timeout. **`HttpExchange`** reads the head (bounded, then parsed by Ktor's
-  `parseRequest`) and the body, and writes answers. **`PeerHandler`** checks the
+- **`PeerHub`** is the lifecycle and the API. **`PeerServer`** owns the sockets:
+  blocking `java.net` sockets, an accept thread that takes a connection only when a
+  slot is free, one thread per connection, and a watch thread that closes any socket
+  past its head's time, its idle time or its deadline. Closing a socket frees its
+  descriptor and ends any read or write on it, so nothing outlives its limits.
+  **`HttpExchange`** reads the head (bounded, then parsed by Ktor's `parseRequest`)
+  and the body, and writes answers in 64 KiB parts. **`PeerHandler`** checks the
   token and the request and calls the store. **`DeviceTokens`** keeps the paired
   devices.
-- **Not Ktor's server engine**: it has no limit on connections or on the time to
-  send headers (ADR-0015).
-- **Common code only**, on the JVM, Android and linuxX64, like the shared modules
-  ([ADR-0006](../docs/adr/0006-native-compatible-shared-modules.md)).
+- **Not Ktor's sockets or server engine**: neither can be bounded and truly closed
+  (ADR-0015, "The hub's socket layer").
 
 ## Tests
 
-All run on the JVM (counted by the coverage gate), the Android host and linuxX64,
-with real hubs on `127.0.0.1` and free ports:
+All run on the JVM (counted by the coverage gate), with real hubs on `127.0.0.1` and
+free ports, in a test JVM with a 768 MiB heap and a 20 minute limit:
 
 - `PeerContractTest` and `PeerStoreGoneContractTest`: the whole contract suite
   through `PeerBlobStore` to a running hub, with the hub stopped and with its
@@ -90,9 +92,11 @@ with real hubs on `127.0.0.1` and free ports:
   transfer limits, and five writers racing through the hub and on the PC.
 - `HubProtocolTest`: requests outside the protocol, heads that do not parse, paths
   that try to leave the store, names with query characters, and failing stores.
-- `HubExhaustionTest`: waves of clients that never read 4 MiB answers, 15 that
-  never read 32 MiB ones, the per-address cap, an `Error` in the store, a broken
-  listening socket, a bounded `stop`, and invalid UTF-8 in paths.
+- `HubExhaustionTest`: 40 clients that never read 4 MiB answers and 15 that never
+  read 32 MiB ones, measured by the process's open descriptors (`/proc/self/fd`),
+  CPU time, heap after a collection and slots, during and after the deadline; the
+  per-address cap, an `Error` in the store, a broken listening socket, a `stop`
+  that closes everything within seconds, and invalid UTF-8 in paths. Linux only.
 - `PeerHubTest`: lifecycle, a taken port, an unset store, pairing across restarts,
   damaged token files, and the address rule.
 
