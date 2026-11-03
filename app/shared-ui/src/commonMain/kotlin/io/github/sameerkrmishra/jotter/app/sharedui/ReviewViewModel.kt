@@ -205,11 +205,8 @@ internal class ReviewViewModel(
             draft =
                 when (decision) {
                     is Decision.Conflict -> {
-                        val details =
-                            conflictDetails.first {
-                                it.conflict.mergeId ==
-                                    decision.mergeId
-                            }
+                        val mergeId = decision.mergeId
+                        val details = conflictDetails.first { it.conflict.mergeId == mergeId }
                         CombinedDraft(decision, details.markedTitle, details.markedBody)
                     }
 
