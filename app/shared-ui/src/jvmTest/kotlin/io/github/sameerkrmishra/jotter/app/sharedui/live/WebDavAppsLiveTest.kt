@@ -34,7 +34,8 @@ class WebDavAppsLiveTest {
                     "Basic " + Base64.getEncoder().encodeToString("$USER:$PASSWORD".toByteArray()),
                 ).build()
         val status =
-            HttpClient.newHttpClient().use {
+            // HTTP/1.1: lighttpd ends the connection when the JDK tries to upgrade to HTTP/2.
+            HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build().use {
                 it.send(request, HttpResponse.BodyHandlers.discarding()).statusCode()
             }
         assertEquals(CREATED, status)
