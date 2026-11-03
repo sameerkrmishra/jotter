@@ -155,7 +155,8 @@ public class SyncScheduler(
             var kind = request
             while (true) {
                 val next = requests.tryReceive().getOrNull() ?: break
-                if (next is Request.Mark) marks.isNew(next.mark) else kind = stronger(kind, next)
+                if (next is Request.Mark) marks.isNew(next.mark)
+                kind = maxOf(kind, next, compareBy { it.reach })
             }
             if (kind != Request.Retry) {
                 pendingEdit?.cancel()
@@ -264,29 +265,19 @@ public class SyncScheduler(
         val until: ComparableTimeMark,
     )
 
-    private sealed interface Request {
-        data class Mark(
+    /** What the loop is asked to do. Of two rounds asked for, the one with the higher [reach]. */
+    private sealed class Request(
+        val reach: Int,
+    ) {
+        class Mark(
             val mark: Long,
-        ) : Request
+        ) : Request(0)
 
         /** A retry of the failed backends that are due, and no other. */
-        data object Retry : Request
+        data object Retry : Request(1)
 
-        data object Scheduled : Request
+        data object Scheduled : Request(2)
 
-        data object Now : Request
-    }
-
-    private companion object {
-        /** Of two queued requests, the one that syncs more. */
-        fun stronger(
-            a: Request,
-            b: Request,
-        ): Request =
-            when {
-                a == Request.Now || b == Request.Now -> Request.Now
-                a == Request.Scheduled || b == Request.Scheduled -> Request.Scheduled
-                else -> Request.Retry
-            }
+        data object Now : Request(3)
     }
 }

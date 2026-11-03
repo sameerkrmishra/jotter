@@ -73,6 +73,7 @@ public sealed interface AddResult {
  * @param io Where blocking database calls run.
  * @param clock The time of a sync and of adding a backend.
  */
+@Suppress("TooManyFunctions") // One function per operation, and the steps of adding a folder.
 public class BackendManager(
     private val store: NoteStore,
     private val engine: SyncEngine,

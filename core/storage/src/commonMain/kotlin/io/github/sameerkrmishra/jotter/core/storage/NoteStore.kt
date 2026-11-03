@@ -27,6 +27,7 @@ internal const val JOTTER_APPLICATION_ID = 0x4A4F5452
  * @property path The database file, as given to [open].
  */
 @OptIn(SyncStoreApi::class)
+@Suppress("LongParameterList") // Private: only open() calls it, once.
 public class NoteStore private constructor(
     internal val driver: SqlDriver,
     internal val database: JotterDatabase,

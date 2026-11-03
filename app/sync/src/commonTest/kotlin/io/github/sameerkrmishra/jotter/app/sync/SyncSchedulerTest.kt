@@ -159,6 +159,35 @@ class SyncSchedulerTest {
         }
 
     @Test
+    fun onlyAFolderIsTriedEvery30sAndEachBackendWhenItIsDue() =
+        runTest {
+            val hub =
+                Backend(
+                    "hub",
+                    "hub",
+                    UnknownConfig("peer"),
+                    Instant.fromEpochMilliseconds(0),
+                    null,
+                    null,
+                )
+            val backends = Backends(listOf(usb, hub, dav))
+            backends.failing["usb"] = Outcome.UNREACHABLE
+            backends.failing["hub"] = Outcome.UNREACHABLE
+            start(backends)
+            testScheduler.advanceTimeBy(100.seconds)
+            // A server that cannot be reached waits longer each time: 30 s, then 60 s.
+            assertEquals(
+                listOf(
+                    0L to listOf("usb", "hub", "dav"),
+                    30L to listOf("usb", "hub"),
+                    60L to listOf("usb"),
+                    90L to listOf("usb", "hub"),
+                ),
+                backends.times,
+            )
+        }
+
+    @Test
     fun anUnpluggedFolderIsTriedEvery30sAndSyncsSoonAfterItIsBack() =
         runTest {
             val backends = Backends(listOf(usb, dav))
@@ -235,7 +264,7 @@ class SyncSchedulerTest {
                 flow {
                     if (broken) {
                         broken = false
-                        throw IllegalStateException("query failed")
+                        error("query failed")
                     }
                     emitAll(marks)
                 }
