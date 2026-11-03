@@ -8,8 +8,17 @@ import okio.Path
 import kotlin.random.Random
 import kotlin.random.nextULong
 
-/** Temporary directories for one test class instance. [deleteAll] removes them. */
-internal class TempFolders {
+/**
+ * A test that needs real hard links in the temporary directory. An app on Android has none
+ * (AndroidStorageTest), so the device tests skip these (see build.gradle.kts).
+ */
+@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
+internal annotation class NeedsHardLinks
+
+/** Temporary directories in [base] for one test class instance. [deleteAll] removes them. */
+internal class TempFolders(
+    private val base: Path = FileSystem.SYSTEM_TEMPORARY_DIRECTORY,
+) {
     private val created = mutableListOf<Path>()
 
     /** A new, empty directory. */
@@ -21,7 +30,7 @@ internal class TempFolders {
 
     /** A path where nothing exists. */
     fun newPath(): Path {
-        val path = FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "jotter-folder-${Random.nextULong()}"
+        val path = base / "jotter-folder-${Random.nextULong()}"
         created += path
         return path
     }

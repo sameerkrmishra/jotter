@@ -6,12 +6,13 @@ import okio.FileSystem
 import okio.Path
 import kotlin.test.AfterTest
 
-/** The contract suite on real folders, with stores made by [newStoreAt]. */
+/** The contract suite on real folders in [base], with stores made by [newStoreAt]. */
 @Suppress("AbstractClassCanBeConcreteClass") // Concrete, the test runners would try to run it.
 abstract class FolderContract internal constructor(
     private val newStoreAt: (Path) -> LocalFolderBlobStore,
+    base: Path = FileSystem.SYSTEM_TEMPORARY_DIRECTORY,
 ) : BlobStoreContract() {
-    private val folders = TempFolders()
+    private val folders = TempFolders(base)
     private val roots = HashMap<BlobStore, Path>()
 
     override suspend fun newStore(): BlobStore {
@@ -39,4 +40,5 @@ class HardLinkContractTest : FolderContract(::linkingStore)
 class RenameContractTest : FolderContract(::renamingStore)
 
 /** With hard links but no locks: a hard link alone must keep every promise. */
+@NeedsHardLinks
 class NoLockContractTest : FolderContract(::locklessStore)

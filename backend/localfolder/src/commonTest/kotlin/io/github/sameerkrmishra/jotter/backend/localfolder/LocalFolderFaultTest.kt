@@ -248,6 +248,7 @@ class LocalFolderFaultTest {
     }
 
     @Test
+    @NeedsHardLinks
     fun aRealLinkReportsATakenTarget() {
         val root = folders.newFolder()
         fs.write(root / "a") { }
@@ -275,6 +276,7 @@ class LocalFolderFaultTest {
         }
 
     @Test
+    @NeedsHardLinks
     fun withoutALockHardLinksStillRefuseATakenPath() =
         runTest {
             val root = folderWithFile("f")

@@ -102,5 +102,13 @@ checked by removing it. `TwoProcessTest` also kills a writer with `SIGKILL` in t
 middle of writing, then checks that every listed file is complete and that the
 next write works.
 
-These have not run on a real FAT or exFAT mount or on an Android device. See
-"Not verified" in ADR-0012.
+On Android devices (`connectedAndroidDeviceTest`, in CI on API 26 and 36), the
+shared tests run in the app's own storage, and `src/androidDeviceTest` adds what
+only a device can show. `AndroidStorageTest`: an app has no hard links in its own
+storage (`EACCES`) or in shared storage, and can take `fcntl` locks on both.
+`SharedStorageContractTest` runs the contract suite in the app's folder in shared
+storage. `TwoProcessDeviceTest` races three processes of the app (started through
+`app_process`) for 100 paths on each storage; with a lock that is never taken it
+fails. Tests marked `@NeedsHardLinks` are skipped on a device.
+
+These have not run on a real FAT or exFAT mount. See "Not verified" in ADR-0012.
