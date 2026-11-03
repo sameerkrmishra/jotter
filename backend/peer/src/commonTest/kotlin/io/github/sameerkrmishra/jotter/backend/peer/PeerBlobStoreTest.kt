@@ -13,10 +13,12 @@ import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.peer.FakeHub.Companion.answer
 import io.github.sameerkrmishra.jotter.backend.peer.FakeHub.Companion.send
+import io.ktor.client.engine.cio.CIO
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -66,6 +68,7 @@ class PeerBlobStoreTest {
             TOKEN,
             PeerTimeouts(idle = idle, small = 1.minutes, transfer = 1.minutes),
             Dispatchers.Default,
+            null,
         ).also {
             stores +=
                 it
@@ -372,6 +375,20 @@ class PeerBlobStoreTest {
                     200.milliseconds,
                 ) { store.read("a") }
             }
+        }
+
+    @Test
+    fun aGivenEngineCarriesTheRequestsAndClosesWithTheStore(): TestResult =
+        test {
+            val fake = FakeHub.start { send(answer(200, "{}")) }.also { fakes += it }
+            val engine = CIO.create()
+            val store = PeerBlobStore(fake.address, TOKEN, engine).also { stores += it }
+            assertEquals(Reachability.Reachable, store.ping())
+            assertContains(fake.requests.single(), "GET ${PeerProtocol.PING}")
+            store.close()
+            // Closing ends the engine's job once its connections are gone.
+            withTimeout(10.seconds) { engine.coroutineContext.job.join() }
+            assertFailsWith<BackendUnavailableException> { store.read("a") }
         }
 
     @Test
