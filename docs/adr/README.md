@@ -50,6 +50,7 @@ write a new ADR and mark the old one as amended or superseded.
 | [0016](0016-where-secrets-live.md) | Where backend secrets live on Linux | Proposed, amended by 0018 |
 | [0017](0017-webdav-backend.md) | The WebDAV backend: what it asks of a server, and what no client can enforce | Proposed |
 | [0018](0018-android-app.md) | The Android app: no local folders, Keystore secrets, WorkManager sync and the tailnet | Proposed |
+| [0019](0019-release-builds.md) | Release builds: one version source, signing outside the repository, reproducible APKs | Proposed |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.

@@ -1,0 +1,28 @@
+Jotter is a notes app that keeps your notes on your phone and lets you choose where they sync. It needs no account, has no ads and no tracking, and works without a network.
+
+<b>Notes</b>
+<ul>
+<li>Markdown notes with a preview, including task lists with checkboxes you can tap</li>
+<li>Tags, pinning, archive and trash</li>
+<li>Full-text search across all notes</li>
+<li>"Share to Jotter" saves text from any app as a new note</li>
+</ul>
+
+<b>Sync on your terms</b>
+<ul>
+<li>Every device keeps its own copy of all notes in a local database, so the app works offline</li>
+<li>Sync through a WebDAV server you choose, such as Nextcloud, a NAS or a mail provider's storage</li>
+<li>Or sync with the Jotter desktop app on your own PC over Tailscale: the phone sends its pairing token only while Tailscale's VPN carries the app</li>
+<li>Edits made on two devices at once are merged; where they clash, Jotter shows both and lets you choose</li>
+<li>Sync runs in the background about every 15 minutes, and when you leave the app</li>
+</ul>
+
+<b>Privacy</b>
+<ul>
+<li>Passwords and tokens are encrypted with a key kept in the Android Keystore, and are never in a backup</li>
+<li>Android's backups and device transfers copy the notes, never passwords or tokens</li>
+<li>A cloud backup holds the notes only if it is end-to-end encrypted; on Android 8, nothing is backed up</li>
+<li>Jotter contacts no server except the ones you add</li>
+</ul>
+
+Jotter is free software under the Apache License 2.0. It is in early development: keep a copy of notes that matter.

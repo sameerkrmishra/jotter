@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- WebDAV and the PC hub. -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -45,5 +46,21 @@
                 <data android:mimeType="text/markdown" />
             </intent-filter>
         </activity>
+
+        <!--
+            No EmojiCompat (docs/fdroid/README.md): its initializer, from Compose's emoji2, asks a
+            system font provider, on most phones Google Play Services, for an emoji font. Without
+            it, emoji are drawn with the system's own font, and an emoji newer than the Android
+            version shows as a blank box.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
     </application>
 </manifest>

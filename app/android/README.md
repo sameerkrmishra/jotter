@@ -12,8 +12,20 @@ ANDROID_HOME=~/Android/Sdk app/android/scripts/hub-e2e.sh emulator-5554
 ```
 
 Set `ANDROID_SERIAL`, or Gradle installs and runs the device tests on every device and
-emulator `adb devices` lists. F-Droid metadata, a reproducible release build and the CI
-emulator job are separate M5 tasks.
+emulator `adb devices` lists.
+
+## Release build
+
+`./gradlew :app:android:assembleRelease` gives an unsigned, unshrunk APK,
+`build/outputs/apk/release/android-release-unsigned.apk`, which is reproducible: two builds of one
+commit are byte-identical ([ADR-0019](../../docs/adr/0019-release-builds.md)).
+`scripts/reproducible-build.sh [REV]` builds it twice in fresh copies and compares; CI's
+`reproducible` workflow runs that on `main`, on tags and on pull requests that change the build.
+The version is `jotter.versionName` and `jotter.versionCode` in the root `gradle.properties`.
+Only with `JOTTER_KEYSTORE` (and its password in `JOTTER_KEYSTORE_PASSWORD`) is the APK signed:
+[docs/releasing.md](../../docs/releasing.md) has the maintainer's steps, and
+[docs/fdroid](../../docs/fdroid/README.md) the F-Droid recipe, store listing and dependency
+audit.
 
 **Dependency rule:** `app:shared-ui` and `app:sync`, AndroidX Activity and WorkManager.
 Nothing depends on it. It is an application, not a library, so ADR-0006's `linuxX64` rule
@@ -88,6 +100,9 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
   ending the process does not save it again. The intent's extras are kept out of that state.
 - **Edge to edge.** Android 15 and later draw apps under the system bars; the screens are
   padded by `safeDrawing`, which includes the keyboard.
+- **No EmojiCompat.** The manifest removes emoji2's `EmojiCompatInitializer`, which would ask a
+  font provider such as Google Play Services for an emoji font (docs/fdroid). Compose draws
+  emoji with the system font; one newer than the phone's Android shows as a blank box.
 
 ## Tests
 
@@ -103,7 +118,7 @@ Device tests (`src/androidTest`; CI's `android-device` job runs them on API 26 a
 
 | Test | What it shows |
 |---|---|
-| `MainActivityTest` | A note written in the app is stored; Back leaves the editor and then the app; turning the phone keeps the draft; leaving the screen stores it; the Sync screen offers WebDAV and the hub, and says why there is no folder; the password and token fields ask for a password keyboard without autocorrection (`EditorInfo.inputType`) |
+| `MainActivityTest` | A note written in the app is stored; emoji, also one newer than API 26, are edited and shown without EmojiCompat; Back leaves the editor and then the app; turning the phone keeps the draft; leaving the screen stores it; the Sync screen offers WebDAV and the hub, and says why there is no folder; the password and token fields ask for a password keyboard without autocorrection (`EditorInfo.inputType`) |
 | `ShareActivityTest` | Shared text becomes one note, also when the phone turns; 110,000 characters are stored whole; an image is refused; text beside a file is kept; an empty share saves nothing; an extra that cannot be unparcelled does not crash the window |
 | `SyncWorkerTest` | `SyncWorker` syncs both ways with another device through a folder and returns after its round, with no backend call on the main thread; the periodic job exists only while a backend does; a database that cannot open ends the job quietly |
 | `KeystoreSecretsTest` | The sealed store with a real Keystore key; a lost key means entering the secret again |

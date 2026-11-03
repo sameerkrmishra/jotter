@@ -13,7 +13,8 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.AppImage)
             packageName = "jotter"
-            packageVersion = "0.1.0"
+            // gradle.properties, as for the Android app (ADR-0019).
+            packageVersion = providers.gradleProperty("jotter.versionName").get()
             description = "Local-first notes"
             vendor = "Jotter contributors"
             licenseFile.set(rootProject.file("LICENSE"))

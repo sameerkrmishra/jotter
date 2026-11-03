@@ -1,0 +1,80 @@
+name: Reproducible
+
+# Builds the Android release APK twice from one commit and fails unless the two are byte-identical,
+# so that F-Droid can verify the maintainer's signed APK against its own build (ADR-0019).
+# On main, on release tags, and on pull requests that change the build: a change to the app's
+# code alone rarely breaks determinism, and the check costs two release builds.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/reproducible.yml"
+      - "app/android/**"
+      - "build-logic/**"
+      - "gradle/**"
+      - "gradle.properties"
+      - "gradlew"
+      - "settings.gradle.kts"
+      - "**/build.gradle.kts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # As in ci.yml: pull requests cancel superseded runs, other events get a group per commit.
+  group: reproducible-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  reproducible:
+    name: reproducible
+    runs-on: ubuntu-latest
+    # Measured 2026-11-03 on the first run: 8 minutes, the first build 5 m 10 s (downloading the
+    # dependencies) and the second 2 m 36 s. No Kotlin/Native toolchain is needed.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Two JDK 21 builds from different vendors, one per build: the APK must not depend on
+      # which JDK 21 builds it (F-Droid uses Debian's). Temurin comes last, so it is JAVA_HOME
+      # for the wrapper.
+      - id: zulu
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: zulu
+          java-version: 21
+
+      - id: temurin
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Dependencies only: the script builds without the build cache, in fresh copies, and the
+      # second build in a Gradle user home of its own that reads only this one's downloads.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+
+      - run: app/android/scripts/reproducible-build.sh
+        env:
+          JOTTER_JDK_A: ${{ steps.temurin.outputs.path }}
+          JOTTER_JDK_B: ${{ steps.zulu.outputs.path }}
+
+      # Both APKs and logs, for diffoscope on a machine that has it.
+      - if: ${{ !success() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reproducible-build
+          path: |
+            build/reproducible/*.apk
+            build/reproducible/*.log
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,55 @@
+# DRAFT of Jotter's build recipe for F-Droid's fdroiddata repository, where it goes as
+# metadata/io.github.sameerkrmishra.jotter.yml. Not submitted yet: docs/fdroid/README.md says what
+# to fill in and check first. The description, summary and changelogs come from fastlane/ in the
+# source repository, so they are not repeated here.
+
+Categories:
+  - Writing
+License: Apache-2.0
+AuthorName: The Jotter Authors
+SourceCode: https://github.com/sameerkrmishra/jotter
+IssueTracker: https://github.com/sameerkrmishra/jotter/issues
+Changelog: https://github.com/sameerkrmishra/jotter/releases
+
+AutoName: Jotter
+
+RepoType: git
+Repo: https://github.com/sameerkrmishra/jotter.git
+# The maintainer's signed APK for each tag. F-Droid builds the same commit unsigned, copies this
+# APK's signature onto its build and publishes it only if the signature then verifies, so users
+# get the maintainer's signature from either source (reproducible builds, ADR-0019).
+Binaries: https://github.com/sameerkrmishra/jotter/releases/download/v%v/jotter-%v.apk
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    # TODO before submitting: the tag of the release.
+    commit: v0.1.0
+    subdir: app/android
+    # The build needs JDK 21 (gradle/gradle-daemon-jvm.properties). Without one installed, the
+    # foojay plugin would download a JDK, which F-Droid's build server should not do.
+    # TODO before submitting: check this against the build server's current Debian release, and
+    # drop the extra source if openjdk-21 is already in it.
+    sudo:
+      - echo "deb https://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list
+      - apt-get update
+      - apt-get install -y -t trixie openjdk-21-jdk-headless
+      - update-alternatives --auto java
+    gradle:
+      - yes
+    # SQLDelight's schema snapshots: small SQLite files that only core:storage's migration tests
+    # read, never the app's build. Test fixtures, not prebuilt code.
+    scanignore:
+      - core/storage/src/commonMain/sqldelight/databases
+
+# TODO before submitting: the SHA-256 of the maintainer's signing certificate, from
+#   apksigner verify --print-certs jotter-0.1.0.apk
+# (the "Signer #1 certificate SHA-256 digest" line, lowercase, without colons).
+AllowedAPKSigningKeys: TODO
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+# The version lives in gradle.properties, not in app/android/build.gradle.kts (ADR-0019).
+UpdateCheckData: gradle.properties|jotter\.versionCode=(\d+)|.|jotter\.versionName=(\S+)
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1

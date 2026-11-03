@@ -420,7 +420,8 @@ records the codec, and a backend with another version's format file is left alon
   [the PC as hub](adr/0015-pc-hub-peer-protocol.md), 0016
   [where backend secrets live](adr/0016-where-secrets-live.md) and 0017
   [the WebDAV backend](adr/0017-webdav-backend.md) (M4); 0018
-  [the Android app](adr/0018-android-app.md) (M5).
+  [the Android app](adr/0018-android-app.md) and 0019
+  [release builds](adr/0019-release-builds.md) (M5).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge. Beside `check`, a `webdav` job
@@ -431,7 +432,10 @@ records the codec, and a backend with another version's format file is left alon
   every pull request. The Android app's end-to-end test with a hub on the host
   (`app/android/scripts/hub-e2e.sh`) runs by hand.
 - **Reproducible F-Droid builds:** no Google Play Services, no proprietary
-  dependencies.
+  dependencies ([docs/fdroid](fdroid/README.md)). Two builds of the release APK
+  from one commit are byte-identical; the `reproducible` workflow checks it on
+  `main`, on tags and on pull requests that change the build, so that F-Droid
+  can publish the maintainer's signed APK ([ADR-0019](adr/0019-release-builds.md)).
 
 ---
 
