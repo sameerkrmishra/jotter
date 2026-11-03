@@ -48,8 +48,10 @@ Run `./gradlew check` before every commit. CI
 `./gradlew check` on every pull request to `main` and every push to `main`.
 Its `check` job is the required status check for merging. Beside it, the
 `simulate` job runs the sync simulator over 3000 seeds, more than `check` does
-(see [core/sync/README.md](core/sync/README.md)). It is not a required check,
-so look at it before merging: a pull request needs it green too. The desktop module
+(see [core/sync/README.md](core/sync/README.md)), and the `webdav` job runs
+`backend/webdav` against real WebDAV servers in containers
+(see [backend/webdav/README.md](backend/webdav/README.md)). They are not required
+checks, so look at them before merging: a pull request needs them green too. The desktop module
 exists, but CI does not build its distributable yet. The APK joins CI in M5.
 
 ## Code style
