@@ -10,6 +10,7 @@ dependencies {
     kover(projects.core.merge)
     kover(projects.backend.api)
     kover(projects.backend.localfolder)
+    kover(projects.backend.webdav)
     kover(projects.core.model)
     kover(projects.core.sqlite)
     kover(projects.core.storage)
