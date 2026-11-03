@@ -1,5 +1,6 @@
 #!/bin/sh
-# Checks that the device tests of every module that applies jotter.android-device-test ran: a
+# Checks that the device tests of every module that applies jotter.android-device-test, and of the
+# Android app, ran: a
 # module whose runner arguments filtered out every test would otherwise pass without a word.
 # Prints the number of test cases per module. Run it from the repository root after
 # `./gradlew connectedAndroidDeviceTest`.
@@ -7,6 +8,7 @@ set -eu
 
 modules=$(grep -rl --include=build.gradle.kts 'id("jotter.android-device-test")' \
     --exclude-dir=build --exclude-dir=build-logic . | sed 's|^\./||; s|/build.gradle.kts$||' | sort)
+modules="$modules app/android"
 test -n "$modules"
 
 status=0

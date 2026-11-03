@@ -98,7 +98,7 @@ the hub client speaking to a real hub through OkHttp on such sockets), `SealedFi
 key: round trips, a lost key, a moved secret, damage, failures, concurrent writes) and
 `TailscaleTest` (when a token may go out).
 
-Device tests (`src/androidTest`, run by hand as CI has no emulator):
+Device tests (`src/androidTest`; CI's `android-device` job runs them on API 26 and 36):
 
 | Test | What it shows |
 |---|---|

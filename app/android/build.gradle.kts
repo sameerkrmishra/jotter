@@ -13,6 +13,10 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // The end-to-end test needs the PC's half on the host: scripts/hub-e2e.sh runs it alone,
+        // with `am instrument`. Left out of Gradle's runs, so that CI counts no skipped test.
+        testInstrumentationRunnerArguments["notClass"] =
+            "io.github.sameerkrmishra.jotter.app.android.HubEndToEndTest"
     }
 
     buildTypes {

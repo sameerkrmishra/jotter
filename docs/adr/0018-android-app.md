@@ -140,7 +140,8 @@ the note again; the intent's extras are not copied into that state.
   cannot tell such a VPN from Tailscale's. This is a stated limit, not a protection.
 - On Android 8.0 and 8.1 nothing is backed up.
 - Two HTTP engines in the app: CIO for WebDAV and loopback, OkHttp for the hub on the tailnet.
-- `connectedDebugAndroidTest` and the end-to-end script run by hand: CI has no emulator yet.
+- The end-to-end script runs by hand: CI's `android-device` job runs the device tests, not
+  the PC's half on the host.
 
 ## Alternatives considered
 
