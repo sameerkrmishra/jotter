@@ -40,8 +40,8 @@ kover {
                 // The lambdas of `main()` are classes of their own.
                 classes("*.desktop.MainKt", "*.desktop.MainKt$*")
                 // The Android app's platform glue: its Activities, the share target's screen and
-                // model, the Application, the composition root, WorkManager's job and the Keystore
-                // key. They need an Android runtime (and core:sqlite's device library), so their
+                // model, the Application, the composition root, WorkManager's job, the Keystore
+                // key and asking Android about Tailscale's VPN. They need an Android runtime (and core:sqlite's device library), so their
                 // tests are app/android's device tests, which Kover does not measure. The app's
                 // own logic (what a share becomes, the sealed secrets) is in host tests and counts.
                 classes(
@@ -56,6 +56,7 @@ kover {
                     "*.app.android.AndroidSync*",
                     "*.app.android.SyncWork*",
                     "*.app.android.KeystoreKeyKt*",
+                    "*.app.android.AndroidTailnet*",
                 )
             }
         }

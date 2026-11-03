@@ -3,6 +3,8 @@
 
     <!-- WebDAV and the PC hub. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether Tailscale's VPN carries this app now, before a hub's token goes out. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
         Backups: the notes database only, and only where the backup is encrypted on the device

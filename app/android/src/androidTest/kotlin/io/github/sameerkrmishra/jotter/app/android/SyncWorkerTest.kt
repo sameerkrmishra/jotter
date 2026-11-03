@@ -42,7 +42,8 @@ import kotlin.test.assertTrue
 class SyncWorkerTest {
     private val mainThreadCalls = AtomicInteger()
     private val calls = AtomicInteger()
-    private val test = TestGraph { secrets -> watching(StandardBackendFactory(secrets)) }
+    private val test =
+        TestGraph { secrets, tailnet -> watching(StandardBackendFactory(secrets, tailnet)) }
     private val stick = File(test.folder, "stick").apply { mkdirs() }
 
     // Not beside the folder: a backend may not be in a database's folder (app:sync).

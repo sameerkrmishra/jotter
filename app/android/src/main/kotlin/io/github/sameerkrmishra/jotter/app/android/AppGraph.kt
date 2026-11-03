@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.android
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.os.Build
 import androidx.work.WorkManager
 import io.github.sameerkrmishra.jotter.app.sharedui.AppViewModel
@@ -11,6 +12,7 @@ import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.app.sync.SyncTiming
+import io.github.sameerkrmishra.jotter.app.sync.TailnetCheck
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
@@ -55,9 +57,11 @@ internal const val FOLDERS_UNAVAILABLE: String =
  * @param databaseName The database's file name in the app's `databases` folder; tests use theirs.
  * @param secretsFile Where the sealed secrets are kept.
  * @param keyAlias The Keystore key that seals them.
- * @param factory Opens a backend, given where its secrets are; tests may replace it.
+ * @param factory Opens a backend, given where its secrets are and the [tailnet] check; tests may
+ *   replace it.
  * @param io Where blocking database, file and Keystore calls run.
  * @param work Where the sync scheduler runs.
+ * @param tailnet Whether a hub's token may go out now: by default, only while Tailscale runs.
  */
 @Suppress("LongParameterList") // Defaults for the app; tests replace the files and the factory.
 internal class AppGraph(
@@ -65,9 +69,11 @@ internal class AppGraph(
     private val databaseName: String = DATABASE_NAME,
     private val secretsFile: File = File(context.noBackupFilesDir, SECRETS_FILE),
     private val keyAlias: String = SECRETS_KEY_ALIAS,
-    private val factory: (SecretStores) -> BackendFactory = ::StandardBackendFactory,
+    private val factory: (SecretStores, TailnetCheck) -> BackendFactory = ::StandardBackendFactory,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     work: CoroutineDispatcher = Dispatchers.Default,
+    private val tailnet: TailnetCheck =
+        AndroidTailnet(context.getSystemService(ConnectivityManager::class.java)),
 ) : AutoCloseable {
     private val context = context.applicationContext
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -103,7 +109,8 @@ internal class AppGraph(
 
     private fun newSync(store: NoteStore): AndroidSync {
         val engine = SyncEngine(store, DeviceInfo(deviceName(), "android"), io)
-        val manager = BackendManager(store, engine, factory(secrets), secrets, io)
+        val manager =
+            BackendManager(store, engine, factory(secrets, tailnet), secrets, io, tailnet = tailnet)
         return AndroidSync(store, manager, WorkManager.getInstance(context), background)
     }
 

@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.sameerkrmishra.jotter.app.sync.BackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
+import io.github.sameerkrmishra.jotter.app.sync.TailnetCheck
 import java.io.File
 import java.security.KeyStore
 import java.util.UUID
@@ -15,7 +16,7 @@ import java.util.UUID
  * so the Activities and [SyncWorker] use it. [close] removes all of it.
  */
 internal class TestGraph(
-    factory: (SecretStores) -> BackendFactory = ::StandardBackendFactory,
+    factory: (SecretStores, TailnetCheck) -> BackendFactory = ::StandardBackendFactory,
 ) : AutoCloseable {
     val context: Context = ApplicationProvider.getApplicationContext()
     private val name = "test-${UUID.randomUUID()}"
