@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** The PC hub as a backend, against a real hub from the `server` module on 127.0.0.1. */
@@ -204,6 +205,55 @@ class PeerBackendTest {
                         )
                     }
                 }
+            }
+        }
+
+    @Test
+    fun onlyLoopbackAndTailscaleAddressesGetAToken() =
+        test {
+            Device(this, "a").use { device ->
+                suspend fun reason(address: String) =
+                    assertIs<AddResult.Refused>(device.manager.addPeer(address, Secret("t"))).reason
+                for (address in listOf("100.128.0.1", "100.63.255.1", "10.0.0.1", "99.64.0.1")) {
+                    assertTrue(reason(address).contains("is not on your tailnet"), address)
+                }
+                // Not four numbers: a name, which the client checks once resolved.
+                assertTrue(
+                    reason("1.2.3").startsWith("Cannot reach the hub at 1.2.3"),
+                    reason("1.2.3"),
+                )
+                // A port is not checked against the tailnet rule.
+                assertTrue(reason("127.0.0.1:1").startsWith("Cannot reach"))
+
+                val folder = folder("stick")
+                val stick =
+                    assertIs<AddResult.Added>(
+                        device.manager.addLocalFolder(folder.toString(), setUpNewStore = true),
+                    ).backend
+                assertEquals(
+                    PasswordChange.Refused("${stick.id} needs no password."),
+                    device.manager.changePassword(stick.id, Secret("x")),
+                )
+                assertNull(device.manager.whereSecretsAre(stick))
+                device.store.backends.add(
+                    io.github.sameerkrmishra.jotter.core.storage.BackendRecord(
+                        "hub",
+                        "peer",
+                        "hub",
+                        """{"host":"127.0.0.1","port":1}""",
+                        kotlin.time.Instant.fromEpochMilliseconds(0),
+                    ),
+                )
+                assertEquals(
+                    PasswordChange.Refused("Enter the pairing token."),
+                    device.manager.changePassword("hub", Secret("")),
+                )
+                val bad = device.manager.changePassword("hub", Secret("a\nb"))
+                assertTrue(
+                    assertIs<PasswordChange.Refused>(bad).reason.startsWith(
+                        "Cannot use this pairing token",
+                    ),
+                )
             }
         }
 

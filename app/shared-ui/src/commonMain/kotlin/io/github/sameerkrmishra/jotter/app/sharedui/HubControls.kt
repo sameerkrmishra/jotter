@@ -68,7 +68,12 @@ public sealed interface HubState {
     ) : HubState
 }
 
-/** A device paired with the hub. */
+/**
+ * A device paired with the hub.
+ *
+ * @property id Its id on the hub.
+ * @property name What the user called it.
+ */
 public data class HubDevice(
     val id: String,
     val name: String,
@@ -77,6 +82,7 @@ public data class HubDevice(
 /**
  * A new pairing. [toString] leaves the token out.
  *
+ * @property device The device.
  * @property token What the user enters on the device, shown once.
  */
 public class HubPairing(

@@ -96,6 +96,48 @@ class BackendsViewModelTest {
     }
 
     @Test
+    fun answersWithNothingAskedDoNothing() {
+        SyncedDevice("here").use { device ->
+            val screen = BackendsViewModel(device.manager, device.scheduler, scope)
+            screen.confirmSetUp()
+            screen.confirmSetUpServer()
+            screen.usePasswordFile()
+            screen.confirmPassword()
+            screen.confirmRemove()
+            assertEquals(null, screen.message)
+            assertEquals(false, screen.busy)
+            assertTrue(noKeyringExplanation("No keyring.", null).contains("in your settings"))
+            screen.close()
+        }
+    }
+
+    @Test
+    fun hubSettingsThatAreIncompleteAreTheDefaults() {
+        SyncedDevice("here").use { device ->
+            val file = folders.resolve("hub.properties")
+            val defaults = HubSettings("/hub", "127.0.0.1", 0)
+            for (text in listOf(
+                "host=127.0.0.1\nport=1\n",
+                "folder=/x\nport=1\n",
+                "folder=/x\nhost=h\nport=no\n",
+            )) {
+                java.nio.file.Files
+                    .writeString(file, text)
+                val hub =
+                    PeerHubControls(
+                        device.manager,
+                        file,
+                        folders.resolve("devices.json"),
+                        scope,
+                        Dispatchers.IO,
+                        defaults,
+                    )
+                assertEquals(defaults, hub.settings)
+            }
+        }
+    }
+
+    @Test
     fun aFolderThatIsBackSyncsAtOnce() {
         SyncedDevice("here").use { device ->
             val stick = folders.resolve("stick").createDirectories()
