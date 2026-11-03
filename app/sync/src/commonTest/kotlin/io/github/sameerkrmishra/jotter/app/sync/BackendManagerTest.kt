@@ -84,9 +84,49 @@ class BackendManagerTest {
                 assertEquals(AddResult.Refused("There is no folder at $path/gone."), missing)
                 val relative = device.manager.addLocalFolder("stick", setUpNewStore = true)
                 assertTrue(assertIs<AddResult.Refused>(relative).reason.contains("full path"))
-                val root = device.manager.addLocalFolder("/", setUpNewStore = false)
-                assertIs<AddResult.NotAStoreYet>(root)
                 assertEquals(emptyList(), device.manager.list())
+            }
+        }
+
+    @Test
+    fun aStoreMayNotHoldTheDatabaseOrNestInAnotherStore() =
+        test {
+            val stick = folder("stick")
+            val other = folder("other")
+            val link = path / "link"
+            files.createSymlink(link, stick)
+            Device(this, "a").use { device ->
+                val databaseFolder = device.file.substringBeforeLast('/')
+
+                suspend fun refused(path: Any): String {
+                    val result =
+                        device.manager.addLocalFolder(
+                            path.toString(),
+                            setUpNewStore = true,
+                        )
+                    return assertIs<AddResult.Refused>(result, path.toString()).reason
+                }
+                assertTrue(refused(databaseFolder).contains("notes database"))
+                assertTrue(refused("$databaseFolder/sub").contains("notes database"))
+                assertTrue(refused(path).contains("notes database"))
+                assertTrue(refused("/").contains("notes database"))
+
+                assertIs<AddResult.Added>(
+                    device.manager.addLocalFolder(stick.toString(), setUpNewStore = true),
+                )
+                files.createDirectories(stick / "inner")
+                assertTrue(refused(stick / "inner").contains("must not nest"))
+                // Another name for the same folder is the same folder.
+                assertTrue(refused(link).contains("must not nest"))
+
+                // A store this device does not sync with is still a store.
+                Device(this, "b").use { b ->
+                    b.manager.addLocalFolder(other.toString(), setUpNewStore = true)
+                }
+                files.createDirectories(other / "inner")
+                assertTrue(refused(other / "inner").contains("inside the Jotter store $other"))
+                assertEquals(1, device.manager.list().size)
+                assertFalse(files.exists(other / "inner" / ".jotter-store"))
             }
         }
 

@@ -40,6 +40,7 @@ class BackendStoreTest {
                 store.backends.add(stick)
             }
             openStore(dir.path).use { store ->
+                assertEquals(dir.path, store.path)
                 assertEquals(listOf(stick, later), store.backends.list())
             }
         }

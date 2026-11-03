@@ -20,8 +20,10 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalPathApi::class)
 class SyncCommandsTest {
     private val directory = createTempDirectory("jotter-cli-sync")
-    private val here = directory.resolve("here.db")
-    private val there = directory.resolve("there.db")
+
+    // Apart from the folders: a backend may not be in the database's folder.
+    private val here = directory.resolve("here/notes.db")
+    private val there = directory.resolve("there/notes.db")
     private val stick = directory.resolve("stick").createDirectories()
 
     @AfterTest
@@ -168,6 +170,15 @@ class SyncCommandsTest {
                 ambiguous.stderr,
             )
         }
+    }
+
+    @Test
+    fun theDatabaseFolderCannotBeABackend() {
+        ok(here, "list")
+        val result = jotter(here, "backends", "add", "--new", here.parent.toString())
+        assertEquals(1, result.statusCode)
+        assertTrue(result.stderr.contains("holds this device's notes database"), result.stderr)
+        assertFalse(here.parent.resolve(".jotter-store").exists())
     }
 
     @Test

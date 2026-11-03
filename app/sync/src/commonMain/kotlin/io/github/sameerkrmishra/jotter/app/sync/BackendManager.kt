@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okio.FileSystem
+import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import kotlin.coroutines.CoroutineContext
@@ -114,6 +116,7 @@ public class BackendManager(
                         it,
                     )
             }
+            overlap(folder)?.let { return@withLock AddResult.Refused(it) }
             val blobs = LocalFolderBlobStore(folder)
             when (val reachability = blobs.ping()) {
                 Reachability.Reachable -> add(blobs, config, name ?: nameOf(folder))
@@ -130,6 +133,36 @@ public class BackendManager(
                                 "Cannot use ${config.path}: ${reachability.detail}",
                             )
                     }
+            }
+        }
+
+    /**
+     * Why [folder] cannot be a store, or null if it can. A store must not hold this device's
+     * database, or sit in its folder, and two stores must not nest: a store's files would end up
+     * in another store, or next to the database. Paths are compared after resolving symbolic
+     * links, so another name for the same place is caught too.
+     */
+    private suspend fun overlap(folder: Path): String? =
+        withContext(io) {
+            val here = canonical(folder)
+            val database = canonical(store.path.toPath(normalize = true)).parent
+            val stores =
+                list().mapNotNull { it.config as? LocalFolderConfig }.map { it.path.toPath() }
+            val enclosing = generateSequence(here.parent) { it.parent }
+            when {
+                database != null && related(here, database) ->
+                    "$folder cannot be a backend: it holds this device's notes database, or is " +
+                        "in its folder ($database). Choose a folder apart from it."
+                stores.any { related(here, canonical(it)) } -> {
+                    val other = stores.first { related(here, canonical(it)) }
+                    "$folder cannot be a backend: it is inside the backend folder $other, or " +
+                        "holds it. Stores must not nest."
+                }
+                enclosing.any { files.exists(it / MARKER) } -> {
+                    val other = enclosing.first { files.exists(it / MARKER) }
+                    "$folder is inside the Jotter store $other. Add $other itself instead."
+                }
+                else -> null
             }
         }
 
@@ -293,6 +326,30 @@ public class BackendManager(
         }
 
     private companion object {
+        /** The marker file of a local folder store (ADR-0012). */
+        const val MARKER = ".jotter-store"
+
+        val files: FileSystem get() = FileSystem.SYSTEM
+
+        /** [path] with symbolic links resolved, or as it is if it does not exist (yet). */
+        fun canonical(path: Path): Path =
+            try {
+                files.canonicalize(path)
+            } catch (_: IOException) {
+                path
+            }
+
+        /** Whether [a] and [b] are the same folder, or one is inside the other. */
+        fun related(
+            a: Path,
+            b: Path,
+        ): Boolean = a.within(b) || b.within(a)
+
+        fun Path.within(other: Path): Boolean =
+            root == other.root &&
+                segments.size >= other.segments.size &&
+                segments.subList(0, other.segments.size) == other.segments
+
         @OptIn(ExperimentalUuidApi::class) // generateV4() is still experimental in Kotlin 2.4.
         fun newId(): String = Uuid.generateV4().toString()
 

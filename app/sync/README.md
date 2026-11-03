@@ -56,7 +56,11 @@ syncs it.
   ([ADR-0012](../../docs/adr/0012-local-folder-publishing.md)). A folder that is a
   Jotter store already is added. One that is not yet answers `NotAStoreYet`, and only
   a second call with `setUpNewStore`, after the user said yes, runs `initialize()`.
-  The same folder is not added twice. Paths must be absolute and are normalised.
+  The same folder is not added twice. Paths must be absolute and are normalised. A
+  folder is refused if it holds the notes database or is in the database's folder,
+  if it is inside or holds a backend folder of this device, or if it is inside a
+  folder with a `.jotter-store` marker: stores must not nest. Paths are compared after
+  resolving symbolic links.
 - **Removing** takes the backend off the list first, then `SyncEngine.forget`, then
   its secrets. Its files stay. If the process dies in between, what is left are sync
   records under an id that is never used again: a new backend always gets a new id.

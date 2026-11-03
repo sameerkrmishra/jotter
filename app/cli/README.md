@@ -73,7 +73,8 @@ yet, it explains what setting it up does and fails: it would create a hidden fil
 put them on this computer's disk, so `--new` must say that this folder is meant
 ([ADR-0012](../../docs/adr/0012-local-folder-publishing.md)). A folder another device
 set up is added without `--new`. A relative `PATH` is taken from the current
-directory and stored as an absolute one.
+directory and stored as an absolute one. A folder that holds the database or is in its folder, or that
+is inside or holds another store, is refused.
 
 `backends remove` deletes nothing in the folder: other devices can go on syncing
 there. Adding it again later copies this device's whole history there again.

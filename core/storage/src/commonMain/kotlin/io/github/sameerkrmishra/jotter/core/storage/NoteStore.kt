@@ -24,6 +24,7 @@ internal const val JOTTER_APPLICATION_ID = 0x4A4F5452
  * @property notes Creates, changes, lists, observes and searches the notes.
  * @property sync What `core:sync` reads and writes. Nothing else can use it (see [SyncStoreApi]).
  * @property backends The backends this device syncs with, and how their last sync went.
+ * @property path The database file, as given to [open].
  */
 @OptIn(SyncStoreApi::class)
 public class NoteStore private constructor(
@@ -33,6 +34,7 @@ public class NoteStore private constructor(
     public val notes: NoteService,
     @property:SyncStoreApi public val sync: SyncStore,
     public val backends: BackendStore,
+    public val path: String,
 ) : AutoCloseable {
     /**
      * Closes the database. Waits for a write running on another thread to finish. The store and
@@ -81,7 +83,7 @@ public class NoteStore private constructor(
                 val sync = SyncStore(database, deviceId, clock, queryContext, ids)
                 val backends = BackendStore(database, queryContext)
                 opened = true
-                return NoteStore(driver, database, deviceId, notes, sync, backends)
+                return NoteStore(driver, database, deviceId, notes, sync, backends, path)
             } finally {
                 if (!opened) driver.close()
             }

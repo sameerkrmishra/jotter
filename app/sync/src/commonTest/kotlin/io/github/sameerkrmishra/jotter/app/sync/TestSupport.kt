@@ -65,7 +65,8 @@ internal class Device(
     val secrets: SecretStore = InMemorySecretStore(),
     io: CoroutineContext = EmptyCoroutineContext,
 ) : AutoCloseable {
-    val file = (dir.path / "$name.db").toString()
+    // In a folder of its own: a backend folder may not be in the database's folder.
+    val file = (dir.folder("db-$name") / "$name.db").toString()
     val store: NoteStore = NoteStore.open(file, name, io, clock)
     val engine = SyncEngine(store, DeviceInfo(name, "test"), io, clock)
     val manager = BackendManager(store, engine, factory, secrets, io, clock)
