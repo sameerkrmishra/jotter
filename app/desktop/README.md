@@ -37,7 +37,8 @@ or holds it exclusively.
   engine's database work and each backend's I/O run on `Dispatchers.IO`, never on the
   UI thread. Exit cancels the scope, which stops a running sync where it is
   (`SyncEngine` is safe to stop anywhere), and waits for it before the store closes.
-  Backends need no secrets yet, so the app passes `NoSecretStore`
+  Passwords and tokens come from `app:sync`'s `linuxSecretStores`: the keyring through
+  `secret-tool`, or the file the user chose when no keyring answered
   ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)).
 - **`--autoclose`** closes the app a few seconds after the window appears and prints
   `jotter: window shown, closing`, to prove that a build starts. It also closes the

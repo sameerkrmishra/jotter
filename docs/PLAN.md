@@ -109,7 +109,7 @@ jotter/
 │   ├── sync/           # backend list and config, add/remove, status, sync scheduling
 │   ├── desktop/        # Compose Desktop entry point, Linux packaging
 │   └── cli/            # Clikt-based CLI
-└── server/             # Ktor: peer BlobStore endpoint (web app API later)
+└── server/             # PC hub: peer BlobStore endpoint, JVM only (web app API later)
 ```
 
 Each module has one job and a small public API. Internal details are marked
