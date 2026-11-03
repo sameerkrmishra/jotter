@@ -34,16 +34,20 @@ depends on this one for the protocol, never the other way round.
 - **Strict answers.** A listing must be one a store could give: sorted, no repeats,
   valid paths below the prefix, sizes not negative. A body needs a
   `Content-Length` of at most 32 MiB. Anything else is `BlobStoreFailureException`.
-- **The token goes to the address only.** No redirects are followed, nothing is
+- **The token stays in the tailnet.** Before each request the hub's name is
+  resolved, and the request goes to that address only if it is loopback,
+  `100.64.0.0/10` or `fd7a:115c:a1e0::/48`; otherwise the call fails, unreachable,
+  with a plain message, and nothing is sent. No redirects are followed, nothing is
   retried, and the token is in no message. A token with characters no hub token
   has, such as a line break, is refused at once.
 - **`writeNew` copies the bytes** before sending, and refuses more than 32 MiB
   without contacting the hub.
-- **Timeouts:** 10 s to connect, 60 s without bytes, 15 min for one request. On
-  linuxX64 Ktor's CIO engine does not apply the 60 s, so only the 15 min bounds a
-  hub that stops answering there.
-- A refused token reads as `Unreachable(FAILED)` with a detail that says so;
-  `backend:api` has no reason for it.
+- **Timeouts:** 10 s to connect, 60 s for a whole `ping` or `list`, 15 min for a
+  `read` or `writeNew`, and 60 s without bytes moving. The client keeps that last
+  watch itself (`IdleWatch`), as Ktor's CIO engine ignores its socket timeout on
+  linuxX64. Uploads go in 64 KiB parts, so a slow upload is not a stall.
+- **A refused token** is `Unreachable(UNAUTHORIZED)`: the device must be paired
+  again, and retrying does not help.
 
 ## Design
 
@@ -57,7 +61,8 @@ depends on this one for the protocol, never the other way round.
 
 ## Tests
 
-`PeerBlobStoreTest` runs the client against `FakeHub`, a raw socket server on
+`PeerBlobStoreTest` also covers the idle watch (silence, a stalled body, a slow but
+steady one) and the tailnet rule. It runs the client against `FakeHub`, a raw socket server on
 loopback that answers as a broken hub would: no protocol header, a body cut short
 or too long, no length, impossible listings, every error code with right and wrong
 statuses, redirects, silence, and nothing listening. `PeerAddressTest` covers the

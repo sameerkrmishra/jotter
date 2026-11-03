@@ -48,11 +48,18 @@ yet.
   requests, repeated or extra parameters, a body on a read and a second
   `Authorization` header are refused. A write needs a plain `Content-Length` of at
   most 32 MiB, checked with the path before the body is read.
-- **Limits** (`HubLimits`): 16 connections (more wait in the kernel's queue), a
-  16 KiB head within 10 s, 30 s of silence in a body, 15 min per request, and 4
-  files in memory at once. A body that stalls or breaks off writes nothing.
+- **Limits** (`HubLimits`): 16 connections, counted until their sockets have
+  closed (more wait in the kernel's queue), 8 from one address (more are cut), a
+  16 KiB head within 10 s, 30 s of silence in a body, 15 min per request including
+  the time the client takes to read the answer, and 4 files in memory at once, each
+  held until its answer is taken. A body that stalls or breaks off writes nothing.
+  Answers are buffered whole, not streamed.
+- **Queries** are decoded strictly: invalid UTF-8 or a bad escape is 400.
 - **Errors.** A store failure goes to the client as its code. An unexpected
-  exception is answered as `FAILED` without its message, and never stops the hub.
+  exception is answered as `FAILED` without its message. An `Error`, such as
+  running out of memory, ends its connection only. If the accept loop ends anyway,
+  `status` becomes `Failed`, and `start` serves again. `stop` takes at most about
+  five seconds, cutting connections that do not end.
 - **No logging.** The hub logs nothing, so it cannot log a token.
 
 ## Design
@@ -83,6 +90,9 @@ with real hubs on `127.0.0.1` and free ports:
   transfer limits, and five writers racing through the hub and on the PC.
 - `HubProtocolTest`: requests outside the protocol, heads that do not parse, paths
   that try to leave the store, names with query characters, and failing stores.
+- `HubExhaustionTest`: waves of clients that never read 4 MiB answers, 15 that
+  never read 32 MiB ones, the per-address cap, an `Error` in the store, a broken
+  listening socket, a bounded `stop`, and invalid UTF-8 in paths.
 - `PeerHubTest`: lifecycle, a taken port, an unset store, pairing across restarts,
   damaged token files, and the address rule.
 

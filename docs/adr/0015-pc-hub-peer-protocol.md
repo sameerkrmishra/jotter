@@ -57,9 +57,18 @@ HTTP/1.1 over TCP, plain text, version 1. All of it is in
   by sync as the KDoc of `BlobStore.writeNew` says: a retry that finds the file
   gets 409 and compares.
 - **`ping`** answers what the hub's own store answers (`Reachable`, or 503 with
-  `MISSING`, `NOT_INITIALIZED` or `FAILED`). A hub that cannot be reached, or that
-  refuses the token, is `Unreachable(FAILED)` with a detail that says which. The
-  `BlobStore` API has no reason for "refused"; see "Alternatives".
+  `MISSING`, `NOT_INITIALIZED` or `FAILED`). A hub that cannot be reached is
+  `Unreachable(FAILED)`. A hub that refuses the token is
+  `Unreachable(UNAUTHORIZED)`, a reason added to `backend:api` (as on the WebDAV
+  branch, with the same name), so that sync stops retrying quickly and the user is
+  told to pair the device again.
+- **Paths must be UTF-8.** The hub decodes the query itself, strictly: invalid
+  UTF-8 or a bad `%` escape is 400, never replacement characters.
+- **Client timeouts.** 10 s to connect; 60 s for a whole `ping` or `list`; 15 min
+  for a `read` or `writeNew`. Within those, a request that moves no bytes for 60 s
+  fails. The client keeps that idle watch itself, around waiting for the answer's
+  head and each part of a body in either direction, because Ktor's CIO engine does
+  not apply its socket timeout on linuxX64.
 
 ### Authentication: per-device tokens
 
@@ -100,31 +109,67 @@ HTTP/1.1 over TCP, plain text, version 1. All of it is in
   issue it for, and protect nothing more on this path. Plain HTTP is only sound
   because of the address rule above: the hub cannot be bound where WireGuard does
   not wrap it.
-- `100.64.0.0/10` is the shared address space of carrier-grade NAT too, so the rule
-  cannot prove that an address belongs to Tailscale; it keeps out the usual LAN and
-  public addresses. IPv6 (Tailscale's `fd7a:115c:a1e0::/48`) is not supported yet.
-- Exposing the hub to the internet with Tailscale Funnel is not supported.
+- **The client sends its token only into the tailnet.** Before every request it
+  resolves the hub's name, checks the address, and sends the request to that same
+  address, so the address checked is the one connected to. Allowed: loopback
+  (`127.0.0.0/8`, `::1`), `100.64.0.0/10` and Tailscale's IPv6 range
+  `fd7a:115c:a1e0::/48`. Anything else, such as a LAN address or a name that
+  resolves to one, is refused with a plain message, before a byte is sent. There is
+  no opt-in. Only the first address a name resolves to is used.
+- **IPv6.** The hub listens on IPv4 only; it cannot be bound to an IPv6 address,
+  not even Tailscale's. The client accepts Tailscale's IPv6 addresses and `::1`,
+  but a hub is reachable there only once a later change lets it listen on them.
+- **An allowed address on another interface.** `100.64.0.0/10` is also the shared
+  address space of carrier-grade NAT. A PC on a phone hotspot or behind some ISPs
+  can hold such an address on a network that is not the tailnet. The address rule
+  cannot tell: binding the hub to that address would serve plain HTTP on that
+  network, with tokens in it. The user must give the address Tailscale shows for
+  the PC, and the backend management UI should take it from Tailscale's own
+  display, not from the PC's interface list. Likewise a phone that reaches such an
+  address outside the tailnet would send its token there.
+- **The hub must never be exposed beyond the tailnet**: no Tailscale Funnel or
+  Serve, no port forwarding, no reverse proxy. Its security rests on WireGuard
+  around every byte; anything that removes the tunnel removes the encryption.
 
 ### Limits
 
 A bad or broken client must not exhaust the PC, which runs the user's desktop app
-in the same process. The hub's server is an accept loop of its own over Ktor's
-sockets (`ktor-network`) and HTTP/1.1 parser (`ktor-http-cio`), because Ktor's CIO
-server engine has no limit on connections and no time limit for a request's
-headers. Defaults, in `HubLimits`:
+in the same process.
+
+**The hub keeps its own accept loop** over Ktor's sockets (`ktor-network`) and
+HTTP/1.1 parser (`ktor-http-cio`), not Ktor's CIO server engine. The engine has no
+limit on connections, no time limit for a request's head, and no way to count a
+connection until its socket has really closed; each of those is a limit below.
+This was reviewed and kept: the loop is short, and the parsing is still Ktor's.
+
+Defaults, in `HubLimits`:
 
 | Limit | Default | What it bounds |
 |---|---|---|
-| `maxConnections` | 16 | Sockets. The loop accepts the next connection only when one ends, so further clients wait in the kernel's listen queue, not in memory |
+| `maxConnections` | 16 | Sockets. A connection counts until its socket has closed, not until its answer was handed to Ktor, which buffers it. The loop accepts the next connection only when one ends, so further clients wait in the kernel's listen queue, not in memory |
+| `maxConnectionsPerClient` | 8 | Connections from one address, with a token or not. Further ones are cut at once, so one tailnet node cannot take every slot |
 | request head | 16 KiB, in `headerTimeout` = 10 s | Memory and time before authentication |
 | body | 32 MiB, with a plain `Content-Length` | Checked before reading; chunked bodies are refused (411) |
 | `idleTimeout` | 30 s | A body that stalls is dropped, and nothing is written |
-| `requestDeadline` | 15 min | One request in all; 32 MiB at about half a megabit per second |
-| `maxTransfers` | 4 | Files held in memory at once, so at most 4 × 32 MiB |
+| `requestDeadline` | 15 min | One request in all, from its first byte until the client has taken the whole answer; 32 MiB at about half a megabit per second |
+| `maxTransfers` | 4 | Files held in memory at once. A read keeps its transfer until the client has taken the answer or the deadline cuts it |
 
 A body is read whole into memory and only then passed to `writeNew`, so a body
-that breaks off or stalls writes nothing. The client bounds what it reads the same
-way: 32 MiB for a file or a listing, and 64 KiB for an error.
+that breaks off or stalls writes nothing. Answers are not streamed: `BlobStore.read`
+returns a whole file, so the hub holds it, and Ktor's write buffer may hold a copy.
+Memory for files is so bounded by about 2 × `maxTransfers` × 32 MiB. A client that
+never reads its answer holds a connection and a transfer until the deadline, then
+is cut; when the hub is done with a connection it closes it and cuts it if it has
+not closed within a second.
+
+Each connection runs on its own in a supervisor, so an exception or `Error` in one,
+such as running out of memory, ends that connection only. If the accept loop itself
+ends for any reason other than `stop`, the status becomes `Failed` with the reason,
+and `start` serves again. `stop` ends every connection within about five seconds,
+cutting those that do not end.
+
+The client bounds what it reads the same way: 32 MiB for a file or a listing, and
+64 KiB for an error.
 
 ### Paths
 
@@ -201,14 +246,15 @@ There is no discovery, broadcast or QR code in this decision.
   right, though the parsing is Ktor's.
 - One connection per request costs a TCP handshake per file; a first sync of
   thousands of segments opens thousands of connections.
-- 16 slow clients can hold every connection for up to the header timeout or the
-  request deadline (only paired devices get past the head). That blocks the hub,
-  not the PC.
+- Slow clients on two or more addresses can hold every connection for up to the
+  header timeout or the request deadline (only paired devices get past the head).
+  That blocks the hub, not the PC.
 - A token is long to type on a phone. The backend management UI may want a QR code
   or a link format, which this ADR leaves open.
-- A refused token reads as `Unreachable(FAILED)`, told apart only by its detail
-  text, so the status screen cannot react to it by type.
-- `100.64.0.0/10` does not prove Tailscale, and IPv6 is not supported.
+- `100.64.0.0/10` does not prove Tailscale (see "An allowed address on another
+  interface"), and the hub cannot listen on IPv6.
+- Answers are buffered, not streamed, so a read costs up to twice the file in memory.
+- A client on several addresses of one machine gets a per-client cap for each.
 
 ### Not verified
 
@@ -216,9 +262,11 @@ There is no discovery, broadcast or QR code in this decision.
 - `testAndroidHostTest` runs the client on a host JVM, not on Android's network
   stack.
 - On linuxX64, Ktor's CIO client does not apply its socket timeout (seen in
-  `PeerBlobStoreTest`), so only the request deadline (15 min) bounds a hub that
-  stops answering there. The JVM and Android are bounded by the socket timeout
-  (60 s).
+  `PeerBlobStoreTest`); the client's own idle watch covers that. On the JVM the
+  engine passes a slow body on in batches, so a body that trickles in a few bytes
+  at a time could look idle for longer than it is. Tested with 256 KiB parts.
+- Name resolution was tested with IP literals and an unresolvable name only, not
+  with a MagicDNS name.
 - The claim that WireGuard makes TLS redundant rests on Tailscale's design, not on
   a test. That Tailscale gives the PC an address in `100.64.0.0/10` is from its
   documentation.
@@ -237,9 +285,13 @@ There is no discovery, broadcast or QR code in this decision.
 - **Ktor's server engine (CIO) with routing:** less code, but no cap on
   connections and no time limit for the request head; an idle or slow client
   costs a coroutine and a socket for as long as it likes.
-- **A new `UnreachableReason.UNAUTHORIZED` in `backend:api`:** lets the UI tell a
-  refused token by type. Left out to keep this change out of `backend:api` and
-  `core:sync`; it is a small change for the backend management task to make.
+- **A refused token as `Unreachable(FAILED)`:** kept `backend:api` unchanged, but
+  sync would retry a token that can never work, and the UI could tell the case
+  only by its text.
+- **Streaming answers:** would bound memory per connection, but `BlobStore.read`
+  returns a whole file; the transfer limit bounds memory instead.
+- **Letting the user allow other hosts for the token:** not now; a hub off the
+  tailnet would have no encryption.
 - **Keep-alive and pipelining:** fewer handshakes, but a connection could then
   carry many requests and the limits would need to be per request and per
   connection.
