@@ -16,6 +16,7 @@ import io.github.sameerkrmishra.jotter.backend.peer.FakeHub.Companion.send
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -26,11 +27,14 @@ import kotlin.test.assertContains
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /**
  * The client against hubs that misbehave, which the real server does not. The tests of the
@@ -53,13 +57,14 @@ class PeerBlobStoreTest {
     private suspend fun storeAnswering(text: String): PeerBlobStore = storeOn { send(text) }
 
     private suspend fun storeOn(
+        idle: Duration = 500.milliseconds,
         answer: suspend io.ktor.utils.io.ByteWriteChannel.(String) -> Unit,
     ): PeerBlobStore {
         val fake = FakeHub.start(answer).also { fakes += it }
         return PeerBlobStore(
             fake.address,
             TOKEN,
-            PeerTimeouts(socket = 500.milliseconds, request = 2.seconds),
+            PeerTimeouts(idle = idle, small = 1.minutes, transfer = 1.minutes),
             Dispatchers.Default,
         ).also {
             stores +=
@@ -195,7 +200,9 @@ class PeerBlobStoreTest {
 
             val refused = storeAnswering(error(401, "UNAUTHORIZED"))
             assertFailsWith<BackendUnavailableException> { refused.read("a") }
-            assertContains((refused.ping() as Reachability.Unreachable).detail, "token")
+            val refusal = refused.ping() as Reachability.Unreachable
+            assertEquals(UnreachableReason.UNAUTHORIZED, refusal.reason)
+            assertContains(refusal.detail, "token")
         }
 
     @Test
@@ -245,11 +252,115 @@ class PeerBlobStoreTest {
         }
 
     @Test
-    fun aHubThatNeverAnswersIsUnavailable(): TestResult =
+    fun aHubThatNeverAnswersIsUnavailableAfterTheIdleTimeout(): TestResult =
         test {
+            // The deadlines are a minute; only the client's own idle watch can end these quickly,
+            // also on linuxX64, where Ktor does not apply its socket timeout.
             val store = storeOn { awaitCancellation() }
+            val started = TimeSource.Monotonic.markNow()
             assertFailsWith<BackendUnavailableException> { store.read("a") }
+            assertIs<Reachability.Unreachable>(store.ping())
+            assertTrue(started.elapsedNow() < 30.seconds, "${started.elapsedNow()}")
         }
+
+    @Test
+    fun aBodyThatStallsIsUnavailableAfterTheIdleTimeout(): TestResult =
+        test {
+            val store =
+                storeOn {
+                    send(answer(200, "abc", length = 10))
+                    flush()
+                    awaitCancellation()
+                }
+            val started = TimeSource.Monotonic.markNow()
+            assertFailsWith<BackendUnavailableException> { store.read("a") }
+            assertTrue(started.elapsedNow() < 30.seconds, "${started.elapsedNow()}")
+        }
+
+    @Test
+    fun aSlowButSteadyBodyIsNotAStall(): TestResult =
+        test {
+            // Parts of 256 KiB: the client's engine passes small trickles on in batches.
+            val part = "x".repeat(256 * 1024)
+            val body = part.repeat(8)
+            val store =
+                storeOn(idle = 1500.milliseconds) {
+                    send(answer(200, "", length = body.length))
+                    flush()
+                    // Eight parts, 300 ms apart: 2.4 s in all, against an idle limit of 1.5 s.
+                    repeat(8) {
+                        delay(300.milliseconds)
+                        send(part)
+                        flush()
+                    }
+                }
+            assertContentEquals(body.encodeToByteArray(), store.read("a"))
+        }
+
+    @Test
+    fun theTokenNeverGoesOutsideTheTailnet(): TestResult =
+        test {
+            listOf("192.0.2.1", "10.0.0.1", "8.8.8.8", "100.128.0.1").forEach { host ->
+                val store = PeerBlobStore(PeerAddress(host, 1), TOKEN).also { stores += it }
+                val ping = store.ping() as Reachability.Unreachable
+                assertContains(
+                    ping.detail,
+                    "neither on the tailnet nor this machine",
+                    message = host,
+                )
+                assertFailsWith<BackendUnavailableException> { store.writeNew("a", byteArrayOf(1)) }
+            }
+            val nowhere = PeerBlobStore(PeerAddress("name.invalid", 1), TOKEN).also { stores += it }
+            assertContains((nowhere.ping() as Reachability.Unreachable).detail, "Cannot find")
+        }
+
+    @Test
+    fun onlyLoopbackAndTailscaleAddressesMayHaveTheToken() {
+        fun v4(vararg octets: Int) = ByteArray(4) { octets[it].toByte() }
+
+        fun v6(vararg groups: Int) =
+            ByteArray(16) {
+                (
+                    groups.getOrElse(it / 2) { 0 } shr (
+                        if (it % 2 ==
+                            0
+                        ) {
+                            8
+                        } else {
+                            0
+                        }
+                    )
+                ).toByte()
+            }
+        val allowed =
+            listOf(
+                v4(127, 0, 0, 1),
+                v4(127, 9, 9, 9),
+                v4(100, 64, 0, 1),
+                v4(100, 127, 255, 255),
+                v6(0, 0, 0, 0, 0, 0, 0, 1),
+                v6(0xfd7a, 0x115c, 0xa1e0, 0xab12, 0, 0, 0, 1),
+            )
+        val refused =
+            listOf(
+                v4(100, 63, 255, 255),
+                v4(100, 128, 0, 0),
+                v4(192, 168, 1, 1),
+                v4(0, 0, 0, 0),
+                v6(0, 0, 0, 0, 0, 0, 0, 2),
+                v6(0, 0, 0, 0, 0, 0, 0, 0),
+                v6(0xfd7a, 0x115c, 0xa1e1, 0, 0, 0, 0, 1),
+                v6(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+                ByteArray(5),
+            )
+        allowed.forEach { assertTrue(isTailnetOrLoopback(it), urlHostOf(it)) }
+        refused.forEach { assertFalse(isTailnetOrLoopback(it), it.contentToString()) }
+        assertEquals("100.64.0.1", urlHostOf(v4(100, 64, 0, 1)))
+        assertEquals(
+            "[fd7a:115c:a1e0:0:0:0:0:1]",
+            urlHostOf(v6(0xfd7a, 0x115c, 0xa1e0, 0, 0, 0, 0, 1)),
+        )
+    }
 
     @Test
     fun theCallersCancellationIsNotAnError(): TestResult =

@@ -15,8 +15,7 @@ import io.github.sameerkrmishra.jotter.backend.peer.dto.ErrorDto
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.contentLength
-import io.ktor.utils.io.readBuffer
-import kotlinx.io.readByteArray
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.json.Json
 
 private const val MAX_ERROR_BYTES = 64 * 1024
@@ -30,7 +29,7 @@ internal class PeerAnswers(
 ) {
     private val unauthorized =
         Reachability.Unreachable(
-            UnreachableReason.FAILED,
+            UnreachableReason.UNAUTHORIZED,
             "Hub $address did not accept this device's token. Pair the device again.",
         )
 
@@ -56,13 +55,17 @@ internal class PeerAnswers(
             cause,
         )
 
-    /** The body of [response], which must have [status], of at most [limit] bytes. */
+    /**
+     * The body of [response], which must have [status], of at most [limit] bytes. Each part read
+     * is reported to [watch].
+     */
     suspend fun body(
         response: HttpResponse,
         status: Int,
         path: String?,
         limit: Int,
-    ): ByteArray = boundedBody(expect(response, status, path), limit)
+        watch: IdleWatch,
+    ): ByteArray = boundedBody(expect(response, status, path, watch), limit, watch)
 
     /**
      * Returns [response] if it has [status], or throws the failure it describes. [path] is the
@@ -72,12 +75,13 @@ internal class PeerAnswers(
         response: HttpResponse,
         status: Int,
         path: String?,
+        watch: IdleWatch,
     ): HttpResponse {
         if (response.status.value == status) return response
         val error =
             try {
                 json.decodeFromString<ErrorDto>(
-                    boundedBody(response, MAX_ERROR_BYTES).decodeToString(),
+                    boundedBody(response, MAX_ERROR_BYTES, watch).decodeToString(),
                 )
             } catch (_: IllegalArgumentException) {
                 // A SerializationException is one: the body is not an error of the protocol.
@@ -155,6 +159,7 @@ internal class PeerAnswers(
     private suspend fun boundedBody(
         response: HttpResponse,
         limit: Int,
+        watch: IdleWatch,
     ): ByteArray {
         val declared = response.contentLength()
         if (declared == null || declared > limit) {
@@ -162,12 +167,20 @@ internal class PeerAnswers(
                 "Hub $address sent an answer of ${declared ?: "unknown"} bytes, not up to $limit",
             )
         }
-        val bytes = response.bodyAsChannel().readBuffer(declared + 1).readByteArray()
-        if (bytes.size.toLong() != declared) {
+        val bytes = ByteArray(declared.toInt())
+        val channel = response.bodyAsChannel()
+        var read = 0
+        while (read < bytes.size) {
+            val part = channel.readAvailable(bytes, read, bytes.size - read)
+            if (part < 0) break
+            read += part
+            watch.progress()
+        }
+        if (read != bytes.size) {
             throw BackendUnavailableException(
                 Reachability.Unreachable(
                     UnreachableReason.FAILED,
-                    "Hub $address sent ${bytes.size} of $declared bytes",
+                    "Hub $address sent $read of $declared bytes",
                 ),
             )
         }

@@ -17,16 +17,21 @@ import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
-import io.ktor.http.content.ByteArrayContent
+import io.ktor.http.content.OutgoingContent
+import io.ktor.network.sockets.InetSocketAddress
+import io.ktor.utils.io.ByteWriteChannel
+import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.concurrent.Volatile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
@@ -38,21 +43,21 @@ private const val HTTP_CREATED = 201
 /**
  * A [BlobStore] on a hub: the `server` module, running on the user's PC and reached over Tailscale
  * (`docs/adr/0015-pc-hub-peer-protocol.md`). Through it, the hub's own store behaves as if it were
- * local: `writeNew` never replaces, `list` is complete or fails, and an unreachable hub, or one
- * that refuses the token, never looks empty.
+ * local: `writeNew` never replaces, `list` is complete or fails, and an unreachable hub never
+ * looks empty. A hub that refuses the token is unreachable with
+ * [UnreachableReason.UNAUTHORIZED]: the device must be paired again.
  *
- * The connection is plain HTTP. Tailscale's WireGuard tunnel encrypts it and proves which machine
- * answers, so this must only be pointed at a Tailscale address or name, or at loopback.
- *
- * Nothing is retried here, and redirects are not followed, so the token only ever goes to
- * [address]. Close the store to free its connections.
+ * The connection is plain HTTP, which Tailscale's WireGuard tunnel encrypts. So the token only
+ * goes to an address on the tailnet or on this machine: before each request the hub's name is
+ * resolved, the address is checked, and the request goes to that address. Nothing is retried, and
+ * redirects are not followed. Close the store to free its connections.
  *
  * @property address Where the hub listens.
  */
 public class PeerBlobStore internal constructor(
     public val address: PeerAddress,
     token: String,
-    timeouts: PeerTimeouts,
+    private val timeouts: PeerTimeouts,
     private val dispatcher: CoroutineDispatcher,
 ) : BlobStore,
     AutoCloseable {
@@ -70,7 +75,6 @@ public class PeerBlobStore internal constructor(
     }
 
     private val authorization = "Bearer $token"
-    private val baseUrl = "http://${address.host}:${address.port}"
     private val answers = PeerAnswers(address)
 
     @Volatile
@@ -82,8 +86,7 @@ public class PeerBlobStore internal constructor(
             followRedirects = false
             install(HttpTimeout) {
                 connectTimeoutMillis = timeouts.connect.inWholeMilliseconds
-                socketTimeoutMillis = timeouts.socket.inWholeMilliseconds
-                requestTimeoutMillis = timeouts.request.inWholeMilliseconds
+                socketTimeoutMillis = timeouts.idle.inWholeMilliseconds
             }
             engine {
                 // A phone needs few connections, and the hub serves several devices.
@@ -95,18 +98,23 @@ public class PeerBlobStore internal constructor(
 
     override suspend fun list(prefix: String): List<BlobInfo> {
         requireValidBlobPrefix(prefix)
-        return call(PeerProtocol.LIST, { parameter(PeerProtocol.PREFIX_PARAMETER, prefix) }) {
-            answers.listing(
+        val query: HttpRequestBuilder.() -> Unit = {
+            parameter(
+                PeerProtocol.PREFIX_PARAMETER,
                 prefix,
-                answers.body(this, HTTP_OK, prefix, PeerProtocol.MAX_LIST_BYTES),
             )
+        }
+        return call(PeerProtocol.LIST, timeouts.small, query) {
+            val body = answers.body(response, HTTP_OK, prefix, PeerProtocol.MAX_LIST_BYTES, watch)
+            answers.listing(prefix, body)
         }
     }
 
     override suspend fun read(path: String): ByteArray {
         requireValidBlobPath(path)
-        return call(PeerProtocol.BLOB, { parameter(PeerProtocol.PATH_PARAMETER, path) }) {
-            answers.body(this, HTTP_OK, path, PeerProtocol.MAX_FILE_BYTES)
+        val query: HttpRequestBuilder.() -> Unit = { parameter(PeerProtocol.PATH_PARAMETER, path) }
+        return call(PeerProtocol.BLOB, timeouts.transfer, query) {
+            answers.body(response, HTTP_OK, path, PeerProtocol.MAX_FILE_BYTES, watch)
         }
     }
 
@@ -122,18 +130,21 @@ public class PeerBlobStore internal constructor(
             )
         }
         // A copy, so that the request sends what the caller passed even if it changes the array.
-        val content = ByteArrayContent(bytes.copyOf(), ContentType.Application.OctetStream)
+        val copy = bytes.copyOf()
         val request: HttpRequestBuilder.() -> Unit = {
             method = HttpMethod.Put
             parameter(PeerProtocol.PATH_PARAMETER, path)
-            setBody(content)
         }
-        call(PeerProtocol.BLOB, request) { answers.expect(this, HTTP_CREATED, path) }
+        call(PeerProtocol.BLOB, timeouts.transfer, request, copy) {
+            answers.expect(response, HTTP_CREATED, path, watch)
+        }
     }
 
     override suspend fun ping(): Reachability =
         try {
-            call(PeerProtocol.PING, {}) { answers.expect(this, HTTP_OK, null) }
+            call(PeerProtocol.PING, timeouts.small, {}) {
+                answers.expect(response, HTTP_OK, null, watch)
+            }
             Reachability.Reachable
         } catch (e: BackendUnavailableException) {
             e.reachability
@@ -151,31 +162,42 @@ public class PeerBlobStore internal constructor(
     }
 
     /**
-     * Sends one request to [endpoint], a `GET` unless [configure] says otherwise, and passes the
-     * answer, if it is from a hub, to [handle]. Any failure to talk to the hub is
-     * [BackendUnavailableException]: the hub is off, unreachable or went away during the call.
+     * Sends one request to [endpoint], a `GET` unless [configure] says otherwise, with [upload] as
+     * its body if given, and passes the answer, if it is from a hub, to [handle]. The request may
+     * take [deadline] in all, and stall for [PeerTimeouts.idle] at most. Any failure to talk to the
+     * hub is [BackendUnavailableException]: the hub is off, unreachable, outside the tailnet, or
+     * went away during the call.
      */
     private suspend fun <T> call(
         endpoint: String,
+        deadline: Duration,
         configure: HttpRequestBuilder.() -> Unit,
-        handle: suspend io.ktor.client.statement.HttpResponse.() -> T,
+        upload: ByteArray? = null,
+        handle: suspend Exchange.() -> T,
     ): T =
         // Off the caller's dispatcher: the timeouts must run in real time, also under runTest.
         withContext(dispatcher) {
             try {
                 check(!closed) { "This store was closed" }
-                client
-                    .prepareRequest("$baseUrl$endpoint") {
-                        configure()
-                        header(HttpHeaders.Authorization, authorization)
-                    }.execute { response ->
-                        answers.requireHub(response)
-                        response.handle()
+                val host = urlHostOf(resolvedAddress())
+                withTimeout(deadline) {
+                    IdleWatch.watching(timeouts.idle) { watch ->
+                        client
+                            .prepareRequest("http://$host:${address.port}$endpoint") {
+                                configure()
+                                header(HttpHeaders.Authorization, authorization)
+                                if (upload != null) setBody(UploadContent(upload, watch))
+                            }.execute { response ->
+                                watch.progress()
+                                answers.requireHub(response)
+                                Exchange(response, watch).handle()
+                            }
                     }
+                }
             } catch (e: BlobStoreException) {
                 throw e
             } catch (e: CancellationException) {
-                // The caller's cancellation, or a timeout of the client's own.
+                // The caller's cancellation, or a deadline or timeout of the client's own.
                 currentCoroutineContext().ensureActive()
                 throw answers.gone(e)
             } catch (
@@ -186,8 +208,63 @@ public class PeerBlobStore internal constructor(
             }
         }
 
+    /**
+     * The address that the hub's name resolves to now, which the request then goes to, so that the
+     * address checked is the address connected to.
+     *
+     * @throws BackendUnavailableException if it does not resolve, or resolves outside the tailnet.
+     */
+    private fun resolvedAddress(): ByteArray {
+        val resolved =
+            try {
+                InetSocketAddress(address.host, address.port).resolveAddress()
+            } catch (
+                // Null on the JVM, a PosixException on linuxX64: either way, no address.
+                @Suppress("TooGenericExceptionCaught") _: Exception,
+            ) {
+                null
+            } ?: throw unreachable("Cannot find hub $address")
+        if (!isTailnetOrLoopback(resolved)) {
+            throw unreachable(
+                "Hub $address is at ${urlHostOf(resolved)}, which is neither on the tailnet nor " +
+                    "this machine, so Jotter does not send it the device's token",
+            )
+        }
+        return resolved
+    }
+
+    private fun unreachable(detail: String) =
+        BackendUnavailableException(Reachability.Unreachable(UnreachableReason.FAILED, detail))
+
+    /** An answer, and the watch that reading its body reports to. */
+    private class Exchange(
+        val response: HttpResponse,
+        val watch: IdleWatch,
+    )
+
+    /** A body sent in parts, each reported to [watch]: a slow upload is not a stall. */
+    private class UploadContent(
+        private val bytes: ByteArray,
+        private val watch: IdleWatch,
+    ) : OutgoingContent.WriteChannelContent() {
+        override val contentLength: Long get() = bytes.size.toLong()
+        override val contentType: ContentType get() = ContentType.Application.OctetStream
+
+        override suspend fun writeTo(channel: ByteWriteChannel) {
+            var offset = 0
+            while (offset < bytes.size) {
+                val end = minOf(offset + UPLOAD_PART, bytes.size)
+                channel.writeFully(bytes, offset, end)
+                channel.flush()
+                offset = end
+                watch.progress()
+            }
+        }
+    }
+
     private companion object {
         const val MAX_CONNECTIONS = 4
+        const val UPLOAD_PART = 64 * 1024
 
         // What a token from the hub is made of: base64url and the dot between its two parts.
         fun isTokenCharacter(char: Char): Boolean =
@@ -199,12 +276,14 @@ public class PeerBlobStore internal constructor(
  * How long [PeerBlobStore] waits.
  *
  * @property connect For a connection to be made.
- * @property socket For the next bytes, in either direction, once connected. Ktor's CIO engine does
- *   not apply this on linuxX64, where only [request] bounds a hub that stops answering.
- * @property request For a whole request, answer included: as long as the hub's own deadline.
+ * @property idle For the next bytes, in either direction, once a request is sent. The client
+ *   enforces this itself, as Ktor's CIO engine does not on linuxX64.
+ * @property small For a whole `ping` or `list`.
+ * @property transfer For a whole `read` or `writeNew`: as long as the hub's own deadline.
  */
 internal data class PeerTimeouts(
     val connect: Duration = 10.seconds,
-    val socket: Duration = 60.seconds,
-    val request: Duration = 15.minutes,
+    val idle: Duration = 60.seconds,
+    val small: Duration = 60.seconds,
+    val transfer: Duration = 15.minutes,
 )

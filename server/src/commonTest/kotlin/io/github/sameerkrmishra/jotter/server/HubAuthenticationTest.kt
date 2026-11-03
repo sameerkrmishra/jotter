@@ -30,7 +30,7 @@ class HubAuthenticationTest {
             val hub = hubs.start()
             val stranger = hubs.client(hub, hub.token.dropLast(1) + "x")
             val ping = stranger.ping()
-            assertEquals(UnreachableReason.FAILED, (ping as Reachability.Unreachable).reason)
+            assertEquals(UnreachableReason.UNAUTHORIZED, (ping as Reachability.Unreachable).reason)
             assertContains(ping.detail, "did not accept this device's token")
             assertFailsWith<BackendUnavailableException> { stranger.list("") }
             assertFailsWith<BackendUnavailableException> { stranger.read("a") }
