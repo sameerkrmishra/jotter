@@ -55,7 +55,7 @@ public class SecretServiceStore(
         key: SecretKey,
         secret: Secret,
     ) {
-        val label = "--label=Jotter: ${describe(key.kind)} of backend ${key.backendId}"
+        val label = "--label=${label(key)}"
         val result =
             run(listOf("store", label) + attributes(key), secret.reveal().encodeToByteArray())
         if (result.exit != 0) throw failure("store", result)
@@ -73,17 +73,29 @@ public class SecretServiceStore(
     }
 
     /**
-     * After `clear` ended with 1 without a word, which is nothing to delete or an unlock prompt
-     * the user dismissed: null if a lookup confirms that [key] is gone, else why it may still be
-     * there, so that the caller does not go on as if it were deleted.
+     * After `clear` ended with 1 without a word: null if [key] is confirmed gone, else why it may
+     * still be there, so that the caller does not go on as if it were deleted (ADR-0016).
+     *
+     * Verified in libsecret's source (`tool/secret-tool.c`, `libsecret/secret-methods.c`), not
+     * against a real keyring, as none is available to the tests:
+     * - `clear` deletes only unlocked items and ends with 1, silently, when it deleted none: so
+     *   a locked item, or a dismissed unlock prompt, looks like no item at all.
+     * - `search --all` without `--unlock` passes no unlock flag to `secret_service_search`, which
+     *   then returns locked items as well as unlocked ones and never prompts. It prints each item
+     *   (its id and label on stdout, its attributes on stderr) and ends with 0, also when nothing
+     *   matches, which prints nothing; a failed search prints why and ends with 1.
+     *
+     * Assumed: that every provider (GNOME Keyring, KWallet, KeePassXC) lists locked items to a
+     * search that does not unlock, as the Secret Service specification says, and that older
+     * `secret-tool` versions behave the same. Its manual page says locked items are skipped
+     * without `--unlock`, which libsecret's code does not do. So only exit 0 with nothing on
+     * either stream counts as gone; anything else, listed items, an error or output that is not
+     * understood, may be a locked secret.
      */
     private suspend fun stillThere(key: SecretKey): SecretStoreException? {
-        val check = run(listOf("lookup") + attributes(key), input = null)
-        return when {
-            check.isNothingFound -> null
-            check.exit == 0 -> SecretStoreException(MAY_BE_LOCKED)
-            else -> failure("delete", check)
-        }
+        val check = run(listOf("search", "--all") + attributes(key), input = null)
+        val gone = check.exit == 0 && check.output.isEmpty() && check.error.isBlank()
+        return if (gone) null else SecretStoreException(mayBeLocked(key))
     }
 
     private fun attributes(key: SecretKey) =
@@ -201,9 +213,12 @@ public class SecretServiceStore(
             "Jotter cannot reach a keyring: there is no desktop session here, as over SSH or in " +
                 "a cron job."
 
-        const val MAY_BE_LOCKED =
-            "The keyring did not confirm that the password was deleted: the keyring may be " +
-                "locked. Unlock your keyring and try again."
+        /** What a delete that the keyring did not confirm says, naming the item by its label. */
+        fun mayBeLocked(key: SecretKey) =
+            "The keyring did not confirm that the item \"${label(key)}\" was deleted: the " +
+                "keyring may be locked. Unlock your keyring and try again."
+
+        fun label(key: SecretKey) = "Jotter: ${describe(key.kind)} of backend ${key.backendId}"
 
         const val NO_PROVIDER =
             "Jotter cannot reach a keyring: no keyring program, such as GNOME Keyring, KWallet " +

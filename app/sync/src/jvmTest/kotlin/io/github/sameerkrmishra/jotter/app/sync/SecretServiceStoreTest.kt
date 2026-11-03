@@ -101,25 +101,71 @@ class SecretServiceStoreTest {
         }
 
     @Test
-    fun aClearThatSaysNothingIsCheckedWithALookup() =
+    fun aSilentClearOfNothingIsConfirmedBySearching() =
+        runTest {
+            // Nothing to delete: clear ends with 1 silently, and an empty search confirms it.
+            store().delete(key)
+            assertTrue(
+                calls().contains("search --all application jotter backend b-1 kind APP_PASSWORD"),
+                calls().toString(),
+            )
+            assertFalse(calls().any { it.contains("--unlock") }, calls().toString())
+        }
+
+    @Test
+    fun aLockedSecretIsNotTakenForDeleted() =
         runTest {
             val store = store()
-            // Nothing to delete: clear ends with 1 silently, and a lookup confirms it.
-            store.delete(key)
-
             store.write(key, Secret(password))
-            directory.resolve("dismiss").writeText("")
-            val locked = assertFailsWith<SecretStoreException> { store.delete(key) }
-            assertFalse(locked is SecretStoreUnavailableException)
-            assertTrue(locked.message!!.contains("the keyring may be locked"), locked.message)
-            assertTrue(locked.message!!.contains("Unlock your keyring"), locked.message)
-            assertFalse(password in locked.message!!)
-            assertEquals(password, store.read(key)?.reveal())
+            // A locked keyring, or a dismissed unlock prompt: clear and lookup both end with 1
+            // without a word, and only the search, which does not unlock, still lists the item.
+            directory.resolve("locked").writeText("")
+            assertNull(store.read(key))
+            assertMayBeLocked(assertFailsWith<SecretStoreException> { store.delete(key) })
 
-            directory.resolve("dismiss").toFile().delete()
+            directory.resolve("locked").toFile().delete()
+            assertEquals(password, store.read(key)?.reveal())
             store.delete(key)
             assertNull(store.read(key))
         }
+
+    @Test
+    fun aSilentClearOfAListedItemIsNotTakenForDeleted() =
+        runTest {
+            val store = store()
+            store.write(key, Secret(password))
+            // Unlocked, yet clear deleted nothing: the search lists it, secret and all.
+            directory.resolve("keep").writeText("")
+            val failure = assertFailsWith<SecretStoreException> { store.delete(key) }
+            assertMayBeLocked(failure)
+            assertEquals(password, store.read(key)?.reveal())
+        }
+
+    @Test
+    fun aSearchThatFailsOrSaysAnythingIsNotTakenForDeleted() =
+        runTest {
+            val store = store()
+            directory.resolve("searchfail").writeText("secret-tool: Cannot search: oops")
+            assertMayBeLocked(assertFailsWith<SecretStoreException> { store.delete(key) })
+
+            directory.resolve("searchfail").toFile().delete()
+            directory.resolve("searchodd").writeText("something unexpected")
+            assertMayBeLocked(assertFailsWith<SecretStoreException> { store.delete(key) })
+
+            directory.resolve("searchodd").toFile().delete()
+            store.delete(key)
+        }
+
+    private fun assertMayBeLocked(failure: SecretStoreException) {
+        val message = failure.message!!
+        assertFalse(failure is SecretStoreUnavailableException)
+        assertTrue(message.contains("the keyring may be locked"), message)
+        assertTrue(message.contains("Unlock your keyring"), message)
+        assertTrue(message.contains("\"Jotter: app password of backend b-1\""), message)
+        assertFalse(password in message, message)
+    }
+
+    private fun calls() = directory.resolve("calls.log").readText().lines()
 
     @Test
     fun withoutASessionBusItFailsClosed() =
@@ -271,9 +317,15 @@ class SecretServiceStoreTest {
         /**
          * Stands in for `secret-tool`: keeps each item in a file next to itself, and logs its
          * arguments and its bus. A file `fail` makes it print that and exit with 1 (or what `exit`
-         * says), and `hang` makes it wait. Like the real one, `clear` ends with 1 and says nothing
-         * when there is no such item; a file `dismiss` makes it do so as though an unlock prompt
-         * was dismissed, deleting nothing.
+         * says), and `hang` makes it wait.
+         *
+         * Like libsecret's: `clear` deletes only unlocked items and ends with 1 without a word when
+         * it deleted none; `search --all` lists locked items too, never prompting, with the label
+         * on stdout and the attributes on stderr, and ends with 0 also when nothing matches. A file
+         * `locked` locks every item, as a locked keyring or a dismissed unlock prompt leaves it:
+         * `lookup` and `clear` then end with 1 without a word. `keep` makes `clear` delete nothing
+         * all the same. `searchfail` makes `search` print it and end with 1; `searchodd` makes it
+         * print that on stderr and end with 0.
          */
         val FAKE_TOOL =
             """
@@ -289,15 +341,28 @@ class SecretServiceStoreTest {
             fi
             op=${'$'}1
             shift
-            if [ "${'$'}op" = store ]; then shift; fi
+            if [ "${'$'}op" = store ] || [ "${'$'}op" = search ]; then shift; fi
             item="${'$'}dir/item-${'$'}(echo "${'$'}*" | tr ' /' '__')"
+            locked=no
+            if [ -f "${'$'}dir/locked" ]; then locked=yes; fi
             case "${'$'}op" in
                 store) cat > "${'$'}item" ;;
-                lookup) [ -f "${'$'}item" ] || exit 1; cat "${'$'}item" ;;
+                lookup)
+                    [ -f "${'$'}item" ] && [ ${'$'}locked = no ] || exit 1
+                    cat "${'$'}item" ;;
                 clear)
-                    [ -f "${'$'}item" ] || exit 1
-                    if [ -f "${'$'}dir/dismiss" ]; then exit 1; fi
+                    [ -f "${'$'}item" ] && [ ${'$'}locked = no ] || exit 1
+                    if [ -f "${'$'}dir/keep" ]; then exit 1; fi
                     rm "${'$'}item" ;;
+                search)
+                    if [ -f "${'$'}dir/searchfail" ]; then cat "${'$'}dir/searchfail" >&2; exit 1; fi
+                    if [ -f "${'$'}dir/searchodd" ]; then cat "${'$'}dir/searchodd" >&2; fi
+                    if [ -f "${'$'}item" ]; then
+                        echo "[1]"
+                        echo "label = Jotter: app password of backend b-1"
+                        if [ ${'$'}locked = no ]; then printf 'secret = '; cat "${'$'}item"; echo; fi
+                        echo "attribute.application = jotter" >&2
+                    fi ;;
             esac
             """.trimIndent() + "\n"
     }

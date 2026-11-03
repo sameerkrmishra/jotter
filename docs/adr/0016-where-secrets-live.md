@@ -74,6 +74,24 @@ decision.
 the keyring reports no bus, no provider or no `secret-tool`; a keyring that refuses
 otherwise, such as a dismissed unlock prompt, is an error and offers nothing.
 
+**A delete is confirmed, not assumed.** `secret-tool clear` deletes only unlocked items
+and ends with 1, without a word, when it deleted none, so a locked item or a dismissed
+unlock prompt looks the same as no item. After such an exit, `SecretServiceStore` runs
+`secret-tool search --all <attributes>`, without `--unlock`, which never prompts. Only
+exit 0 with nothing printed counts as deleted; listed items, a failed search or any
+output it does not expect mean the secret may still be there, and the delete fails with
+"the keyring may be locked", naming the item, so that removing the backend offers
+`--keep-secret` or Remove anyway. What is verified, in libsecret's source
+(`tool/secret-tool.c` and `libsecret/secret-methods.c`): that `clear` behaves as above,
+and that a search without the unlock flag returns locked items as well as unlocked ones,
+and ends with 0, printing nothing, when none match. What is assumed, as no real keyring
+is available to the tests: that GNOME Keyring, KWallet and KeePassXC list locked items
+to such a search, as the Secret Service specification says, and that older
+`secret-tool` versions do the same. Its manual page says that locked items are skipped
+without `--unlock`; libsecret's code does not do that. If a provider did skip them, a
+locked secret would again count as deleted, which is why a test against a real keyring
+on a desktop is still owed.
+
 **This record was a design until a backend needed a secret.** The Secret Service store
 and the file are built, with their tests, by the first of WebDAV and the PC hub to
 need them, and must follow this record; until then only the interface, the test
