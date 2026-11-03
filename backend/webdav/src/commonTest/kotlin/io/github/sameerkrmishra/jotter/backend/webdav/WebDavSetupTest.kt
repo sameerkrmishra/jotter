@@ -41,7 +41,8 @@ class WebDavSetupTest {
             assertEquals(UnreachableReason.MISSING, reason)
             assertFalse(server.isDirectory("/missing"))
             fixture.fault("PROPFIND", "/store/", HttpStatusCode.Conflict)
-            assertEquals(UnreachableReason.MISSING, unavailableReason { fakeStore(server).initialize() })
+            val conflict = unavailableReason { fakeStore(server).initialize() }
+            assertEquals(UnreachableReason.MISSING, conflict)
         }
 
     @Test
