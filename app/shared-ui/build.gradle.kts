@@ -39,3 +39,23 @@ kotlin {
 tasks.named { it == "testAndroidHostTest" }.configureEach {
     enabled = false
 }
+
+// The live test in the package `live` syncs two apps through a real WebDAV server that
+// backend/webdav/scripts/live-test.sh starts. It runs only when that script sets
+// JOTTER_WEBDAV_LIVE, and then alone. The URL is a task input, so a result is never taken from the
+// cache for another server.
+val webDavLive = providers.environmentVariable("JOTTER_WEBDAV_LIVE").orNull == "1"
+
+tasks.withType<AbstractTestTask>().configureEach {
+    listOf("JOTTER_WEBDAV_LIVE", "JOTTER_WEBDAV_LIGHTTPD_URL").forEach { name ->
+        inputs.property(name, providers.environmentVariable(name).orElse(""))
+    }
+    filter.run {
+        isFailOnNoMatchingTests = false
+        if (webDavLive) {
+            includeTestsMatching("*.sharedui.live.*")
+        } else {
+            excludeTestsMatching("*.sharedui.live.*")
+        }
+    }
+}

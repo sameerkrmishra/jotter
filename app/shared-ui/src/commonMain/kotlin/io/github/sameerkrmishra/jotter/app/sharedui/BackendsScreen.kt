@@ -19,9 +19,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import io.github.sameerkrmishra.jotter.app.sync.Backend
+import io.github.sameerkrmishra.jotter.app.sync.WebDavConfig
 
 internal const val FOLDER_FIELD = "folder"
+internal const val SERVER_URL_FIELD = "server-url"
+internal const val SERVER_USER_FIELD = "server-user"
+internal const val SERVER_PASSWORD_FIELD = "server-password"
+internal const val NEW_PASSWORD_FIELD = "new-password"
+internal const val ADD_SERVER = "Add server"
+internal const val NEW_PASSWORD = "Enter new password"
 internal const val BACKENDS_TITLE = "Sync"
 internal const val NO_BACKENDS =
     "This device syncs with no backend yet. Add a folder, such as a USB stick or a folder " +
@@ -55,6 +63,7 @@ internal fun BackendsScreen(
             Message(it) { TextButton(onClick = backends::dismissMessage) { Text("Dismiss") } }
         }
         AddFolder(backends)
+        AddServer(backends)
         if (backends.backends.isEmpty()) Text(NO_BACKENDS)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(spacing)) {
             items(backends.backends, key = { it.id }) { backend ->
@@ -62,6 +71,10 @@ internal fun BackendsScreen(
                     backend,
                     backends.statusOf(backend),
                     onRemove = { backends.askToRemove(backend) },
+                    onPassword =
+                        { backends.askForPassword(backend) }.takeIf {
+                            backend.config is WebDavConfig
+                        },
                 )
             }
         }
@@ -79,6 +92,7 @@ internal fun BackendsScreen(
             dismissButton = { TextButton(onClick = backends::cancelSetUp) { Text("Cancel") } },
         )
     }
+    BackendsDialogs(backends)
     backends.removing?.let { backend ->
         AlertDialog(
             onDismissRequest = backends::cancelRemove,
@@ -88,6 +102,118 @@ internal fun BackendsScreen(
             dismissButton = { TextButton(onClick = backends::cancelRemove) { Text("Cancel") } },
         )
     }
+}
+
+/** The dialogs of adding a server and replacing its password. */
+@Composable
+private fun BackendsDialogs(backends: BackendsViewModel) {
+    backends.settingUpServer?.let { url ->
+        AlertDialog(
+            onDismissRequest = backends::cancelSetUpServer,
+            title = { Text(SET_UP_SERVER_TITLE) },
+            text = { Text(setUpServerExplanation(url)) },
+            confirmButton = {
+                TextButton(onClick = backends::confirmSetUpServer) { Text("Set up and add") }
+            },
+            dismissButton = {
+                TextButton(onClick = backends::cancelSetUpServer) { Text("Cancel") }
+            },
+        )
+    }
+    backends.noKeyring?.let { reason ->
+        AlertDialog(
+            onDismissRequest = backends::cancelPasswordFile,
+            title = { Text(NO_KEYRING_TITLE) },
+            text = { Text(noKeyringExplanation(reason, backends.secretsFile)) },
+            confirmButton = {
+                TextButton(onClick = backends::usePasswordFile) { Text("Keep it in the file") }
+            },
+            dismissButton = {
+                TextButton(onClick = backends::cancelPasswordFile) { Text("Cancel") }
+            },
+        )
+    }
+    backends.changingPassword?.let { backend ->
+        AlertDialog(
+            onDismissRequest = backends::cancelPassword,
+            title = { Text(PASSWORD_TITLE) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+                    Text(
+                        "Make a new app password for Jotter in the settings of " +
+                            "${backend.config.location}'s account, and enter it here. Jotter " +
+                            "checks it with the server before it keeps it.",
+                    )
+                    PasswordField(
+                        backends.davPassword,
+                        { backends.editServer(password = it) },
+                        Modifier.fillMaxWidth().testTag(NEW_PASSWORD_FIELD),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = backends::confirmPassword,
+                    enabled = !backends.busy && backends.davPassword.isNotEmpty(),
+                ) { Text("Check and keep") }
+            },
+            dismissButton = { TextButton(onClick = backends::cancelPassword) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun AddServer(backends: BackendsViewModel) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = backends.davUrl,
+            onValueChange = { backends.editServer(url = it) },
+            modifier = Modifier.weight(2f).testTag(SERVER_URL_FIELD),
+            label = { Text("WebDAV folder URL, https://…") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            value = backends.davUser,
+            onValueChange = { backends.editServer(user = it) },
+            modifier = Modifier.weight(1f).testTag(SERVER_USER_FIELD),
+            label = { Text("User name") },
+            singleLine = true,
+        )
+        PasswordField(
+            backends.davPassword,
+            { backends.editServer(password = it) },
+            Modifier.weight(1f).testTag(SERVER_PASSWORD_FIELD),
+        )
+        Button(
+            onClick = backends::addServer,
+            enabled =
+                !backends.busy &&
+                    backends.changingPassword == null &&
+                    backends.davUrl.isNotBlank() &&
+                    backends.davUser.isNotBlank() &&
+                    backends.davPassword.isNotEmpty(),
+        ) { Text(ADD_SERVER) }
+    }
+}
+
+/** A field whose text is never shown. */
+@Composable
+private fun PasswordField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        label = { Text("App password") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+    )
 }
 
 @Composable
@@ -115,16 +241,27 @@ private fun BackendCard(
     backend: Backend,
     lines: BackendLines,
     onRemove: () -> Unit,
+    onPassword: (() -> Unit)?,
 ) {
     Card(Modifier.fillMaxWidth().testTag(backendTag(backend.id))) {
         Column(Modifier.padding(spacing), verticalArrangement = Arrangement.spacedBy(spacing)) {
             Text(backend.name, style = MaterialTheme.typography.titleMedium)
             Text(backend.config.location)
+            lines.secret?.let { Text(it) }
             Text(lines.reachability)
             Text(lines.lastSuccess)
             lines.lastProblem?.let { Text(it) }
             lines.issues.forEach { Text("• $it") }
-            TextButton(onClick = onRemove) { Text("Remove") }
+            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                onPassword?.let {
+                    if (lines.passwordRefused) {
+                        Button(onClick = it) { Text(NEW_PASSWORD) }
+                    } else {
+                        TextButton(onClick = it) { Text(NEW_PASSWORD) }
+                    }
+                }
+                TextButton(onClick = onRemove) { Text("Remove") }
+            }
         }
     }
 }

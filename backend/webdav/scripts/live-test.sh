@@ -86,6 +86,13 @@ for target in $targets; do
     tasks="$tasks :backend:webdav:${target}Test"
     rm -rf "backend/webdav/build/test-results/${target}Test"
 done
+# Two apps syncing through lighttpd, end to end (app/shared-ui, JVM only).
+case " $targets " in
+    *" jvm "*)
+        tasks="$tasks :app:shared-ui:jvmTest"
+        rm -rf app/shared-ui/build/test-results/jvmTest
+        ;;
+esac
 
 # Apache's If-None-Match is not atomic: concurrent writers of one path can all win
 # (docs/adr/0017-webdav-backend.md). That one contract test is known to fail there.
@@ -107,3 +114,11 @@ for target in $targets; do
         fi
     done
 done
+case " $targets " in
+    *" jvm "*)
+        if ! ls app/shared-ui/build/test-results/jvmTest/*WebDavAppsLiveTest.xml > /dev/null 2>&1; then
+            echo "WebDavAppsLiveTest did not run" >&2
+            exit 1
+        fi
+        ;;
+esac

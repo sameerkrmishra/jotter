@@ -356,6 +356,9 @@ public class BackendManager internal constructor(
             "Cannot set up ${config.url}: ${failure.message}"
         }
 
+    /** The file a user may choose for passwords, for people, or null if there is none. */
+    public val secretsFile: String? get() = secrets.fileLocation
+
     /** Where the secrets of [backend] are kept, in plain words, or null if it needs none. */
     public fun whereSecretsAre(backend: Backend): String? =
         when {

@@ -1,7 +1,10 @@
 package io.github.sameerkrmishra.jotter.app.sharedui
 
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
-import io.github.sameerkrmishra.jotter.app.sync.NoSecretStore
+import io.github.sameerkrmishra.jotter.app.sync.Secret
+import io.github.sameerkrmishra.jotter.app.sync.SecretKey
+import io.github.sameerkrmishra.jotter.app.sync.SecretStore
+import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.app.sync.SyncTiming
@@ -14,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 
@@ -26,6 +30,7 @@ import kotlin.time.Duration.Companion.minutes
 @Suppress("InjectDispatcher") // The tests stand in for a composition root.
 class SyncedDevice(
     name: String,
+    val secrets: TestSecrets = TestSecrets(),
 ) : AutoCloseable {
     private val database = TestDatabase()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -34,7 +39,13 @@ class SyncedDevice(
     val file: String get() = database.file
     private val engine = SyncEngine(store, DeviceInfo(name, "test"), Dispatchers.IO)
     val manager =
-        BackendManager(store, engine, StandardBackendFactory, NoSecretStore, Dispatchers.IO)
+        BackendManager(
+            store,
+            engine,
+            StandardBackendFactory(secrets.stores),
+            secrets.stores,
+            Dispatchers.IO,
+        )
     val scheduler =
         SyncScheduler(
             manager::syncAll,
@@ -54,5 +65,36 @@ class SyncedDevice(
 
     companion object {
         const val AFTER_EDIT_MS = 200L
+    }
+}
+
+/** Secrets in memory, in place of this user's keyring and of the file a user may choose. */
+class TestSecrets(
+    val keyring: MemorySecrets = MemorySecrets(),
+    val file: MemorySecrets = MemorySecrets(),
+    stores: SecretStores? = null,
+) {
+    val stores: SecretStores = stores ?: SecretStores(keyring, file, "/config/jotter/secrets.json")
+}
+
+/** A [SecretStore] in memory. */
+class MemorySecrets : SecretStore {
+    val secrets =
+        ConcurrentHashMap<
+            SecretKey,
+            Secret,
+        >()
+
+    override suspend fun read(key: SecretKey) = secrets[key]
+
+    override suspend fun write(
+        key: SecretKey,
+        secret: Secret,
+    ) {
+        secrets[key] = secret
+    }
+
+    override suspend fun delete(key: SecretKey) {
+        secrets.remove(key)
     }
 }

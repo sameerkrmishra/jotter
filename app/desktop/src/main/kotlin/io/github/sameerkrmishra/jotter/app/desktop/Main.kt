@@ -9,9 +9,9 @@ import io.github.sameerkrmishra.jotter.app.sharedui.CannotOpenNotes
 import io.github.sameerkrmishra.jotter.app.sharedui.JotterApp
 import io.github.sameerkrmishra.jotter.app.sharedui.SyncControls
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
-import io.github.sameerkrmishra.jotter.app.sync.NoSecretStore
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
+import io.github.sameerkrmishra.jotter.app.sync.linuxSecretStores
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
@@ -75,8 +75,16 @@ private fun runApp(
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val engine = SyncEngine(store, DeviceInfo(DEVICE_NAME, "linux"), Dispatchers.IO)
+    // The keyring through the Secret Service, or the file the user chose (ADR-0016).
+    val secrets = linuxSecretStores(System::getenv, System.getProperty("user.home"), Dispatchers.IO)
     val manager =
-        BackendManager(store, engine, StandardBackendFactory, NoSecretStore, Dispatchers.IO)
+        BackendManager(
+            store,
+            engine,
+            StandardBackendFactory(secrets),
+            secrets,
+            Dispatchers.IO,
+        )
     val scheduler = SyncScheduler(manager::syncAll)
     // In the app's scope, so that exit cancels a running sync before the store closes.
     scheduler.start(scope, store.notes.observeRevisionMark())

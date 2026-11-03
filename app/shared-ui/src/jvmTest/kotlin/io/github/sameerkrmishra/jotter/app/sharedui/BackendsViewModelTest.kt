@@ -5,8 +5,8 @@ package io.github.sameerkrmishra.jotter.app.sharedui
 import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.Backend
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
-import io.github.sameerkrmishra.jotter.app.sync.NoSecretStore
 import io.github.sameerkrmishra.jotter.app.sync.Outcome
+import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
@@ -61,7 +61,13 @@ class BackendsViewModelTest {
             val store = database.open(Dispatchers.IO)
             val engine = SyncEngine(store, DeviceInfo("x", "test"), Dispatchers.IO)
             val manager =
-                BackendManager(store, engine, StandardBackendFactory, NoSecretStore, Dispatchers.IO)
+                BackendManager(
+                    store,
+                    engine,
+                    StandardBackendFactory(SecretStores.NONE),
+                    SecretStores.NONE,
+                    Dispatchers.IO,
+                )
             // A database that went away under the screen.
             store.close()
             val screen = BackendsViewModel(manager, SyncScheduler(manager::syncAll), scope)
