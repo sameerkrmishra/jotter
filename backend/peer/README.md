@@ -65,5 +65,4 @@ address. Both run on the JVM (counted by the coverage gate), the Android host an
 linuxX64.
 
 The contract suite runs through this client against a real hub in the `server`
-module's tests, which also count towards this module's coverage in the merged
-report.
+module's tests. The coverage gate counts this module's own tests only.
