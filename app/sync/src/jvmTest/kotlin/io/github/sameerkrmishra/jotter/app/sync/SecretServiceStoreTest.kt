@@ -75,6 +75,32 @@ class SecretServiceStoreTest {
         }
 
     @Test
+    fun aSecretToolThatGivesNothingBackReadsAsLockedOrMissing() =
+        runTest {
+            // Exit 1 without a word: no such item, or an unlock prompt the user dismissed.
+            val factory = StandardBackendFactory(SecretStores(store(), NoSecretStore))
+            val backend =
+                Backend(
+                    "b-1",
+                    "dav",
+                    WebDavConfig("https://dav.example.org/", "me"),
+                    kotlin.time.Instant.fromEpochMilliseconds(0),
+                    null,
+                    null,
+                )
+            val failure = assertFailsWith<MissingSecretException> { factory.open(backend) }
+            assertTrue(failure.message!!.contains("the keyring may be locked"), failure.message)
+            assertTrue(failure.message!!.contains("Unlock your keyring"), failure.message)
+            // Nothing was written or deleted because of it.
+            assertTrue(
+                directory.resolve("calls.log").readText().lines().none {
+                    it.startsWith("store") ||
+                        it.startsWith("clear")
+                },
+            )
+        }
+
+    @Test
     fun withoutASessionBusItFailsClosed() =
         runTest {
             directory.resolve("fail").writeText("Unknown or unsupported transport")

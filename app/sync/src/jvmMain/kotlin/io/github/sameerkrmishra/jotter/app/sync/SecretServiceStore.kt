@@ -43,6 +43,9 @@ public class SecretServiceStore(
         val result = run(listOf("lookup") + attributes(key), input = null)
         return when {
             result.exit == 0 -> Secret(result.output.decodeToString())
+            // Exit 1 without a word: no such item, or, as far as secret-tool says, an unlock prompt
+            // the user dismissed. Callers word null as "locked or missing" and never overwrite,
+            // delete or forget a backend because of it.
             result.isNothingFound -> null
             else -> throw failure("read", result)
         }

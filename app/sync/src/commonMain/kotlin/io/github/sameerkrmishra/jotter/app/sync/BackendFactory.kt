@@ -72,8 +72,9 @@ internal fun openPeer(
 
 /** What a hub backend without its token says. */
 internal const val NO_TOKEN: String =
-    "No pairing token for this hub is stored on this device, as after restoring the notes on " +
-        "another computer. Pair this device on the PC again and enter the new token."
+    "Jotter could not read this hub's pairing token: the keyring may be locked, or the token is " +
+        "not stored on this device, as after restoring the notes on another computer. Unlock " +
+        "your keyring, or pair this device on the PC again and enter the new token."
 
 /** A store that a new backend may need to set up, as `initialize()` does. */
 internal interface NewStore :
@@ -106,5 +107,6 @@ internal fun openWebDav(
 
 /** What a WebDAV backend without its password says, for the status screen. */
 internal const val NO_PASSWORD: String =
-    "No app password for this backend is stored on this device, as after restoring the notes " +
-        "on another computer. Enter it for this backend again."
+    "Jotter could not read this backend's password: the keyring may be locked, or the password " +
+        "is not stored on this device, as after restoring the notes on another computer. Unlock " +
+        "your keyring, or enter the password again."

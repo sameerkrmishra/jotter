@@ -4,6 +4,11 @@ import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.server.HubConfig
 import io.github.sameerkrmishra.jotter.server.PeerHub
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -254,6 +259,38 @@ class PeerBackendTest {
                         "Cannot use this pairing token",
                     ),
                 )
+            }
+        }
+
+    @Test
+    fun aCancelledAddOfAHubLeavesNoTokenBehind() =
+        test {
+            Hub(this).use { hub ->
+                val keyring = InMemorySecretStore()
+                val cancelling =
+                    object : SecretStore by keyring {
+                        override suspend fun write(
+                            key: SecretKey,
+                            secret: Secret,
+                        ) {
+                            keyring.write(key, secret)
+                            currentCoroutineContext().cancel()
+                        }
+
+                        override suspend fun delete(key: SecretKey) {
+                            currentCoroutineContext().ensureActive()
+                            keyring.delete(key)
+                        }
+                    }
+                Device(this, "a", secrets = cancelling).use { device ->
+                    val token = Secret(hub.pair("laptop").token)
+                    val job =
+                        coroutineScope { launch { device.manager.addPeer(hub.address, token) } }
+                    job.join()
+                    assertTrue(job.isCancelled)
+                    assertTrue(keyring.secrets.isEmpty())
+                    assertTrue(device.manager.list().isEmpty())
+                }
             }
         }
 

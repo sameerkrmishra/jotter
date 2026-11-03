@@ -14,6 +14,7 @@ import io.github.sameerkrmishra.jotter.core.sync.SyncReport
 import io.github.sameerkrmishra.jotter.core.sync.SyncResult
 import io.github.sameerkrmishra.jotter.core.sync.SyncTarget
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -317,12 +318,23 @@ public class BackendManager internal constructor(
             if (setUp) blobs.initialize()
             AddResult.Added(insert(id, config, name))
         } catch (e: BlobStoreException) {
-            place.delete(key)
+            forgetSecret(place, key)
             AddResult.Refused(cannotSetUp(config, e))
         } catch (e: Exception) {
-            place.delete(key)
+            forgetSecret(place, key)
             throw e
         }
+    }
+
+    /**
+     * Deletes the secret of a backend that was not added, also when adding was cancelled: a
+     * cancelled coroutine would otherwise fail the delete at once and leave the secret behind.
+     */
+    private suspend fun forgetSecret(
+        place: SecretStore,
+        key: SecretKey,
+    ) {
+        withContext(NonCancellable) { place.delete(key) }
     }
 
     private fun unusable(
@@ -356,6 +368,23 @@ public class BackendManager internal constructor(
         } else {
             "Cannot set up ${config.url}: ${failure.message}"
         }
+
+    /**
+     * Where the secrets of [backend], removed with `keepSecrets`, may still be, and how to delete
+     * them, in plain words; or null if it has none.
+     */
+    public fun secretsLeftBehind(backend: Backend): String? {
+        if (backend.config.secrets.isEmpty()) return null
+        val what = if (backend.config is PeerConfig) "pairing token" else "password"
+        return if (backend.config.secretPlace == SecretPlace.KEYRING) {
+            "Its $what may still be in your keyring, as the item \"Jotter: ... of backend " +
+                "${backend.id}\". Delete it later in your keyring program, such as Seahorse or " +
+                "KWalletManager, or with: secret-tool clear application jotter backend ${backend.id}"
+        } else {
+            "Its $what may still be in ${secrets.fileLocation}, under ${backend.id}. Delete " +
+                "that entry, or the whole file if no other backend uses it."
+        }
+    }
 
     /** The file a user may choose for passwords, for people, or null if there is none. */
     public val secretsFile: String? get() = secrets.fileLocation
@@ -476,13 +505,11 @@ public class BackendManager internal constructor(
             }
             try {
                 AddResult.Added(insert(id, config, name ?: "PC hub"))
-            } catch (e: CancellationException) {
-                place.delete(SecretKey(id, SecretKind.PAIRING_SECRET))
-                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
-                place.delete(SecretKey(id, SecretKind.PAIRING_SECRET))
+                // Cancellation too: the token must not stay behind for a backend not added.
+                forgetSecret(place, SecretKey(id, SecretKind.PAIRING_SECRET))
                 throw e
             }
         }
@@ -511,14 +538,19 @@ public class BackendManager internal constructor(
      *
      * Its secrets go first: if they cannot be deleted, as when no keyring answers, nothing is
      * removed and [SecretStoreException] says why, so that no password is left behind unseen.
-     * Then the backend leaves the list. If the process dies before the rest, what is left are
-     * sync records under an id that is never used again.
+     * The user may then remove it with [keepSecrets], which leaves its secrets where they are;
+     * [secretsLeftBehind] says where, and how to delete them later. Then the backend leaves the
+     * list. If the process dies before the rest, what is left are sync records under an id that
+     * is never used again.
      */
-    public suspend fun remove(id: String): Boolean =
+    public suspend fun remove(
+        id: String,
+        keepSecrets: Boolean = false,
+    ): Boolean =
         operations.withLock {
             val backend = list().firstOrNull { it.id == id } ?: return@withLock false
             val place = secrets.of(backend.config.secretPlace)
-            backend.config.secrets.forEach { place.delete(SecretKey(id, it)) }
+            if (!keepSecrets) backend.config.secrets.forEach { place.delete(SecretKey(id, it)) }
             withContext(io) { store.backends.remove(id) }
             engine.forget(id)
             true

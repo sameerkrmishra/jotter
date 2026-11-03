@@ -6,6 +6,11 @@ import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
 import io.github.sameerkrmishra.jotter.core.storage.BackendRecord
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -295,6 +300,90 @@ class WebDavBackendTest {
                 assertTrue(device.manager.remove(backend.id))
                 assertTrue(keyring.secrets.isEmpty())
                 assertNull(device.manager.whereSecretsAre(local()))
+                assertNull(device.manager.secretsLeftBehind(local()))
+            }
+        }
+
+    @Test
+    fun withoutAKeyringABackendCanStillBeRemovedKeepingItsSecret() =
+        test {
+            val server = Server()
+            server.marked = true
+            val keyring = InMemorySecretStore()
+            val noKeyring =
+                object : SecretStore by keyring {
+                    override suspend fun delete(key: SecretKey): Unit =
+                        throw SecretStoreUnavailableException("No keyring here.")
+                }
+            Device(this, "a", secrets = noKeyring, webDav = server).use { device ->
+                val backend =
+                    assertIs<AddResult.Added>(device.manager.addWebDav(url, "me", password)).backend
+                // Every plain removal fails, as no keyring answers.
+                repeat(2) {
+                    assertFailsWith<SecretStoreUnavailableException> {
+                        device.manager.remove(backend.id)
+                    }
+                }
+                val left = device.manager.secretsLeftBehind(backend)!!
+                assertTrue(
+                    left.contains("secret-tool clear application jotter backend ${backend.id}"),
+                    left,
+                )
+                assertTrue(device.manager.remove(backend.id, keepSecrets = true))
+                assertEquals(emptyList(), device.manager.list())
+                assertEquals(1, keyring.secrets.size)
+            }
+            Device(this, "b", webDav = server).use { device ->
+                val backend =
+                    assertIs<AddResult.Added>(
+                        device.manager.addWebDav(
+                            url,
+                            "me",
+                            password,
+                            secretPlace = SecretPlace.FILE,
+                        ),
+                    ).backend
+                val left = device.manager.secretsLeftBehind(backend)!!
+                assertTrue(
+                    left.startsWith("Its password may still be in /config/secrets.json"),
+                    left,
+                )
+            }
+        }
+
+    @Test
+    fun aCancelledAddLeavesNoSecretBehind() =
+        test {
+            val server = Server()
+            val keyring = InMemorySecretStore()
+            // Cancels the add once the secret is stored, and, like a store that blocks, fails
+            // when called from a cancelled coroutine.
+            val cancelling =
+                object : SecretStore by keyring {
+                    override suspend fun write(
+                        key: SecretKey,
+                        secret: Secret,
+                    ) {
+                        keyring.write(key, secret)
+                        currentCoroutineContext().cancel()
+                    }
+
+                    override suspend fun delete(key: SecretKey) {
+                        currentCoroutineContext().ensureActive()
+                        keyring.delete(key)
+                    }
+                }
+            Device(this, "a", secrets = cancelling, webDav = server).use { device ->
+                val job =
+                    coroutineScope {
+                        launch {
+                            device.manager.addWebDav(url, "me", password, setUpNewStore = true)
+                        }
+                    }
+                job.join()
+                assertTrue(job.isCancelled)
+                assertTrue(keyring.secrets.isEmpty())
+                assertEquals(emptyList(), device.manager.list())
             }
         }
 
@@ -375,6 +464,10 @@ class WebDavBackendTest {
                 val sync = device.manager.syncAll().single()
                 assertEquals(Outcome.UNAUTHORIZED, sync.attempt.outcome)
                 assertEquals(NO_PASSWORD, sync.attempt.detail)
+                // It may be a locked keyring: nothing is changed, and the words say both.
+                assertTrue(NO_PASSWORD.contains("the keyring may be locked"))
+                assertTrue(NO_PASSWORD.contains("Unlock your keyring, or enter the password again"))
+                assertEquals(1, device.manager.list().size)
                 val status = device.manager.status().single()
                 assertEquals(
                     Reachability.Unreachable(UnreachableReason.FAILED, NO_PASSWORD),
