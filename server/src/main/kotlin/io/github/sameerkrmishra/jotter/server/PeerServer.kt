@@ -89,7 +89,7 @@ internal class PeerServer(
         }
         server = socket
         watch.scheduleAtFixedRate(
-            ::closeExpired,
+            ::watchTick,
             0,
             WATCH_PERIOD.inWholeMilliseconds,
             TimeUnit.MILLISECONDS,
@@ -109,14 +109,26 @@ internal class PeerServer(
     fun stop() {
         stopping = true
         server?.close()
+        val deadline = System.nanoTime() + STOP_TIME.inWholeNanoseconds
+
+        fun remaining() = ((deadline - System.nanoTime()) / NANOS_PER_MILLI).coerceAtLeast(1)
+        // The acceptor may be admitting a connection it has just accepted. Once it has ended, no
+        // connection can be added, and admit() closes any that it adds after stopping was set.
+        // It may wait for a free slot, which closing the listener does not end.
+        acceptor?.interrupt()
+        acceptor?.join(remaining())
         val connections = open.toList()
         connections.forEach { it.close() }
-        val deadline = System.nanoTime() + STOP_TIME.inWholeNanoseconds
-        (listOfNotNull(acceptor) + connections.map { it.thread }).forEach { thread ->
-            thread.join(((deadline - System.nanoTime()) / NANOS_PER_MILLI).coerceAtLeast(1))
-        }
+        connections.forEach { it.thread.join(remaining()) }
         watch.shutdownNow()
     }
+
+    /** What the watch runs first on each look. Tests make it throw. */
+    @Volatile
+    internal var beforeWatch: () -> Unit = {}
+
+    /** Address entries kept for the per-address cap. For tests. */
+    internal val trackedAddresses: Int get() = synchronized(perClient) { perClient.size }
 
     /** Closes the listening socket without stopping, as a failing system would. For tests. */
     internal fun breakListener() {
@@ -175,11 +187,18 @@ internal class PeerServer(
                 } finally {
                     connection.close()
                     open -= connection
-                    synchronized(perClient) { perClient[address] = perClient.getValue(address) - 1 }
+                    synchronized(perClient) {
+                        val left = perClient.getValue(address) - 1
+                        if (left == 0) perClient -= address else perClient[address] = left
+                    }
                     slots.release()
                 }
             }, "jotter-hub-connection").apply { isDaemon = true }
+        // A second line of defence, should the watch ever stop: no read waits longer than this.
+        client.soTimeout = limits.idleTimeout.inWholeMilliseconds.toInt()
         open += connection
+        // stop() may have taken its list of connections before this one was added.
+        if (stopping) connection.close()
         connection.thread.start()
     }
 
@@ -225,9 +244,25 @@ internal class PeerServer(
         }
     }
 
-    private fun closeExpired() {
-        val now = System.nanoTime()
-        open.forEach { if (it.expired(now)) it.close() }
+    /**
+     * One look of the watch. If it fails, a scheduled task would silently stop running, and no
+     * time limit would hold any more: so the hub stops serving instead, closes every connection,
+     * and reports the failure.
+     */
+    private fun watchTick() {
+        try {
+            beforeWatch()
+            val now = System.nanoTime()
+            open.forEach { if (it.expired(now)) it.close() }
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Throwable,
+        ) {
+            onFailure("the hub's watch over its connections failed: $e")
+            stopping = true
+            server?.close()
+            open.forEach { it.close() }
+            throw e
+        }
     }
 
     private companion object {

@@ -114,7 +114,13 @@ internal fun readBody(
     val body = ByteArray(length)
     var offset = 0
     while (offset < length) {
-        val read = input.read(body, offset, minOf(PART_BYTES, length - offset))
+        val read =
+            try {
+                input.read(body, offset, minOf(PART_BYTES, length - offset))
+            } catch (e: java.io.IOException) {
+                // A read that timed out, or a socket the watch closed: the client is not sending.
+                throw MalformedRequestException("The body stalled or broke off", e)
+            }
         if (read <
             0
         ) {

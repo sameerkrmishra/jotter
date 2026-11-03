@@ -101,6 +101,14 @@ public class PeerHub internal constructor(
     /** The connections the hub has open now. For tests. */
     internal val openConnections: Int get() = server?.openConnections ?: 0
 
+    /** Address entries the per-address cap keeps. For tests. */
+    internal val trackedAddresses: Int get() = server?.trackedAddresses ?: 0
+
+    /** Makes the watch over connections fail with [failure] on its next look. For tests. */
+    internal fun failWatch(failure: Throwable) {
+        server?.beforeWatch = { throw failure }
+    }
+
     /** Breaks the hub's listening socket, as a failing system would. For tests. */
     internal fun breakListener() {
         server?.breakListener()
