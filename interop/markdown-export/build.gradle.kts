@@ -1,6 +1,7 @@
 plugins {
     id("jotter.kmp-library")
     id("jotter.quality")
+    id("jotter.android-device-test")
 }
 
 kotlin {
