@@ -283,6 +283,11 @@ its last row is 155 to 162 ms:
 | Tuned script, with the archive | 21 | 155 ms | 158 ms |
 | Tuned script, with the archive | 27 | 162 ms | 157 ms |
 
+Measured again on 2026-11-03 after M4 added `jotter sync` and `jotter backends`, with
+the same method and machine, under 0.25 of 12 cores busy: **138 and 151 ms on JDK 21**
+(Temurin 21.0.12.1) and 154, 151 and 153 ms on JDK 27 (OpenJDK 27.0.1), in rounds of 10.
+`jotter add` loads none of the sync code.
+
 The JVM is therefore fast enough, and ADR-0006's native CLI is not needed for now.
 Under load the numbers are far worse: one run with sibling builds on the machine
 took about 1200 ms, without tuning. Measure on a quiet machine.
