@@ -20,10 +20,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.DEFAULT_ARGS_KEY
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.lifecycle.viewmodel.MutableCreationExtras
 import kotlinx.coroutines.withContext
 
 /** The test tag of the share target's message. */
@@ -51,7 +53,11 @@ public class ShareActivity : ComponentActivity() {
                     ShareViewModel(
                         readShare { shareOf(intent) },
                         GraphNotes(graph),
-                        extras.createSavedStateHandle(),
+                        // Without the intent's extras as defaults, which the handle would copy:
+                        // they may not unparcel, and a long text would overflow the saved state.
+                        MutableCreationExtras(extras)
+                            .apply { set(DEFAULT_ARGS_KEY, Bundle()) }
+                            .createSavedStateHandle(),
                     )
                 @Suppress("UNCHECKED_CAST") // The only model this factory makes.
                 return model as T

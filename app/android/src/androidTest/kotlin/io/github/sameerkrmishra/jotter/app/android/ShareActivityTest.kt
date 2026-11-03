@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.android
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -117,8 +118,20 @@ class ShareActivityTest {
                 putExtra("from.another.app", Unreadable())
             }
         ActivityScenario.launch<ShareActivity>(intent).use {
-            compose.awaitText(SHARE_UNREADABLE)
-            assertTrue(notes().isEmpty())
+            // Up to Android 12 the first extra read unparcels them all, and the share is refused.
+            // From Android 13 each extra is unparcelled when read, so the text is still saved.
+            compose.waitUntil(TIMEOUT_MS) {
+                listOf(SHARE_UNREADABLE, SAVED).any {
+                    compose.onAllNodesWithText(it).fetchSemanticsNodes().isNotEmpty()
+                }
+            }
+            val refused = compose.onAllNodesWithText(SHARE_UNREADABLE).fetchSemanticsNodes()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                assertEquals("milk", notes().single().body)
+            } else {
+                assertTrue(refused.isNotEmpty())
+                assertTrue(notes().isEmpty())
+            }
         }
     }
 
