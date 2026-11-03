@@ -8,7 +8,11 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.IOException
+import java.net.Inet4Address
+import java.net.ServerSocket
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -34,6 +38,25 @@ class TailnetTest {
         assertEquals(TAILSCALE_OFF, check.refuse("100.101.102.103"))
         assertEquals(TAILSCALE_OFF, check.refuse("pc.tail1234.ts.net"))
         assertNull(check.refuse("127.0.0.1"))
+    }
+
+    @Test
+    fun aSocketBoundToANetworkConnectsOnlyWhereItsRoutesLead() {
+        val connectivity = test.context.getSystemService(ConnectivityManager::class.java)
+        // The emulator's own network stands in for Tailscale's, which it does not have.
+        val network = checkNotNull(connectivity.activeNetwork)
+        val links = checkNotNull(connectivity.getLinkProperties(network))
+        val own = links.linkAddresses.map { it.address }.first { it is Inet4Address }
+        ServerSocket(0, 1, own).use { server ->
+            val routed =
+                TailnetSockets(network::bindSocket) { a -> links.routes.any { it.matches(a) } }
+            routed.createSocket(own, server.localPort).use { assertTrue(it.isConnected) }
+            val nowhere = TailnetSockets(network::bindSocket) { false }
+            assertFailsWith<IOException> { nowhere.createSocket(own, server.localPort) }
+        }
+        val check = AndroidTailnet(connectivity)
+        assertNull(check.engine("127.0.0.1"), "loopback uses the client's own engine")
+        checkNotNull(check.engine("100.101.102.103")).close()
     }
 
     @Test

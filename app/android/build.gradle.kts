@@ -45,9 +45,14 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     // The sealed secrets file. Its JSON is built by hand, so no serialization plugin.
     implementation(libs.kotlinx.serialization.json)
+    // The hub client's engine, on sockets bound to Tailscale's network (ADR-0018).
+    implementation(libs.ktor.client.okhttp)
+    implementation(projects.backend.peer)
 
     testImplementation(kotlin("test-junit"))
     testImplementation(libs.kotlinx.coroutines.test)
+    // A real hub on loopback, for the OkHttp engine of the hub client.
+    testImplementation(projects.server)
 
     androidTestImplementation(kotlin("test-junit"))
     androidTestImplementation(libs.androidx.test.core)

@@ -1,8 +1,11 @@
 package io.github.sameerkrmishra.jotter.app.android
 
 import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import android.net.NetworkCapabilities
 import io.github.sameerkrmishra.jotter.app.sync.TailnetCheck
+import io.ktor.client.engine.HttpClientEngine
 import java.net.Inet4Address
 import java.net.InetAddress
 
@@ -65,22 +68,43 @@ private fun isTailscale(address: InetAddress): Boolean {
  * phone's Tailscale address; without it, a `100.64.0.0/10` address goes out over the mobile
  * network, where carriers use that range themselves. An app that Tailscale's split tunnelling
  * leaves out sees no VPN either, and so sends nothing.
+ *
+ * A hub that is not on loopback gets an engine whose sockets are bound to that VPN, and connect
+ * only to an address its routes cover ([TailnetSockets]). A VPN of another app that holds an
+ * address in `100.64.0.0/10` passes the check: Android does not say which app runs a VPN.
  */
 internal class AndroidTailnet(
     private val connectivity: ConnectivityManager,
 ) : TailnetCheck {
-    override fun refuse(host: String): String? {
-        val network = connectivity.activeNetwork
+    override fun refuse(host: String): String? =
+        tailnetRefusal(host, tailscale()?.let(connectivity::getLinkProperties)?.addresses())
+
+    override fun engine(host: String): HttpClientEngine? {
+        if (tailnetRefusal(host, null) == null) return null
+        val network = tailscale()
+        return tailnetEngine(
+            TailnetSockets(network?.let { it::bindSocket }) { address ->
+                val routes = network?.let(connectivity::getLinkProperties)?.routes.orEmpty()
+                routes.any { it.matches(address) }
+            },
+        )
+    }
+
+    /** This app's network now, if it is a VPN holding a Tailscale address. */
+    private fun tailscale(): Network? {
+        val network = connectivity.activeNetwork ?: return null
         val vpn =
-            network
-                ?.let(connectivity::getNetworkCapabilities)
+            connectivity
+                .getNetworkCapabilities(network)
                 ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-        val addresses =
-            if (vpn) {
-                connectivity.getLinkProperties(network)?.linkAddresses?.map { it.address }
-            } else {
-                null
-            }
-        return tailnetRefusal(host, addresses)
+        val addresses = connectivity.getLinkProperties(network)?.addresses()
+        return network.takeIf { vpn && tailnetRefusal(TAILNET_PROBE, addresses) == null }
+    }
+
+    private fun LinkProperties.addresses(): List<InetAddress> = linkAddresses.map { it.address }
+
+    private companion object {
+        /** A host that only a Tailscale address lets through [tailnetRefusal]. */
+        const val TAILNET_PROBE = "100.64.0.1"
     }
 }
