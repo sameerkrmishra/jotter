@@ -268,8 +268,10 @@ class WebDavCommandsTest {
                 .contains("Plain http would send the password"),
         )
         assertTrue(error("backends", "add", "webdav").contains("For a folder called webdav"))
-        assertTrue(error("backends", "add", "/a", "/b").contains("give one folder, or webdav"))
-        assertTrue(error("backends", "add", "--user", "me", "/a").contains("for webdav only"))
+        assertTrue(error("backends", "add", "/a", "/b").contains("give one folder, webdav and"))
+        assertTrue(
+            error("backends", "add", "--user", "me", "/a").contains("for webdav and peer only"),
+        )
         assertTrue(error("backends", "add", "webdav", server.url).contains("needs --user NAME"))
         assertEquals(
             "jotter: no password was given\n",

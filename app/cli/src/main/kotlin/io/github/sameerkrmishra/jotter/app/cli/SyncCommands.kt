@@ -14,6 +14,7 @@ import io.github.sameerkrmishra.jotter.app.sync.BackendManager
 import io.github.sameerkrmishra.jotter.app.sync.BackendStatus
 import io.github.sameerkrmishra.jotter.app.sync.Outcome
 import io.github.sameerkrmishra.jotter.app.sync.PasswordChange
+import io.github.sameerkrmishra.jotter.app.sync.PeerConfig
 import io.github.sameerkrmishra.jotter.app.sync.SecretPlace
 import io.github.sameerkrmishra.jotter.app.sync.SecretStoreException
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
@@ -65,6 +66,7 @@ internal class SyncSetup(
 
 private const val PLATFORM = "linux"
 private const val WEBDAV = "webdav"
+private const val PEER = "peer"
 
 /** `jotter sync`: one sync with every backend, one line each. */
 internal class SyncCommand(
@@ -132,16 +134,23 @@ internal class BackendsCommand(
     }
 }
 
-/** `jotter backends add`: adds a folder or a WebDAV server as a backend, and prints its id. */
+/**
+ * `jotter backends add`: adds a folder, a WebDAV server or the PC hub as a backend, and prints its
+ * id.
+ */
 private class AddBackendCommand(
     private val setup: SyncSetup,
 ) : CoreCliktCommand(name = "add") {
     private val target by argument(
         name = "PATH",
-        help = "The folder, such as a USB stick. Or webdav, followed by the URL of a collection.",
+        help =
+            "The folder, such as a USB stick. Or webdav, followed by the URL of a collection, " +
+                "or peer, followed by the PC hub's address.",
     )
-    private val url by argument(name = "URL", help = "With webdav: the collection's URL.")
-        .optional()
+    private val url by argument(
+        name = "URL",
+        help = "With webdav: the collection's URL. With peer: HOST or HOST:PORT.",
+    ).optional()
     private val name by option("--name", help = "A name for it. Default: the folder's name.")
     private val setUp by option(
         "--new",
@@ -151,18 +160,26 @@ private class AddBackendCommand(
     private val passwordInFile by option(
         "--password-in-file",
         help =
-            "With webdav: keep the app password in plain text in a file readable by you " +
-                "alone, \$XDG_CONFIG_HOME/jotter/secrets.json, for where no keyring answers.",
+            "With webdav or peer: keep the app password or token in plain text in a file " +
+                "readable by you alone, \$XDG_CONFIG_HOME/jotter/secrets.json, for where no " +
+                "keyring answers.",
     ).flag()
 
     override fun help(context: Context): String =
-        "Add a folder, or a WebDAV server (webdav URL --user NAME), as a backend and print its " +
-            "id. The app password is read from the terminal, or else from the first line of stdin."
+        "Add a folder, a WebDAV server (webdav URL --user NAME) or the PC hub (peer HOST[:PORT]) " +
+            "as a backend and print its id. The app password or pairing token is read from the " +
+            "terminal, or else from the first line of stdin."
 
     override fun run() {
         val webDavUrl = url?.takeIf { target == WEBDAV }
-        usageProblem(webDavUrl)?.let { throw CliktError("jotter: $it") }
-        val result = if (webDavUrl != null) addWebDav(webDavUrl) else addFolder()
+        val hub = url?.takeIf { target == PEER }
+        usageProblem(webDavUrl ?: hub)?.let { throw CliktError("jotter: $it") }
+        val result =
+            when {
+                webDavUrl != null -> addWebDav(webDavUrl)
+                hub != null -> addPeer(hub)
+                else -> addFolder()
+            }
         val failure =
             when (result) {
                 is AddResult.Added -> return echo(result.backend.id)
@@ -178,17 +195,28 @@ private class AddBackendCommand(
     }
 
     /** What is wrong with the arguments, or null. */
-    private fun usageProblem(webDavUrl: String?): String? =
+    private fun usageProblem(remote: String?): String? =
         when {
-            url != null && webDavUrl == null ->
-                "give one folder, or webdav and the URL of a collection"
+            url != null && remote == null ->
+                "give one folder, webdav and the URL of a collection, or peer and the hub's address"
             target == WEBDAV && url == null ->
                 "webdav needs the URL of a collection: jotter backends add webdav URL --user " +
                     "NAME. For a folder called webdav, write ./webdav"
-            webDavUrl == null && (user != null || passwordInFile) ->
-                "--user and --password-in-file are for webdav only"
+            target == PEER && url == null ->
+                "peer needs the hub's address: jotter backends add peer HOST[:PORT]. For a " +
+                    "folder called peer, write ./peer"
+            remote == null && (user != null || passwordInFile) ->
+                "--user and --password-in-file are for webdav and peer only"
+            target == PEER && (user != null || setUp) ->
+                "--user and --new are not for peer: the hub's folder is set up on the PC"
             else -> null
         }
+
+    private fun addPeer(address: String): AddResult {
+        val place = if (passwordInFile) SecretPlace.FILE else SecretPlace.KEYRING
+        val token = setup.passwords.read("Pairing token for the hub at $address: ")
+        return setup.withBackends { it.addPeer(address, token, name, place) }
+    }
 
     private fun addFolder(): AddResult {
         if (target.isEmpty()) throw CliktError("jotter: the path is empty")
@@ -239,19 +267,22 @@ private class PasswordCommand(
     private val id by argument(name = "ID", help = "A backend id, or a unique start of one.")
 
     override fun help(context: Context): String =
-        "Replace the app password of a WebDAV backend, after checking it with the server. It is " +
-            "read from the terminal, or else from the first line of stdin."
+        "Replace the app password of a WebDAV backend, or the pairing token of the PC hub, " +
+            "after checking it. It is read from the terminal, or else from the first line of stdin."
 
     override fun run() {
         val backend = setup.withBackends { it.list() }.resolve(id)
-        val config =
-            backend.config as? WebDavConfig
-                ?: throw CliktError("jotter: ${backend.id} needs no password")
-        val password =
-            setup.passwords.read("New app password for ${config.username} at ${config.url}: ")
+        val (what, prompt) =
+            when (val config = backend.config) {
+                is WebDavConfig ->
+                    "app password" to "New app password for ${config.username} at ${config.url}: "
+                is PeerConfig -> "pairing token" to "New pairing token for ${config.location}: "
+                else -> throw CliktError("jotter: ${backend.id} needs no password")
+            }
+        val password = setup.passwords.read(prompt)
         when (val result = setup.withBackends { it.changePassword(backend.id, password) }) {
             PasswordChange.Changed ->
-                echo("Stored the new app password of ${oneLine(backend.name)}.")
+                echo("Stored the new $what of ${oneLine(backend.name)}.")
             is PasswordChange.Refused -> throw CliktError("jotter: ${result.reason}")
         }
     }

@@ -42,4 +42,6 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.core)
     // To hold locks on a test database and to make files that are not Jotter's.
     testImplementation(libs.androidx.sqlite.bundled)
+    // A real PC hub on 127.0.0.1, for `jotter backends add peer`.
+    testImplementation(projects.server)
 }
