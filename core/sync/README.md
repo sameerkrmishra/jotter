@@ -103,10 +103,19 @@ Every run then ends on a conflict made for the purpose: a revision that does not
 claims to resolve it, and one device deletes the note while another edits it. It must stay
 open on every device until it is answered.
 
-`check` runs 3000 seeds on the JVM, about 4 minutes here, and 25 on `linuxX64`, whose debug
-binary is far slower, plus `REGRESSION_SEEDS` on both. `nightly.yml` runs 50000 seeds, each
-night a new range, and opens an issue if a run fails or times out. By hand, use the script,
-which fails unless the test report says that exactly that range ran:
+`check` runs seeds 1 to 800 on the JVM and 25 on `linuxX64`, whose debug binary is far slower,
+plus `REGRESSION_SEEDS` on both. Those are the first catches of every bug and mutant found so
+far, so each is still caught by its own seed, and the range holds all of them below 800. CI's
+`simulate` job runs seeds 1 to 3000 beside `check`, and `nightly.yml` runs 50000 more, each
+night a new range, and opens an issue if a run fails or times out.
+
+On the JVM the seeds run on one thread per core (`JOTTER_SIM_THREADS` to change it). Each case
+is its own world on one thread, so no outcome depends on the order, and a failure names the
+first failing seed of the range.
+Measured 2026-11-03 here (6 cores, 12 threads): one thread runs about 5.4 seeds a second, and 12
+threads 3000 seeds in 208 s, against 554 s on one.
+
+By hand, use the script, which fails unless the test report says that exactly that range ran:
 
 ```
 core/sync/scripts/simulate.sh 1000 5000           # START CASES, on the JVM
