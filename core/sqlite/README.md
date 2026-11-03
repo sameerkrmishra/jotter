@@ -7,7 +7,7 @@ about Jotter's schema: `core/storage` owns the `.sq` files, the SQLDelight
 plugin (`generateAsync = false`, `sqlite-3-44-dialect`) and the repositories.
 
 ```kotlin
-val driver: SqlDriver = openSqliteDriver(path, JotterDatabase.Schema)
+val driver: SqlDriver = openSqliteDriver(path, JotterDatabase.Schema, JOTTER_APPLICATION_ID)
 val db = JotterDatabase(driver)
 // ...
 driver.close() // checkpoints the WAL
@@ -18,12 +18,28 @@ atomicfu. No other Jotter module.
 
 ## What `openSqliteDriver` does
 
-- Opens (or creates) the file and sets `busy_timeout = 5000`,
-  `journal_mode = WAL` (fails if WAL cannot be enabled, e.g. `:memory:`) and
-  `foreign_keys = ON`.
+- Opens (or creates) the file and sets `busy_timeout = 5000`.
+- Rejects a database of another application and leaves it untouched: one whose
+  `PRAGMA application_id` is not the caller's, or one at `user_version` 0 that
+  has tables. Only a new, empty database has neither. A database with a newer
+  version than the schema is rejected the same way. This runs first because
+  the next step already rewrites the file header. It reads everything in one
+  statement, so it cannot see half of another process's create. The exception:
+  a foreign file in WAL mode with an unfinished `-wal` is checkpointed when the
+  last connection closes, as by any SQLite client.
+- Sets `journal_mode = WAL` (fails if WAL cannot be enabled, e.g. `:memory:`)
+  and `foreign_keys = ON`. The switch can fail with `SQLITE_BUSY` at once when
+  two connections open a new file together, without running the busy handler,
+  so it is retried for as long as `busy_timeout`, then fails with the last
+  error.
 - Creates or migrates the schema inside one `BEGIN IMMEDIATE` transaction,
-  using `PRAGMA user_version`. A database with a newer version than the schema
-  is rejected and left untouched.
+  using `PRAGMA user_version`; creating also sets `application_id`.
+- Runs a migration (not a create) by SQLite's procedure for schema changes:
+  `foreign_keys = OFF` before `BEGIN IMMEDIATE`, since it cannot change inside
+  a transaction, then the migration, then `PRAGMA foreign_key_check`, which
+  fails the migration and rolls it back on any violation, then `COMMIT`, and
+  `foreign_keys = ON` again, also on failure. So a migration can rebuild a
+  table that others reference without `DROP TABLE` cascading into them.
 
 ## Design
 
@@ -40,6 +56,9 @@ atomicfu. No other Jotter module.
   SQLDelight, and also rolls back the whole outer transaction: SQLDelight
   leaves an unfinished nested transaction behind, after which its record of
   failures and hooks cannot be trusted.
+- **Busy errors.** After `busy_timeout` a statement fails with androidx's
+  `SQLiteException`. It is not part of this module's API, so `isSqliteBusy`
+  tells that case apart, by the result code androidx writes into the message.
 - **Reads.** Every transaction uses `BEGIN IMMEDIATE`, read-only ones too, and
   so takes the write lock across processes. `core/storage` should therefore
   not wrap pure reads in transactions; a single query needs none.

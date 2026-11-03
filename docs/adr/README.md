@@ -12,11 +12,13 @@ Each ADR has one status:
 
 - **Proposed**: written and under review. Not yet binding.
 - **Accepted**: agreed. Code and reviews follow it.
+- **Accepted, amended by NNNN**: still binding. Read it together with the later
+  ADR, which takes precedence where the two differ.
 - **Superseded by NNNN**: replaced by a later ADR. The old record stays in
   place, unchanged except for its status line, so the history is kept.
 
 An accepted ADR is not edited to change its decision. To change a decision,
-write a new ADR and mark the old one as superseded.
+write a new ADR and mark the old one as amended or superseded.
 
 ## Adding an ADR
 
@@ -34,10 +36,11 @@ write a new ADR and mark the old one as superseded.
 |---|---|---|
 | [0001](0001-local-first-architecture.md) | Local-first architecture | Accepted |
 | [0002](0002-sqlite-via-sqldelight.md) | SQLite via SQLDelight with bundled SQLite | Accepted |
-| [0003](0003-revision-dag-and-three-way-merge.md) | Revision DAG with three-way merge | Accepted |
+| [0003](0003-revision-dag-and-three-way-merge.md) | Revision DAG with three-way merge | Accepted, amended by 0009 |
 | [0004](0004-immutable-change-segments.md) | Immutable change segments on dumb blob stores | Accepted |
 | [0005](0005-manual-dependency-injection.md) | Manual constructor injection | Accepted |
 | [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted |
+| [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.

@@ -1,0 +1,231 @@
+package io.github.sameerkrmishra.jotter.core.storage
+
+import app.cash.sqldelight.db.SqlDriver
+import io.github.sameerkrmishra.jotter.core.model.HybridTimestamp
+import io.github.sameerkrmishra.jotter.core.model.Note
+import io.github.sameerkrmishra.jotter.core.model.NoteState
+import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.kotest.property.Arb
+import io.kotest.property.arbitrary.bind
+import io.kotest.property.arbitrary.enum
+import io.kotest.property.arbitrary.list
+import io.kotest.property.arbitrary.long
+import io.kotest.property.checkAll
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertContains
+import kotlin.test.assertEquals
+import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+/** The device's hybrid logical clock, which every write reads from and stores in the database. */
+class ClockTest {
+    private enum class Operation { CREATE, EDIT, TAG, PIN, ARCHIVE }
+
+    @Test
+    fun timestampsIncreaseWhateverTheWallClockDoes() =
+        runTest {
+            val clock = FakeClock(millis = 1_000_000)
+            withStore(clock) { store ->
+                val written = mutableListOf<HybridTimestamp>()
+                // Each step moves the wall clock by up to 5 s either way, then writes.
+                val steps =
+                    Arb.list(
+                        Arb.bind(Arb.long(-5_000L..5_000L), Arb.enum<Operation>(), ::Pair),
+                    )
+                checkAll(steps) { operations ->
+                    var note = store.notes.create("", "")
+                    written += note.updatedAt
+                    for ((jump, operation) in operations) {
+                        clock.millis += jump
+                        val next = apply(store.notes, note, operation)
+                        if (next.revisionId != note.revisionId) written += next.updatedAt
+                        note = next
+                    }
+                }
+                assertTrue(
+                    written.zipWithNext().all { (a, b) ->
+                        a < b
+                    },
+                    "Not increasing: $written",
+                )
+            }
+        }
+
+    @Test
+    fun theClockSurvivesReopeningAfterTheWallClockWentBack() =
+        withTempDir { dir ->
+            val clock = FakeClock(millis = 5_000)
+            val first = openStore(dir.path, clock).use { it.notes.create("", "first") }
+
+            clock.millis = 1_000
+            val second = openStore(dir.path, clock).use { it.notes.create("", "second") }
+
+            assertEquals(HybridTimestamp(5_000, 0), first.updatedAt)
+            assertEquals(HybridTimestamp(5_000, 1), second.updatedAt)
+        }
+
+    @Test
+    fun twoStoresOnOneFileShareTheClock() =
+        withTempDir { dir ->
+            // As the desktop app and the CLI: one database, two connections, two wall clocks.
+            val aheadClock = FakeClock(millis = 10_000)
+            val behindClock = FakeClock(millis = 1_000)
+            openStore(dir.path, aheadClock).use { ahead ->
+                openStore(dir.path, behindClock).use { behind ->
+                    val note = ahead.notes.create("", "")
+                    val written = mutableListOf(note.updatedAt)
+                    repeat(INTERLEAVED_WRITES) { index ->
+                        val store = if (index % 2 == 0) behind else ahead
+                        written +=
+                            store.notes
+                                .edit(
+                                    note.id,
+                                    store.currentRevision(note),
+                                    "",
+                                    "$index",
+                                ).updatedAt
+                    }
+
+                    assertEquals(
+                        (0..INTERLEAVED_WRITES).map { HybridTimestamp(10_000, it) },
+                        written,
+                    )
+                    assertEquals(ahead.deviceId, behind.deviceId)
+                }
+            }
+        }
+
+    @Test
+    fun concurrentWritersFromTwoStoresNeverReuseATimestamp() =
+        withTempDir { dir ->
+            val clock = FakeClock(millis = 1_000)
+            openStore(dir.path, clock).use { first ->
+                openStore(dir.path, clock).use { second ->
+                    val created =
+                        runBlocking {
+                            listOf(first, second)
+                                .map { store ->
+                                    async(testThreads) {
+                                        List(CONCURRENT_WRITES) { store.notes.create("", "") }
+                                    }
+                                }.awaitAll()
+                                .flatten()
+                        }
+
+                    // Every write read the clock the previous one stored, so with the wall clock
+                    // standing still the counter counts up without a gap or a repeat.
+                    val timestamps = created.map(Note::updatedAt).sorted()
+                    assertEquals(
+                        List(2 * CONCURRENT_WRITES) { HybridTimestamp(1_000, it) },
+                        timestamps,
+                    )
+                    assertEquals(2 * CONCURRENT_WRITES, first.notes.list().size)
+                }
+            }
+        }
+
+    @Test
+    fun aFailedWriteLeavesTheStoredClockAsItWas() =
+        withStore(FakeClock(millis = 1_000)) { store ->
+            val driver = store.driver
+            val note = store.notes.create("", "body")
+            // Fails at COMMIT, the last step: the write has stored the clock by then.
+            FAIL_AT_COMMIT.forEach { sql -> driver.execute(null, sql, 0) }
+            val clock = driver.storedClock()
+
+            val error = assertFails { store.notes.edit(note.id, note.revisionId, "", "edit") }
+
+            assertContains(error.message.orEmpty(), "FOREIGN KEY constraint failed")
+            assertEquals(clock, driver.storedClock())
+            assertEquals(note, store.notes.get(note.id))
+            assertEquals(1, store.notes.history(note.id).size)
+        }
+
+    @Test
+    fun everyWriteReportsADatabaseThatStaysLocked() =
+        withTempDir { dir ->
+            openStore(dir.path).use { holder ->
+                openStore(dir.path).use { waiter ->
+                    // Keeps the test short. The 5 s default gives the same error, only later.
+                    waiter.driver.execute(null, "PRAGMA busy_timeout = 50", 0)
+                    val notes = waiter.notes
+                    val note = notes.create("", "body")
+                    val writes =
+                        listOf<() -> Unit>(
+                            { notes.create("", "") },
+                            { notes.edit(note.id, note.revisionId, "", "edit") },
+                            { notes.addTag(note.id, TagName.parse("tag")) },
+                            { notes.removeTag(note.id, TagName.parse("tag")) },
+                            { notes.setPinned(note.id, true) },
+                            { notes.setState(note.id, NoteState.TRASHED) },
+                            { notes.deleteForever(note.id) },
+                        )
+
+                    holder.database.transaction {
+                        writes.forEach { write ->
+                            val error = assertFailsWith<StorageBusyException> { write() }
+                            assertNotNull(error.cause)
+                        }
+                    }
+
+                    // It was only the lock: the same store writes again once it is released.
+                    assertEquals("edit", notes.edit(note.id, note.revisionId, "", "edit").body)
+                }
+            }
+        }
+
+    @Test
+    fun otherFailuresOfAWriteAreNotBusyErrors() =
+        withStore { store ->
+            store.driver.execute(null, BLOCK_REVISIONS, 0)
+
+            val error = assertFails { store.notes.create("", "") }
+
+            assertFalse(error is StorageBusyException)
+            assertContains(error.message.orEmpty(), "blocked")
+        }
+
+    private fun apply(
+        notes: NoteService,
+        note: Note,
+        operation: Operation,
+    ): Note =
+        when (operation) {
+            Operation.CREATE -> notes.create("", "")
+            Operation.EDIT -> notes.edit(note.id, note.revisionId, "", note.body + "x")
+            Operation.TAG -> notes.addTag(note.id, TagName.parse("t${note.tags.size}"))
+            Operation.PIN -> notes.setPinned(note.id, !note.isPinned)
+            Operation.ARCHIVE -> notes.setState(note.id, NoteState.ARCHIVED)
+        }
+
+    private fun SqlDriver.storedClock() =
+        queryLong("SELECT hlc_physical FROM device") to queryLong("SELECT hlc_counter FROM device")
+
+    private fun NoteStore.currentRevision(note: Note) = checkNotNull(notes.get(note.id)).revisionId
+
+    private companion object {
+        const val INTERLEAVED_WRITES = 6
+        const val CONCURRENT_WRITES = 50
+
+        /** Every new revision adds a row whose deferred foreign key is never satisfied. */
+        val FAIL_AT_COMMIT =
+            listOf(
+                "CREATE TABLE parent(id INTEGER PRIMARY KEY)",
+                "CREATE TABLE child(parent_id INTEGER REFERENCES parent(id) " +
+                    "DEFERRABLE INITIALLY DEFERRED)",
+                "CREATE TRIGGER orphan AFTER INSERT ON revision " +
+                    "BEGIN INSERT INTO child(parent_id) VALUES (1); END",
+            )
+
+        const val BLOCK_REVISIONS =
+            "CREATE TRIGGER block BEFORE INSERT ON revision " +
+                "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
+    }
+}

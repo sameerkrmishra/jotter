@@ -156,7 +156,8 @@ Each module has one job and a small public API. Internal details are marked
 
 ```kotlin
 data class Note(
-    val id: NoteId,             // UUIDv7: sortable, generated offline
+    val id: NoteId,             // new: UUIDv7, generated offline; imported: deterministic
+    val revisionId: RevisionId, // the revision it was materialised from
     val title: String,          // may be empty (Keep style)
     val body: String,           // Markdown
     val tags: Set<TagName>,
@@ -167,17 +168,23 @@ data class Note(
 )
 ```
 
-Local SQLite tables (simplified):
+Local SQLite tables (simplified; the schema is in `core/storage`):
 
 - `note`: current materialised state of each note (what the UI reads).
 - `note_fts`: FTS5 virtual table over title and body.
-- `tag`, `note_tag`.
-- `revision`: every revision of every note, with parent revision ids (a DAG,
-  like git commits). This history is what makes three-way merge possible.
+- `note_tag`: each note's current tags. There is no separate `tag` table: the
+  tag list is a `GROUP BY` over `note_tag`.
+- `revision`: every revision of every note, with parent revision ids in
+  `revision_parent` (a DAG, like git commits) and tags in `revision_tag`.
+  This history is what makes three-way merge possible.
+- `device`: this device's id and name, and the last timestamp of its hybrid
+  logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
 - `backend`: configured backends and their settings.
 - `sync_cursor`: per backend, per remote device: the last segment applied.
-- `device`: this device's id and name.
+
+Schema version 1 (M1) has no `conflict`, `backend` or `sync_cursor` table.
+M3 and M4, which need them, add them with schema migrations.
 
 "Delete forever" from trash writes a tombstone revision so the deletion syncs.
 Tombstones stay until log compaction (deferred).
@@ -212,7 +219,13 @@ greatest of its parents' stamps. The device that computed it is not recorded,
 so all of its fields derive from the parents alone. If two devices auto-merge
 the same heads, they produce the same revision and it deduplicates. Two
 different automatic merges can share a stamp, so the revision id is the final
-tiebreaker.
+tiebreaker. The one exception to a fresh timestamp is an imported note, whose
+revisions carry the source times. Two imports give two roots. When two parents
+have no common ancestor, then for each of `body` and `title` separately, if all
+roots among the ancestors of the two parents being merged have the same value,
+that value is the base; otherwise the base is empty. A parent counts as its own
+ancestor. Parents with a common ancestor use it as usual
+([ADR-0009](adr/0009-import-preserves-source-timestamps.md)).
 
 **On conflict:** only `body` and `title` conflict. The device still writes a
 deterministic automatic merge with both heads as parents. Tags and the
@@ -318,8 +331,12 @@ codec. Documented as ADR-0007 in M6.
 - **Google Keep import** (Takeout `Keep/*.json`): `title` and `textContent`
   map to the note. `listContent` becomes a Markdown task list. `labels` become
   tags. `isPinned`, `isArchived` and `isTrashed` map to state. Timestamps are
-  preserved. Colors are dropped. The import is idempotent: re-importing
-  doesn't duplicate notes. Tests run against a synthetic fixture set, never
+  preserved: the revisions of an imported note carry the original created and
+  edited times as their HLC stamps
+  ([ADR-0009](adr/0009-import-preserves-source-timestamps.md)). Colors are
+  dropped. The import is idempotent: the note id is derived from the source
+  note, and a note with any history, including a tombstone, is skipped, so
+  re-importing doesn't duplicate notes. Tests run against a synthetic fixture set, never
   real user data.
 - **Markdown export:** one `.md` file per note with YAML front-matter (tags,
   pinned, state, timestamps). Filter by tag. Available from the UI and the CLI
@@ -345,7 +362,9 @@ codec. Documented as ADR-0007 in M6.
   0001 local-first, 0002 SQLite/SQLDelight, 0003 revision DAG + diff3,
   0004 immutable segment sync, 0005 manual DI (all in M0); 0006
   native-compatible shared modules (M1); 0007 encryption plan and
-  0008 multi-user plan (both deferred features, documented in M6).
+  0008 multi-user plan (both deferred features, documented in M6); 0009
+  [import keeps source timestamps](adr/0009-import-preserves-source-timestamps.md)
+  (M2).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.

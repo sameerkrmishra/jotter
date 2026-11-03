@@ -19,7 +19,7 @@ class CloseTest {
     @Test
     fun closeLeavesOnlyTheDatabaseFile() =
         withTempDir { dir ->
-            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema))
+            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID))
             db.insert("a")
             assertTrue(dir.exists("-wal"), "WAL mode keeps a -wal file while open")
             assertTrue(dir.exists("-shm"), "WAL mode keeps a -shm file while open")
@@ -30,7 +30,7 @@ class CloseTest {
             assertFalse(dir.exists("-wal"))
             assertFalse(dir.exists("-shm"))
             // The row was checkpointed into the main file.
-            openSqliteDriver(dir.path, NotesSchema).use { driver ->
+            openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID).use { driver ->
                 assertEquals(listOf("a"), NotesDatabase(driver).titles().executeAsList())
             }
         }
@@ -87,7 +87,7 @@ class CloseTest {
     @Test
     fun closingTwiceIsHarmless() =
         withTempDir { dir ->
-            val driver = openSqliteDriver(dir.path, NotesSchema)
+            val driver = openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID)
             driver.close()
             driver.close()
         }
@@ -95,7 +95,7 @@ class CloseTest {
     @Test
     fun closedDriverRejectsWork() =
         withTempDir { dir ->
-            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema))
+            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID))
             db.sqlDriver.close()
 
             assertClosed { db.insert("a") }
@@ -117,7 +117,7 @@ class CloseTest {
     @Test
     fun closeWaitsForATransactionOnAnotherThread() =
         withTempDir { dir ->
-            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema))
+            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID))
             runBlocking {
                 val opened = CompletableDeferred<Unit>()
                 val writer =
@@ -132,7 +132,7 @@ class CloseTest {
                 db.sqlDriver.close()
                 writer.join()
             }
-            openSqliteDriver(dir.path, NotesSchema).use { driver ->
+            openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID).use { driver ->
                 assertEquals(
                     listOf("committed before close"),
                     NotesDatabase(driver).titles().executeAsList(),

@@ -15,7 +15,7 @@ internal object SecondProcessWriter {
     @JvmStatic
     fun main(args: Array<String>) {
         val (path, rows) = args
-        val db = NotesDatabase(openSqliteDriver(path, NotesSchema))
+        val db = NotesDatabase(openSqliteDriver(path, NotesSchema, TEST_APPLICATION_ID))
         try {
             db.transaction {
                 db.insert("child hold")

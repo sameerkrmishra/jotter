@@ -20,7 +20,7 @@ class TwoProcessTest {
         withTempDir { dir ->
             // Opened (and the schema created) before the child starts, so that the timed write
             // below is the first statement that has to wait for the child.
-            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema))
+            val db = NotesDatabase(openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID))
             val child = startSecondProcess(dir.path)
             try {
                 val toChild = child.outputStream.bufferedWriter()
@@ -52,7 +52,7 @@ class TwoProcessTest {
                 db.sqlDriver.close()
             }
 
-            openSqliteDriver(dir.path, NotesSchema).use { driver ->
+            openSqliteDriver(dir.path, NotesSchema, TEST_APPLICATION_ID).use { driver ->
                 val titles = NotesDatabase(driver).titles().executeAsList()
                 assertEquals(2 + 2 * ROWS, titles.size)
                 assertEquals(1 + ROWS, titles.count { it.startsWith("child") })

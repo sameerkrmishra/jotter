@@ -1,6 +1,6 @@
 # 0003. Revision DAG with three-way merge and conflict records
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by [ADR-0009](0009-import-preserves-source-timestamps.md)
 - **Date:** 2026-10-21
 
 ## Context
