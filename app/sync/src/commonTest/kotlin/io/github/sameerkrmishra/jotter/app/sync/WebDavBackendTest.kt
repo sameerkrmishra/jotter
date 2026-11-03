@@ -352,6 +352,32 @@ class WebDavBackendTest {
         }
 
     @Test
+    fun theWordsForASecretFileThatCannotBeFoundNameNoNull() =
+        test {
+            val server = Server()
+            server.marked = true
+            Device(this, "a", webDav = server, fileLocation = null).use { device ->
+                val backend =
+                    assertIs<AddResult.Added>(
+                        device.manager.addWebDav(
+                            url,
+                            "me",
+                            password,
+                            secretPlace = SecretPlace.FILE,
+                        ),
+                    ).backend
+                val left = device.manager.secretsLeftBehind(backend)!!
+                val where = device.manager.whereSecretsAre(backend)!!
+                for (words in listOf(left, where)) {
+                    assertFalse("null" in words, words)
+                    assertTrue(words.contains("cannot tell where on this device"), words)
+                }
+                assertTrue(left.contains("jotter/secrets.json"), left)
+                assertTrue(left.contains("under ${backend.id}"), left)
+            }
+        }
+
+    @Test
     fun aCancelledAddLeavesNoSecretBehind() =
         test {
             val server = Server()
