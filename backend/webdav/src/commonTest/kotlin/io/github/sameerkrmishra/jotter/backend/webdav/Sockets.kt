@@ -69,8 +69,9 @@ internal class FaultProxy private constructor(
     private val server: ServerSocket,
 ) : AutoCloseable {
     // A connection that breaks is what this proxy is for, not a failure of the test.
+    private val ignoreFailures = CoroutineExceptionHandler { _, _ -> }
     private val scope =
-        CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> })
+        CoroutineScope(SupervisorJob() + Dispatchers.Default + ignoreFailures)
     private val connections = AtomicInt(0)
 
     /** The port to connect to. */
