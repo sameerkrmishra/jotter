@@ -93,6 +93,30 @@ internal fun BackendsScreen(
         )
     }
     BackendsDialogs(backends)
+    RemoveDialogs(backends)
+}
+
+@Composable
+private fun BackendList(backends: BackendsViewModel) {
+    if (backends.backends.isEmpty()) Text(NO_BACKENDS)
+    backends.backends.forEach { backend ->
+        key(backend.id) {
+            BackendCard(
+                backend,
+                backends.statusOf(backend),
+                onRemove = { backends.askToRemove(backend) },
+                onPassword =
+                    { backends.askForPassword(backend) }.takeIf {
+                        backend.config is WebDavConfig || backend.config is PeerConfig
+                    },
+            )
+        }
+    }
+}
+
+/** Confirming a removal, and removing anyway when the secret cannot be deleted. */
+@Composable
+private fun RemoveDialogs(backends: BackendsViewModel) {
     backends.removing?.let { backend ->
         AlertDialog(
             onDismissRequest = backends::cancelRemove,
@@ -119,24 +143,6 @@ internal fun BackendsScreen(
                 TextButton(onClick = backends::cancelRemoveAnyway) { Text("Keep it") }
             },
         )
-    }
-}
-
-@Composable
-private fun BackendList(backends: BackendsViewModel) {
-    if (backends.backends.isEmpty()) Text(NO_BACKENDS)
-    backends.backends.forEach { backend ->
-        key(backend.id) {
-            BackendCard(
-                backend,
-                backends.statusOf(backend),
-                onRemove = { backends.askToRemove(backend) },
-                onPassword =
-                    { backends.askForPassword(backend) }.takeIf {
-                        backend.config is WebDavConfig || backend.config is PeerConfig
-                    },
-            )
-        }
     }
 }
 

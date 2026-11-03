@@ -477,7 +477,7 @@ internal class BackendsViewModel(
                         val left = manager.secretsLeftBehind(backend)?.takeIf { keepSecrets }
                         message =
                             "Removed ${backend.name}. Its files stay in " +
-                            "${backend.config.location}." + (left?.let { " $it" } ?: "")
+                            "${backend.config.location}." + left?.let { " $it" }.orEmpty()
                     } catch (e: SecretStoreException) {
                         removingAnyway =
                             StuckRemoval(

@@ -114,6 +114,15 @@ class TwoAppsWebDavTest {
                 }
                 onNodeWithText(NEW_PASSWORD).performClick()
                 clickInDialog("Cancel")
+
+                // Removed with a keyring that answers: its password goes with it.
+                onNodeWithText("Remove").performClick()
+                clickInDialog("Remove")
+                awaitText("Removed 127.0.0.1. Its files stay in ${server.url}.")
+                waitUntil(timeoutMillis = TIMEOUT_MS) {
+                    device.secrets.keyring.secrets
+                        .isEmpty()
+                }
             }
         }
 

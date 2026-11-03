@@ -104,6 +104,8 @@ class BackendsViewModelTest {
             screen.usePasswordFile()
             screen.confirmPassword()
             screen.confirmRemove()
+            screen.confirmRemoveAnyway()
+            screen.cancelRemoveAnyway()
             assertEquals(null, screen.message)
             assertEquals(false, screen.busy)
             assertTrue(noKeyringExplanation("No keyring.", null).contains("in your settings"))

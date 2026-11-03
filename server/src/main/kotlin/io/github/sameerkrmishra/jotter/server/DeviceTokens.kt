@@ -17,6 +17,8 @@ import okio.Path
 import okio.Path.Companion.toPath
 import okio.use
 import java.nio.file.Files
+import java.nio.file.attribute.FileAttribute
+import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.encoding.Base64
 import kotlin.uuid.Uuid
@@ -204,7 +206,7 @@ internal class DeviceTokens(
     private companion object {
         val json = Json { prettyPrint = true }
 
-        fun attributeOf(permissions: String) =
+        fun attributeOf(permissions: String): FileAttribute<Set<PosixFilePermission>> =
             PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString(permissions))
 
         val base64Url = Base64.UrlSafe.withPadding(Base64.PaddingOption.ABSENT)

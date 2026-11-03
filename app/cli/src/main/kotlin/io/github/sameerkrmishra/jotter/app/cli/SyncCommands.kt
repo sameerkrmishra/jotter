@@ -314,7 +314,8 @@ private class RemoveBackendCommand(
                     throw CliktError(
                         "jotter: cannot delete the password of ${backend.id}, so nothing was " +
                             "removed: ${e.message} To remove it anyway and delete the password " +
-                            "later yourself, run: jotter backends remove --keep-secret ${backend.id}",
+                            "later yourself, run: jotter backends remove --keep-secret " +
+                            backend.id,
                         e,
                     )
                 }

@@ -149,6 +149,14 @@ class SyncCommandsTest {
     }
 
     @Test
+    fun keepingTheSecretOfAFolderSaysNothingMore() {
+        val id = ok(here, "backends", "add", "--new", stick.toString()).trim()
+        val removed = ok(here, "backends", "remove", "--keep-secret", id)
+        assertEquals(1, removed.lines().count { it.isNotEmpty() }, removed)
+        assertEquals("", ok(here, "backends"))
+    }
+
+    @Test
     fun anAmbiguousIdIsRefused() {
         val other = directory.resolve("other").createDirectories()
         ok(here, "backends", "add", "--new", stick.toString())
