@@ -66,10 +66,13 @@ from one commit, each from its own `git archive` copy in its own directory, with
 cache, in different time zones, locales and umasks, minutes apart, and fails unless the two are
 byte-identical (diffoscope, or `zipinfo` and a file comparison, shows a difference). CI's
 `reproducible` workflow runs it with Temurin for one build and Zulu for the other on every push
-to `main`, on tags, and on pull requests that change the build. On 2026-11-04 four builds of the
-same sources (two local with Temurin 21.0.12 in a worktree and in exported trees, two in CI with
-Temurin 21.0.13 and Zulu 21.0.13) gave the same APK, SHA-256 `06981c62…fdab0061`. The release
-build needs no Kotlin/Native toolchain.
+to `main`, on tags, and on pull requests that change the build. The first build uses the caller's
+Gradle user home, the second an empty one of its own that reads only downloaded dependencies
+from it, so no library dexed by the first is reused. On 2026-11-04 five builds of the same
+sources gave the same APK, SHA-256 `06981c62…fdab0061`: three local ones with Temurin
+21.0.12.1+1, in a worktree and in two exported trees, and two in CI (run 41722235749, whose log
+resolves Temurin `21.0.13+9` and Zulu `21.0.13`). The release build needs no Kotlin/Native
+toolchain.
 
 ## Consequences
 
@@ -88,8 +91,8 @@ build needs no Kotlin/Native toolchain.
 - The APK is about 16 MB, unshrunk.
 - A change in the app's code alone does not run the check on its pull request, only after the
   merge; such changes are unlikely to break determinism, but can (for instance a new library).
-- Signing with Gradle stores the passwords in Gradle's configuration cache (encrypted) unless
-  the build runs with `--no-configuration-cache`, as docs/releasing.md says.
+- Signing with Gradle would store the passwords in Gradle's configuration cache (encrypted), so
+  with `JOTTER_KEYSTORE` set the build fails unless it runs with `--no-configuration-cache`.
 - The check runs on one OS (Linux, x86_64); F-Droid's build server is the same, a maintainer on
   macOS would have to try.
 
