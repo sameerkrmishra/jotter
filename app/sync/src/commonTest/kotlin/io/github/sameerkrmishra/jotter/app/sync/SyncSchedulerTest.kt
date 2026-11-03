@@ -31,7 +31,7 @@ class SyncSchedulerTest {
 
     /** The backends, what each sync ends with, and every round with the backends it synced. */
     private class Backends(
-        val all: List<Backend>,
+        var all: List<Backend>,
     ) {
         val rounds = mutableListOf<List<String>>()
         val times = mutableListOf<Pair<Long, List<String>>>()
@@ -39,8 +39,12 @@ class SyncSchedulerTest {
         var now: () -> Long = { 0 }
         var blockNext: CompletableDeferred<Unit>? = null
         var throwNext: Exception? = null
+        var throwAlways = false
+        var calls = 0
 
         suspend fun syncAll(due: (Backend) -> Boolean): List<BackendSync> {
+            calls++
+            check(!throwAlways) { "database is locked" }
             blockNext?.let {
                 blockNext = null
                 it.await()
@@ -184,6 +188,39 @@ class SyncSchedulerTest {
                     90L to listOf("usb", "hub"),
                 ),
                 backends.times,
+            )
+        }
+
+    // Before the fix these two spun on virtual time and hung the test run.
+    @Test
+    fun aFailedBackendThatIsRemovedIsNotRetried() =
+        runTest(timeout = 10.seconds) {
+            val backends = Backends(listOf(usb, dav))
+            backends.failing["usb"] = Outcome.UNREACHABLE
+            start(backends)
+            backends.all = listOf(dav)
+            testScheduler.advanceTimeBy(40.seconds)
+            // One retry finds it gone, and then nothing until the period.
+            assertEquals(2, backends.calls)
+            testScheduler.advanceTimeBy(4.minutes)
+            assertEquals(2, backends.calls)
+        }
+
+    @Test
+    fun roundsThatKeepThrowingWaitBetweenTries() =
+        runTest(timeout = 10.seconds) {
+            val backends = Backends(listOf(usb))
+            backends.failing["usb"] = Outcome.UNREACHABLE
+            val (scheduler, _) = start(backends)
+            backends.throwAlways = true
+            testScheduler.advanceTimeBy(100.seconds)
+            // The retry at 30 s throws, and each next one waits the first backoff again.
+            assertEquals(listOf(0L), backends.times.map { it.first })
+            assertEquals(1 + 3, backends.calls)
+            assertTrue(
+                scheduler.problem.value
+                    .orEmpty()
+                    .contains("database is locked"),
             )
         }
 

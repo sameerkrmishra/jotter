@@ -17,6 +17,9 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
+/** The shortest wait before a retry of failed backends, whatever their state says. */
+private val MIN_RETRY = 1.seconds
+
 /**
  * When [SyncScheduler] syncs.
  *
@@ -176,18 +179,23 @@ public class SyncScheduler(
         requests.send(request)
     }
 
-    /** How long until the first failed backend is due again, or null if none failed. */
+    /**
+     * How long until the first failed backend is due again, or null if none failed. Never less
+     * than [MIN_RETRY], so that no state of [failures] can make the loop spin.
+     */
     private fun nextRetry(): Duration? =
         failures.values
             .minOfOrNull { failed -> failed.until - timeSource.markNow() }
-            ?.coerceAtLeast(Duration.ZERO)
+            ?.coerceAtLeast(MIN_RETRY)
 
     @Suppress("TooGenericExceptionCaught") // The next round tries again; this one must not end it.
     private suspend fun round(kind: Request) {
         running.value = true
         try {
             val now = timeSource.markNow()
+            val listed = mutableSetOf<String>()
             syncAll { backend ->
+                listed += backend.id
                 val failed = failures[backend.id]
                 when (kind) {
                     Request.Now -> true
@@ -195,12 +203,19 @@ public class SyncScheduler(
                     else -> failed == null || failed.until <= now
                 }
             }.forEach(::count)
+            // A backend removed since it failed is never synced again to clear its entry.
+            failures.keys.retainAll(listed)
             report { it.copy(syncing = null) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // BackendManager reports every failure of a backend in its result. What is left, such
-            // as a database that cannot be read, is the device's: the next round tries again.
+            // as a database that cannot be read, is the device's: the next round tries again,
+            // not before firstBackoff, as the failed backends would otherwise be due at once.
+            val later = timeSource.markNow() + timing.firstBackoff
+            failures.entries.forEach { entry ->
+                entry.setValue(Failures(entry.value.count, maxOf(entry.value.until, later)))
+            }
             val text = "Jotter could not sync: ${e.message}. It tries again."
             report { it.copy(syncing = text) }
         } finally {
