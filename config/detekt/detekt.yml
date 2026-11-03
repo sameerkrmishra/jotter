@@ -2,13 +2,26 @@
 # Only list rules here whose default we deliberately change.
 
 comments:
-  # docs/PLAN.md §8: KDoc on every public class, function and property.
+  # docs/PLAN.md §8: KDoc on every public class, function and property. Tests are excluded, as by
+  # default; the default list does not know KMP's androidDeviceTest source set, so it is spelled out.
   UndocumentedPublicClass:
     active: true
+    excludes: &testSources
+      - '**/test/**'
+      - '**/androidTest/**'
+      - '**/commonTest/**'
+      - '**/jvmTest/**'
+      - '**/androidUnitTest/**'
+      - '**/androidInstrumentedTest/**'
+      - '**/androidDeviceTest/**'
+      - '**/jsTest/**'
+      - '**/iosTest/**'
   UndocumentedPublicFunction:
     active: true
+    excludes: *testSources
   UndocumentedPublicProperty:
     active: true
+    excludes: *testSources
 
 naming:
   # A @Composable that emits UI is named like a class, by Compose's convention.
