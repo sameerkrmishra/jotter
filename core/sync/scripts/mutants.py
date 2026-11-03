@@ -173,6 +173,14 @@ M = [
     ("resolver ignores refused ids", R,
      "storedGraph(store.sync, conflict.noteId)",
      "RevisionGraph(store.sync.revisions(conflict.noteId))"),
+    ("answer on an older shown version written", R,
+     "        if (head.id == expectedHead) {\n", "        if (true) {\n"),
+    ("answer keeps its draft", R, "        store.sync.deleteDraft(closed)\n", ""),
+    ("saving set-aside text twice makes two notes", R,
+     "            if (store.sync.isDismissed(text)) {\n", "            if (false) {\n"),
+    ("dismissed text still listed", S,
+     "queries.selectShownInvalidRevisions(::invalidOfRow).executeAsList()",
+     "queries.selectInvalidRevisions(::invalidOfRow).executeAsList()"),
 ]
 
 RESULTS = ("core/sync/build/test-results/jvmTest/"

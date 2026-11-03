@@ -103,6 +103,26 @@ public data class InvalidRevision(
 )
 
 /**
+ * Text the user is combining by hand to answer an open conflict or a hidden head, kept on this
+ * device only so that it outlives the app.
+ *
+ * @property targetId The conflicted merge, or the hidden head, that the text answers.
+ * @property noteId Its note.
+ * @property isConflict Whether [targetId] is a conflicted merge rather than a hidden head.
+ * @property baseId The head whose text the user combined against.
+ * @property title The title as typed.
+ * @property body The body as typed.
+ */
+public data class ResolutionDraft(
+    val targetId: RevisionId,
+    val noteId: NoteId,
+    val isConflict: Boolean,
+    val baseId: RevisionId,
+    val title: String,
+    val body: String,
+)
+
+/**
  * Marks what is for `core:sync` alone. Kotlin has no friend modules, so [SyncStore] cannot be
  * `internal` to `core:storage` and still reach `core:sync`. No app needs it: this opt-in makes any
  * other use a compile error.
@@ -383,6 +403,66 @@ public class SyncStore internal constructor(
         }
     }
 
+    /** Returns the text that the DAG does not count, by note, but what this device dismissed. */
+    public fun shownInvalidRevisions(): List<InvalidRevision> =
+        queries.selectShownInvalidRevisions(::invalidOfRow).executeAsList()
+
+    /** Emits [shownInvalidRevisions] now and again whenever they change. */
+    public fun observeShownInvalidRevisions(): Flow<List<InvalidRevision>> =
+        queries
+            .selectShownInvalidRevisions(::invalidOfRow)
+            .asFlow()
+            .mapToList(queryContext)
+            .distinctUntilChanged()
+
+    /** Records that the user dismissed [row] on this device. */
+    public fun dismissInvalid(row: InvalidRevision) {
+        queries.insertDismissedInvalid(
+            row.revisionId.toString(),
+            row.reason.name,
+            row.title,
+            row.body,
+        )
+    }
+
+    /** Returns whether the user dismissed [row] on this device. */
+    public fun isDismissed(row: InvalidRevision): Boolean =
+        queries
+            .countDismissedInvalid(
+                row.revisionId.toString(),
+                row.reason.name,
+                row.title,
+                row.body,
+            ).executeAsOne() > 0
+
+    /** Stores [draft] in place of any draft for the same target. */
+    public fun putDraft(draft: ResolutionDraft) {
+        queries.upsertDraft(
+            draft.targetId.toString(),
+            draft.noteId.toString(),
+            draft.isConflict,
+            draft.baseId.toString(),
+            draft.title,
+            draft.body,
+        )
+    }
+
+    /** Removes the draft for [targetId], if there is one. */
+    public fun deleteDraft(targetId: RevisionId) {
+        queries.deleteDraft(targetId.toString())
+    }
+
+    /** Returns every draft, by note. */
+    public fun drafts(): List<ResolutionDraft> = queries.selectDrafts(::draftOfRow).executeAsList()
+
+    /** Emits [drafts] now and again whenever they change. */
+    public fun observeDrafts(): Flow<List<ResolutionDraft>> =
+        queries
+            .selectDrafts(::draftOfRow)
+            .asFlow()
+            .mapToList(queryContext)
+            .distinctUntilChanged()
+
     /** Returns every hidden head, by note. */
     public fun hiddenHeads(): List<HiddenHead> =
         queries.selectHiddenHeads(::hiddenHeadOfRow).executeAsList()
@@ -471,4 +551,22 @@ private fun conflictOfRow(
         losingRevisionId = RevisionId.parse(losingRevisionId),
         losingTitle = losingTitle,
         losingBody = losingBody,
+    )
+
+@Suppress("LongParameterList") // One parameter per column, as SQLDelight passes them.
+private fun draftOfRow(
+    targetId: String,
+    noteId: String,
+    isConflict: Boolean,
+    baseId: String,
+    title: String,
+    body: String,
+): ResolutionDraft =
+    ResolutionDraft(
+        targetId = RevisionId.parse(targetId),
+        noteId = NoteId.parse(noteId),
+        isConflict = isConflict,
+        baseId = RevisionId.parse(baseId),
+        title = title,
+        body = body,
     )

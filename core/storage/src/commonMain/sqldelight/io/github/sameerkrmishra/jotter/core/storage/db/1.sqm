@@ -58,3 +58,25 @@ CREATE TABLE conflict (
 ) WITHOUT ROWID;
 
 CREATE INDEX conflict_by_note ON conflict(note_id);
+
+-- Text of invalid_revision that the user dismissed on this device, by the same key. Local: it is
+-- never synced, and another device still lists that text until its user dismisses it there.
+CREATE TABLE dismissed_invalid (
+  revision_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (revision_id, reason, title, body)
+) WITHOUT ROWID;
+
+-- Text the user is combining by hand to answer an open conflict (target: the merge) or a hidden
+-- head (target: the head), kept so that it outlives the app. base_id is the head whose text it was
+-- combined against. Local, never synced; it goes once the answer is written or the user drops it.
+CREATE TABLE combined_draft (
+  target_id TEXT NOT NULL PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  is_conflict INTEGER AS kotlin.Boolean NOT NULL CHECK (is_conflict IN (0, 1)),
+  base_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL
+) WITHOUT ROWID;

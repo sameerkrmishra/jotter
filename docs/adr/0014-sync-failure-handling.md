@@ -18,7 +18,8 @@ devices disagree for good.
 
 **Local tables** (schema 2): `sync_read` for the files read in each folder of a backend,
 `sync_segment` for this device's own segments, `backend_revision` for what is known to be
-on a backend, `conflict` as PLAN.md §4 says, `hidden_head` and `invalid_revision`. `backend_id` is opaque, as the `backend` table
+on a backend, `conflict` as PLAN.md §4 says, `hidden_head` and `invalid_revision`, and
+the local `dismissed_invalid` and `combined_draft` (below). `backend_id` is opaque, as the `backend` table
 comes with M4.
 
 **Validity is a function of a revision and its ancestors.** Never of the order of
@@ -148,6 +149,21 @@ names the hidden head, which then stops counting on every device. If the ancesto
 comes, nothing changes: the user has decided. A head that waits for an open conflict
 cannot be settled, as that would pass over the conflict and its losing text.
 `resolves` may therefore name any revision.
+
+**An answer names the head it was made on.** `settleHidden`, like `resolve`, takes the
+head the user saw. If the note shows another one when the answer is written, nothing is
+written and the caller learns the head now shown, so that a newer edit is never replaced
+by an answer made without it.
+
+**Local decisions stay local.** Text that does not count can be saved as a note, or
+dismissed after the user confirms. Either way the device records it in
+`dismissed_invalid` and stops listing it. That table is not synced: dismissing says what
+one person has looked at on one device, the text itself stays stored and relayed, and a
+synced dismissal would need a new kind of revision, so a format change, for no gain in
+safety. Another device lists the text until it is dismissed there too. Texts the user
+combines by hand to answer a conflict or a hidden head are kept in `combined_draft`,
+also local, until the answer is written, which deletes the draft in the same
+transaction, or the user drops it.
 
 **Limits.** A file, compressed or inflated, is at most 32 MiB. Inflating stops at
 the limit, so a small file cannot fill memory. A push splits revisions so that each

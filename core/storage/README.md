@@ -57,6 +57,7 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 | `sync_read` | Per backend, the files read in each device folder, by name |
 | `sync_segment`, `backend_revision` | This device's segments on each backend, and what is known to be there |
 | `conflict`, `hidden_head`, `invalid_revision` | Open conflicts with the text that lost, heads a note does not show, and text that does not count: mostly caches of what the revisions say, kept by `core:sync` |
+| `dismissed_invalid`, `combined_draft` | Set-aside text the user saved or dismissed on this device, and texts being combined by hand to answer a conflict. Local: never synced |
 
 `backend` (PLAN.md §4) comes with M4, as a migration.
 

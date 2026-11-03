@@ -142,6 +142,36 @@ class ValidityTest {
         }
 
     @Test
+    fun textSetAsideCanBeSavedOnceOrDismissedOnThisDeviceAlone(): TestResult =
+        runTest {
+            val bad = textRevision(4, 5, "bad", root)
+            val onTop = textRevision(5, 90, "my own words", bad)
+            val store = device("saves")
+            val other = device("dismisses")
+            val blobs = InMemoryBlobStore()
+            plant(blobs, listOf(root, bad, onTop))
+            store.report(blobs)
+            other.report(blobs)
+            val resolver = ConflictResolver(store)
+            val row = resolver.invalid().single()
+
+            val saved = assertNotNull(resolver.saveInvalidAsNote(row))
+
+            assertEquals("my own words", saved.body)
+            assertNull(resolver.saveInvalidAsNote(row))
+            assertEquals(1, store.notes.list().count { it.body == "my own words" })
+            assertEquals(emptyList(), resolver.invalid())
+            assertEquals(listOf(row), store.sync.invalidRevisions())
+            store.report(blobs)
+            other.report(blobs)
+            val theirs = ConflictResolver(other)
+            assertEquals(listOf(row), theirs.invalid())
+            theirs.dismissInvalid(row)
+            assertEquals(emptyList(), theirs.observeInvalid().first())
+            assertEquals(1, other.notes.list().count { it.body == "my own words" })
+        }
+
+    @Test
     fun aBadChildThatCameFirstIsShownUntilItsParentSaysOtherwise(): TestResult =
         runTest {
             val store = device("late")
@@ -381,7 +411,7 @@ class ValidityTest {
             val hidden = resolver.hidden().single()
             assertEquals(HiddenReason.OPEN_CONFLICT, hidden.reason)
             assertFailsWith<HiddenHeadWaitsForConflictException> {
-                resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepShown)
+                resolver.settleNow(phone, hidden.revisionId, ConflictResolution.KeepShown)
             }
             assertEquals(1, resolver.open().size)
         }
@@ -417,7 +447,8 @@ class ValidityTest {
             reader.notes.edit(note.id, note.revisionId, "", "a\nreader\n")
             reader.report(blobs)
             val resolver = ConflictResolver(reader)
-            resolver.settleHidden(
+            resolver.settleNow(
+                reader,
                 resolver.hidden().single().revisionId,
                 ConflictResolution.KeepShown,
             )

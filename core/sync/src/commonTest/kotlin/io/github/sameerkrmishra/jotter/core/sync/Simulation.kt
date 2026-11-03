@@ -561,7 +561,7 @@ internal class Simulation(
     private fun resolveOne(device: SimDevice) {
         val conflict = device.conflicts.open().randomOrNull(random) ?: return
         conflictsSeen++
-        device.conflicts.resolve(conflict.mergeId, randomResolution())
+        device.conflicts.resolveNow(conflict.mergeId, randomResolution())
     }
 
     private fun settleOne(device: SimDevice) {
@@ -570,7 +570,11 @@ internal class Simulation(
                 .hidden()
                 .filter { it.reason == HiddenReason.MISSING_ANCESTOR }
                 .randomOrNull(random)
-        if (head != null) device.conflicts.settleHidden(head.revisionId, randomResolution())
+        if (head !=
+            null
+        ) {
+            device.conflicts.settleNow(device.store, head.revisionId, randomResolution())
+        }
     }
 
     private fun randomResolution(): ConflictResolution =
@@ -802,14 +806,18 @@ internal class Simulation(
             conflictsSeen += open.size
             open.forEach { conflict ->
                 if (resolver.details(conflict.mergeId) != null) {
-                    resolver.resolve(conflict.mergeId, ConflictResolution.KeepBoth)
+                    resolver.resolveNow(conflict.mergeId, ConflictResolution.KeepBoth)
                 }
             }
             // A resolution above can have merged these away. KeepBoth loses no line.
             waiting.forEach { head ->
                 // Settling one can merge another of its note.
                 if (head in resolver.hidden()) {
-                    resolver.settleHidden(head.revisionId, ConflictResolution.KeepBoth)
+                    resolver.settleNow(
+                        alive.first().store,
+                        head.revisionId,
+                        ConflictResolution.KeepBoth,
+                    )
                 }
             }
             settle()

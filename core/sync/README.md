@@ -14,8 +14,8 @@ when (val result = engine.sync(SyncTarget("usb-stick", blobStore))) {
 
 val conflicts = ConflictResolver(store)
 conflicts.observeOpen() // Flow<List<OpenConflict>>
-conflicts.details(mergeId) // both texts, and the text with conflict markers
-conflicts.resolve(mergeId, ConflictResolution.KeepBoth)
+val details = conflicts.details(mergeId) // both texts, the marked text, the shown head
+conflicts.resolve(mergeId, ConflictResolution.KeepBoth, details.shownHeadId)
 ```
 
 **Dependency rule:** depends on `core:model`, `core:merge`, `core:storage` and
@@ -30,7 +30,8 @@ below is `internal`.
 | `SyncTarget`, `DeviceInfo` | A backend with its lasting local id, and what `device.json` says |
 | `SyncResult` | `Completed`, `Unreachable`, `Incompatible` or `Interrupted` |
 | `SyncReport`, `SyncIssue`, `SegmentProblem` | What a cycle did, and what it could not do |
-| `ConflictResolver` | `open`, `observeOpen`, `details`, `resolve`; for heads a note cannot merge yet `hidden`, `observeHidden`, `settleHidden`; for text that does not count `invalid`, `observeInvalid` |
+| `ConflictResolver` | `open`, `observeOpen`, `details`, `resolve`; for heads a note cannot merge yet `hidden`, `observeHidden`, `settleHidden`; for text that does not count `invalid`, `observeInvalid`, `saveInvalidAsNote`, `dismissInvalid`; for texts combined by hand `drafts`, `observeDrafts`, `putDraft`, `discardDraft` |
+| `ResolveResult` | What `resolve` and `settleHidden` did: `Resolved`, or nothing written because the note shows another head (`ShownChanged`) or a deletion closed the conflict (`Closed`) |
 | `ConflictDetails`, `ConflictResolution`, `NoSuchConflictException`, `NoSuchHiddenHeadException`, `HiddenHeadWaitsForConflictException` | For the conflict screen |
 
 `SyncReport.merges` above zero means the backend has not seen them: they go out with
@@ -59,7 +60,17 @@ The merge rules are in
 - **What counts is judged from the revisions alone.** `RevisionGraph` decides, from a
   revision and its ancestors. Everything readable is stored and passed on, so one bad
   stamp cannot make devices hold different revisions. The UI must show
-  `ConflictResolver.invalid`, or that text is out of sight.
+  `ConflictResolver.invalid`, or that text is out of sight. The user can save such text
+  as a note or dismiss it; that is recorded on this device only (ADR-0014).
+- **An answer names what it was made on.** `resolve` and `settleHidden` take the head
+  the user saw (`ConflictDetails.shownHeadId`, or `Note.revisionId` for a hidden head).
+  If the note shows another by then, such as an edit made while the user combined a
+  text, nothing is written and the result says which head shows now. Without that,
+  keeping the other version or saving a text combined from the old one would drop the
+  newer edit with no word.
+- **Texts combined by hand are kept on this device**, in `combined_draft`, so that they
+  survive a restart. The answer that uses one deletes it in the same transaction; a
+  draft whose conflict was answered elsewhere stays until the user saves or drops it.
 - **Files are named by their content**, and pull tracks names, not numbers. A restored
   backup reads what it lost from its own folder, and nothing can overwrite anything.
 - **`okio`** gives SHA-256 and gzip in common code. It adds no new dependency to the

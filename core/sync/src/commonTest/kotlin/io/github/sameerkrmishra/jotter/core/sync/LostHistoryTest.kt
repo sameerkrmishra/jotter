@@ -133,7 +133,7 @@ class LostHistoryTest {
             phone.notes.deleteForever(note.id)
 
             assertNull(resolver.details(mergeId))
-            resolver.resolve(mergeId, ConflictResolution.KeepShown)
+            resolver.resolveNow(mergeId, ConflictResolution.KeepShown)
 
             assertTrue(resolver.open().isEmpty())
             assertEquals(
@@ -238,14 +238,14 @@ class LostHistoryTest {
             val reader = world.reader
             val resolver = ConflictResolver(reader)
             val hidden = resolver.hidden().single()
-            resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepBoth)
+            resolver.settleNow(reader, hidden.revisionId, ConflictResolution.KeepBoth)
             assertTrue(resolver.hidden().isEmpty())
             assertEquals(1, reader.live(world.note.id).size)
             assertTrue(reader.notes.list().any { it.body == hidden.body })
             reader.sync(world.blobs)
             assertTrue(resolver.hidden().isEmpty())
             assertFailsWith<NoSuchHiddenHeadException> {
-                resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepShown)
+                resolver.settleNow(reader, hidden.revisionId, ConflictResolution.KeepShown)
             }
         }
 
@@ -260,12 +260,40 @@ class LostHistoryTest {
             val resolver = ConflictResolver(reader)
             val hidden = resolver.hidden().single()
 
-            val settled = resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepLosing)
+            val settled =
+                resolver.settleNow(
+                    reader,
+                    hidden.revisionId,
+                    ConflictResolution.KeepLosing,
+                )
 
             assertEquals(hidden.body, settled?.body)
             val revision = assertNotNull(settled?.revisionId?.let(reader.sync::revision))
             assertEquals(setOf(shown.revisionId), revision.parents)
             assertEquals(hidden.revisionId, revision.resolves)
+        }
+
+    @Test
+    fun settlingOnAnOlderShownVersionIsRefused(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val reader = world.reader
+            val shown = assertNotNull(reader.notes.get(world.note.id))
+            val resolver = ConflictResolver(reader)
+            val hidden = resolver.hidden().single()
+            val newer = reader.notes.edit(shown.id, shown.revisionId, shown.title, "NEW LINE")
+
+            val result =
+                resolver.settleHidden(
+                    hidden.revisionId,
+                    ConflictResolution.KeepLosing,
+                    shown.revisionId,
+                )
+
+            assertEquals(ResolveResult.ShownChanged(newer.revisionId), result)
+            assertEquals("NEW LINE", reader.notes.get(shown.id)?.body)
+            assertEquals(hidden, resolver.hidden().single())
         }
 
     @Test
@@ -276,7 +304,12 @@ class LostHistoryTest {
             val shown = assertNotNull(world.reader.notes.get(world.note.id))
             val resolver = ConflictResolver(world.reader)
             val hidden = resolver.hidden().single()
-            val settled = resolver.settleHidden(hidden.revisionId, ConflictResolution.KeepShown)
+            val settled =
+                resolver.settleNow(
+                    world.reader,
+                    hidden.revisionId,
+                    ConflictResolution.KeepShown,
+                )
             assertEquals(shown.body, settled?.body)
             assertTrue(settled?.revisionId != shown.revisionId)
         }
@@ -290,7 +323,7 @@ class LostHistoryTest {
             val hidden = resolver.hidden().single()
             val tooLong = ConflictResolution.Edited("", "x".repeat(MAX_NOTE_CHARS + 1))
             assertFailsWith<NoteTooLargeException> {
-                resolver.settleHidden(hidden.revisionId, tooLong)
+                resolver.settleNow(world.reader, hidden.revisionId, tooLong)
             }
             assertEquals(hidden, resolver.hidden().single())
         }

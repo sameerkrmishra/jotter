@@ -8,6 +8,7 @@ import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.NoteTooLargeException
+import io.github.sameerkrmishra.jotter.core.storage.ResolutionDraft
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
@@ -18,6 +19,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -27,7 +29,7 @@ class ConflictResolverTest {
         FileSystem.SYSTEM_TEMPORARY_DIRECTORY /
             "jotter-conflict-test-${Random.nextLong().toULong()}"
     private val blobs = InMemoryBlobStore()
-    private val phone = open("phone")
+    private var phone = open("phone")
     private val pc = open("pc")
     private val target = SyncTarget("b", blobs)
 
@@ -96,7 +98,7 @@ class ConflictResolverTest {
             assertEquals(mergeId, conflicts.open().single().mergeId)
             assertEquals(mergeId, phone.notes.get(note.id)?.revisionId)
             assertNotNull(conflicts.details(mergeId))
-            conflicts.resolve(mergeId, ConflictResolution.KeepShown)
+            conflicts.resolveNow(mergeId, ConflictResolution.KeepShown)
             assertTrue(conflicts.open().isEmpty())
         }
 
@@ -119,7 +121,7 @@ class ConflictResolverTest {
             val (note, conflicts) = conflicted()
             val conflict = conflicts.open().single()
             val shown = phone.notes.get(note.id)?.body
-            val result = conflicts.resolve(conflict.mergeId, ConflictResolution.KeepShown)
+            val result = conflicts.resolveNow(conflict.mergeId, ConflictResolution.KeepShown)
             assertEquals(shown, result?.body)
             exchange()
             assertTrue(conflicts.open().isEmpty())
@@ -133,7 +135,7 @@ class ConflictResolverTest {
         runTest {
             val (note, conflicts) = conflicted()
             val conflict = conflicts.open().single()
-            conflicts.resolve(conflict.mergeId, ConflictResolution.KeepLosing)
+            conflicts.resolveNow(conflict.mergeId, ConflictResolution.KeepLosing)
             exchange()
             assertEquals(conflict.losingBody, pc.notes.get(note.id)?.body)
         }
@@ -143,7 +145,7 @@ class ConflictResolverTest {
         runTest {
             val (_, conflicts) = conflicted()
             val conflict = conflicts.open().single()
-            conflicts.resolve(conflict.mergeId, ConflictResolution.KeepBoth)
+            conflicts.resolveNow(conflict.mergeId, ConflictResolution.KeepBoth)
             exchange()
             val bodies =
                 pc.notes
@@ -158,7 +160,7 @@ class ConflictResolverTest {
         runTest {
             val (note, conflicts) = conflicted()
             val conflict = conflicts.open().single()
-            conflicts.resolve(conflict.mergeId, ConflictResolution.Edited("new\u0000", "both"))
+            conflicts.resolveNow(conflict.mergeId, ConflictResolution.Edited("new\u0000", "both"))
             assertEquals("new�", phone.notes.get(note.id)?.title)
         }
 
@@ -168,7 +170,7 @@ class ConflictResolverTest {
             val (_, conflicts) = conflicted()
             val mergeId = conflicts.open().single().mergeId
             val tooLong = ConflictResolution.Edited("", "x".repeat(MAX_NOTE_CHARS + 1))
-            assertFailsWith<NoteTooLargeException> { conflicts.resolve(mergeId, tooLong) }
+            assertFailsWith<NoteTooLargeException> { conflicts.resolveNow(mergeId, tooLong) }
             assertEquals(mergeId, conflicts.open().single().mergeId)
         }
 
@@ -190,7 +192,7 @@ class ConflictResolverTest {
                 exchange()
 
                 assertEquals("kept", conflicts.details(conflict.mergeId)?.shownBody)
-                conflicts.resolve(conflict.mergeId, ConflictResolution.KeepShown)
+                conflicts.resolveNow(conflict.mergeId, ConflictResolution.KeepShown)
                 assertEquals("kept", phone.notes.get(note.id)?.body)
                 exchange()
             }
@@ -201,9 +203,9 @@ class ConflictResolverTest {
         runTest {
             val (_, conflicts) = conflicted()
             val mergeId = conflicts.open().single().mergeId
-            conflicts.resolve(mergeId, ConflictResolution.KeepShown)
+            conflicts.resolveNow(mergeId, ConflictResolution.KeepShown)
             assertFailsWith<NoSuchConflictException> {
-                conflicts.resolve(mergeId, ConflictResolution.KeepShown)
+                conflicts.resolveNow(mergeId, ConflictResolution.KeepShown)
             }
         }
 
@@ -217,8 +219,81 @@ class ConflictResolverTest {
             assertEquals(mergeId, conflicts.open().single().mergeId)
             val details = assertNotNull(conflicts.details(mergeId))
             assertEquals("edited meanwhile", details.shownBody)
-            conflicts.resolve(mergeId, ConflictResolution.KeepShown)
+            conflicts.resolveNow(mergeId, ConflictResolution.KeepShown)
             assertEquals("edited meanwhile", phone.notes.get(note.id)?.body)
+        }
+
+    /** The UI's answer was based on what it showed: an edit made since must not vanish unseen. */
+    @Test
+    fun anAnswerBasedOnAnOlderShownVersionIsRefused(): TestResult =
+        runTest {
+            val (note, conflicts) = conflicted()
+            val mergeId = conflicts.open().single().mergeId
+            val seen = assertNotNull(conflicts.details(mergeId))
+            val shown = assertNotNull(phone.notes.get(note.id))
+            val newer = phone.notes.edit(note.id, shown.revisionId, "title", "NEW LINE")
+
+            listOf(
+                ConflictResolution.Edited("title", "combined from the old version"),
+                ConflictResolution.KeepLosing,
+            ).forEach { answer ->
+                val result = conflicts.resolve(mergeId, answer, seen.shownHeadId)
+                assertEquals(ResolveResult.ShownChanged(newer.revisionId), result)
+            }
+            assertEquals("NEW LINE", phone.notes.get(note.id)?.body)
+            assertEquals(mergeId, conflicts.open().single().mergeId)
+            val current = assertNotNull(conflicts.details(mergeId))
+            assertEquals(newer.revisionId, current.shownHeadId)
+
+            val answered =
+                conflicts.resolve(
+                    mergeId,
+                    ConflictResolution.Edited("title", "both"),
+                    newer.revisionId,
+                )
+
+            assertEquals("both", assertIs<ResolveResult.Resolved>(answered).note?.body)
+            assertTrue(conflicts.open().isEmpty())
+        }
+
+    @Test
+    fun aDraftOutlivesTheAppAndGoesWithItsAnswer(): TestResult =
+        runTest {
+            val (note, conflicts) = conflicted()
+            val details = assertNotNull(conflicts.details(conflicts.open().single().mergeId))
+            val mergeId = details.conflict.mergeId
+            val draft = ResolutionDraft(mergeId, note.id, true, details.shownHeadId, "t", "typed")
+            conflicts.putDraft(draft)
+            conflicts.putDraft(draft.copy(body = "typed more"))
+            phone.close()
+            phone = open("phone")
+            val reopened = ConflictResolver(phone)
+
+            assertEquals(listOf(draft.copy(body = "typed more")), reopened.drafts())
+            assertEquals(reopened.drafts(), reopened.observeDrafts().first())
+            reopened.resolve(
+                mergeId,
+                ConflictResolution.Edited("t", "typed more"),
+                details.shownHeadId,
+            )
+            assertEquals(emptyList(), reopened.drafts())
+        }
+
+    @Test
+    fun aDraftStaysWhenItsConflictIsResolvedElsewhereUntilDiscarded(): TestResult =
+        runTest {
+            val (note, conflicts) = conflicted()
+            val details = assertNotNull(conflicts.details(conflicts.open().single().mergeId))
+            val mergeId = details.conflict.mergeId
+            val draft = ResolutionDraft(mergeId, note.id, true, details.shownHeadId, "t", "mine")
+            conflicts.putDraft(draft)
+            ConflictResolver(pc).resolveNow(mergeId, ConflictResolution.KeepShown)
+            exchange()
+
+            assertTrue(conflicts.open().isEmpty())
+            assertEquals(listOf(draft), conflicts.drafts())
+            conflicts.discardDraft(mergeId)
+            assertEquals(emptyList(), conflicts.drafts())
         }
 
     @Test
@@ -236,7 +311,7 @@ class ConflictResolverTest {
             exchange()
             val conflicts = ConflictResolver(phone)
             assertEquals(2, RevisionGraph(phone.sync.revisions(note.id)).liveHeads.size)
-            conflicts.resolve(conflicts.open().single().mergeId, ConflictResolution.KeepShown)
+            conflicts.resolveNow(conflicts.open().single().mergeId, ConflictResolution.KeepShown)
             val merged = assertNotNull(phone.notes.get(note.id))
             assertTrue(merged.body.endsWith("third\n"))
             assertEquals(1, RevisionGraph(phone.sync.revisions(note.id)).liveHeads.size)
@@ -248,8 +323,10 @@ class ConflictResolverTest {
         runTest {
             val (note, conflicts) = conflicted()
             val mergeId = conflicts.open().single().mergeId
-            conflicts.resolve(mergeId, ConflictResolution.Edited("title", "phone's answer"))
-            ConflictResolver(pc).resolve(mergeId, ConflictResolution.Edited("title", "pc's answer"))
+            conflicts.resolveNow(mergeId, ConflictResolution.Edited("title", "phone's answer"))
+            ConflictResolver(
+                pc,
+            ).resolveNow(mergeId, ConflictResolution.Edited("title", "pc's answer"))
             exchange()
             assertEquals(phone.notes.get(note.id), pc.notes.get(note.id))
             assertEquals(1, conflicts.open().size)
