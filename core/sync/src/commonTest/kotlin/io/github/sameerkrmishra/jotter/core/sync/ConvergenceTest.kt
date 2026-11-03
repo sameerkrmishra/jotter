@@ -13,7 +13,7 @@ class ConvergenceTest {
         runTest(timeout = maxOf(MIN_TIMEOUT_MINUTES, CASES / CASES_PER_MINUTE).minutes) {
             val start = simulationProperty("jotter.sim.start") ?: FIRST_SEED
             val cases = CASES
-            val outcomes = (start until start + cases).map { seeded(it) }
+            val outcomes = seeded((start until start + cases).toList())
             println(
                 "Simulated seeds $start until ${start + cases}: " +
                     "${outcomes.sumOf { it.revisions }} revisions, " +
@@ -33,14 +33,23 @@ class ConvergenceTest {
     @Test
     fun theSeedsThatFoundBugsStillPass(): TestResult =
         runTest(timeout = MIN_TIMEOUT_MINUTES.minutes) {
-            REGRESSION_SEEDS.forEach { seeded(it) }
+            seeded(REGRESSION_SEEDS)
         }
 
-    /** Whatever goes wrong in a case, the failure names the seed that replays it. */
-    private suspend fun seeded(seed: Long): SimOutcome =
-        runCatching { simulate(seed) }.getOrElse { failure ->
-            throw AssertionError("Seed $seed failed: ${failure.message}", failure)
+    /**
+     * Whatever goes wrong in a case, the failure names the seed that replays it. Seeds may run in
+     * parallel, but every case is its own world, so the outcomes do not depend on the order: all
+     * of them run, and a failure names the first failing seed of [seeds].
+     */
+    private suspend fun seeded(seeds: List<Long>): List<SimOutcome> {
+        val results = simulateEach(seeds)
+        seeds.zip(results).forEach { (seed, result) ->
+            result.exceptionOrNull()?.let { failure ->
+                throw AssertionError("Seed $seed failed: ${failure.message}", failure)
+            }
         }
+        return results.map { it.getOrThrow() }
+    }
 
     private companion object {
         const val FIRST_SEED = 1L
