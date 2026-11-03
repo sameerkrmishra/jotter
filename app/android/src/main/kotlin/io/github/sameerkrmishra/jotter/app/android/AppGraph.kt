@@ -79,8 +79,10 @@ internal class AppGraph(
     private val ui = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val background = CoroutineScope(SupervisorJob() + work)
 
-    /** The notes and their sync, or why they could not be opened. */
-    val opened: Opened by lazy(::open)
+    private val opening = lazy(::open)
+
+    /** The notes and their sync, or why they could not be opened. Opened on first use. */
+    val opened: Opened by opening
 
     /** The secrets of backends: sealed with a Keystore key, in a file outside every backup. */
     val secrets: SecretStores by lazy {
@@ -123,7 +125,8 @@ internal class AppGraph(
             ui.coroutineContext.job.cancelAndJoin()
             background.coroutineContext.job.cancelAndJoin()
         }
-        (opened as? Opened.Ready)?.store?.close()
+        // A graph never used opens nothing here.
+        if (opening.isInitialized()) (opened as? Opened.Ready)?.store?.close()
     }
 
     private companion object {
@@ -209,10 +212,16 @@ internal class AndroidSync(
                 .distinctUntilChanged()
                 // A failed read changes nothing: the job stays as it was until the next start.
                 .catch { }
-                .collect { SyncWork.periodic(workManager, it) }
+                .collect { any ->
+                    anyBackend.set(any)
+                    SyncWork.periodic(workManager, any)
+                }
         }
         return true
     }
+
+    // Unknown until the backends are first read: then a sync after leaving is asked for anyway.
+    private val anyBackend = AtomicBoolean(true)
 
     /** The app came to the screen: a sync, as on start. */
     fun foreground() {
@@ -225,8 +234,11 @@ internal class AndroidSync(
         scheduler.syncAndWait()
     }
 
-    /** The app left the screen, or a text was shared: a sync by WorkManager, once online. */
+    /**
+     * The app left the screen, or a text was shared: a sync by WorkManager, once online. Not when
+     * there is no backend, so that leaving the app does not wake the phone for nothing.
+     */
     fun soon() {
-        SyncWork.soon(workManager)
+        if (anyBackend.get()) SyncWork.soon(workManager)
     }
 }

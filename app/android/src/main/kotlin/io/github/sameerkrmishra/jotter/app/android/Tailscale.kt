@@ -4,7 +4,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import io.github.sameerkrmishra.jotter.app.sync.TailnetCheck
 import java.net.Inet4Address
-import java.net.Inet6Address
 import java.net.InetAddress
 
 private const val IPV4_PARTS = 4
@@ -52,11 +51,11 @@ private fun isLoopback(host: String): Boolean {
 /** Whether [address] is in `100.64.0.0/10` or `fd7a:115c:a1e0::/48`. */
 private fun isTailscale(address: InetAddress): Boolean {
     val bytes = address.address.map { it.toInt() and BYTE }
-    return when (address) {
-        is Inet4Address ->
-            bytes[0] == TAILSCALE_FIRST && bytes[1] and TAILSCALE_MASK == TAILSCALE_SECOND
-        is Inet6Address -> bytes.take(TAILSCALE_V6.size) == TAILSCALE_V6
-        else -> false
+    // An InetAddress is either of the two.
+    return if (address is Inet4Address) {
+        bytes[0] == TAILSCALE_FIRST && bytes[1] and TAILSCALE_MASK == TAILSCALE_SECOND
+    } else {
+        bytes.take(TAILSCALE_V6.size) == TAILSCALE_V6
     }
 }
 

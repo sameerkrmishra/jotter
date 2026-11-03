@@ -19,7 +19,14 @@ class TailscaleTest {
     @Test
     fun anythingElseOnlyWhileAVpnHoldsATailscaleAddress() {
         val hosts =
-            listOf("100.101.102.103", "pc.tail1234.ts.net", "128.0.0.1", "127.0.0", "1270.0.0.1")
+            listOf(
+                "100.101.102.103",
+                "pc.tail1234.ts.net",
+                "128.0.0.1",
+                "127.0.0",
+                "1270.0.0.1",
+                "127.0.0.256",
+            )
         hosts.forEach { host ->
             assertEquals(TAILSCALE_OFF, tailnetRefusal(host, null), host)
             assertEquals(TAILSCALE_OFF, tailnetRefusal(host, emptyList()), host)

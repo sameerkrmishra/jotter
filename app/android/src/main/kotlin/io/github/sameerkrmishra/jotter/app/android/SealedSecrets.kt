@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
 import java.security.GeneralSecurityException
 import java.security.ProviderException
 import java.util.Base64
@@ -208,8 +209,9 @@ internal class SealedFileSecretStore(
                     "secrets" to JsonObject(secrets.mapValues { JsonPrimitive(it.value) }),
                 ),
             ).toString()
-        file.parentFile?.mkdirs()
-        val temporary = File(file.parentFile, ".${file.name}.${UUID.randomUUID()}")
+        val folder = file.toPath().toAbsolutePath().parent
+        Files.createDirectories(folder)
+        val temporary = File(folder.toFile(), ".${file.name}.${UUID.randomUUID()}")
         try {
             FileOutputStream(temporary).use { out ->
                 out.write(text.encodeToByteArray())
