@@ -235,8 +235,9 @@ last-writer-wins fields merge by the rules above. Body and title come from the
 head with the higher stamp, so every device picks the same one. The merge
 records that it is conflicted and which parent lost. Every device that applies
 it stores the losing text in `conflict`. The UI shows a badge and offers "keep
-mine", "keep theirs", "keep both as separate notes" or "edit merged text"
-(side-by-side, with conflict markers pre-filled). New edits while the conflict
+the shown version", "keep the other version", "keep both as separate notes" or
+"combine by hand" (both versions in full, where they differ, and the text with
+conflict markers pre-filled; see `app/shared-ui`). New edits while the conflict
 is open take the conflicted merge as parent. Resolving creates a user revision
 on top of the head that descends from the conflicted merge. It names the
 conflicted merge it resolves, so other devices learn the conflict is closed.

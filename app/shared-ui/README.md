@@ -7,7 +7,7 @@ that the CLI could want does not belong here.
 
 ```kotlin
 val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-val app = AppViewModel(store.notes, scope, Dispatchers.IO)
+val app = AppViewModel(store.notes, ConflictResolver(store), scope, Dispatchers.IO)
 JotterApp(app) // in a window
 // When the user closes it:
 app.requestExit { exit() } // saves first, and asks if that fails
@@ -15,7 +15,8 @@ app.requestExit { exit() } // saves first, and asks if that fails
 scope.coroutineContext.job.cancelAndJoin() // before store.close()
 ```
 
-**Dependency rule:** depends on `core:storage`. Only `app/*` may depend on it.
+**Dependency rule:** depends on `core:storage` and `core:sync`, and on `core:sync`'s
+public API alone. Only `app/*` may depend on it.
 
 ## What is here
 
@@ -26,6 +27,9 @@ scope.coroutineContext.job.cancelAndJoin() // before store.close()
 | `CannotOpenNotes` | What an app shows instead if the database could not be opened |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
 | `EditorViewModel`, `EditorScreen` | The text editor with its Markdown preview, and adding and removing tags |
+| `AttentionViewModel` | The notes that sync left something on, from `ConflictResolver`'s three lists: open conflicts, hidden heads and text that does not count |
+| `ReviewViewModel`, `ReviewScreen`, `ReviewParts` | The review of one such note: what happened in plain words, every text in full, and the answers |
+| `regionsOf` | Where two conflicting versions agree and where they differ, read back from core:sync's marked text |
 | `parseMarkdown`, `MarkdownDocument` | The `markdown` package: a note's text as plain blocks and spans, with no Compose in it |
 | `MarkdownPreview` | Those blocks on screen, with tappable task checkboxes |
 
@@ -114,6 +118,34 @@ not worth it for six lines.
   | 1 MB checklist | 1 M | 936 ms |
   | 1 MB table | 1 M | 1.6 s |
 
+- **What sync leaves for the user.** `ConflictResolver` lists open conflicts,
+  hidden heads (edits a note does not show yet) and text that does not count, and
+  core:sync's README says the UI must show all three. So a note with any of them is
+  marked on its card ("Needs attention: conflicting edits") and in the editor, and the
+  "Needs attention" view, beside Notes, Archive and Trash, lists every one, also a note
+  that has left the list because none of its text counts. Pins, archiving, tags and a
+  deletion beside an edit merge by themselves (PLAN.md §5), so they show nothing.
+  The review of a note shows, in plain words without sync's terms:
+
+  | What core:sync reports | What the user sees | What they can do |
+  |---|---|---|
+  | An open conflict | Both versions in full, and where they differ in two colours | Keep the shown version, keep the other, keep both as separate notes, or combine by hand from core:sync's text with conflict markers |
+  | A hidden head, `MISSING_ANCESTOR` | The shown version and the waiting edit, and that earlier changes have not arrived | The same four, through `settleHidden`, or wait for the next sync |
+  | A hidden head, `OPEN_CONFLICT` | The waiting edit's text, which merges once the conflict is resolved | Nothing: `settleHidden` refuses it |
+  | Text that does not count: `BAD_HISTORY`, `MALFORMED`, `ID_COLLISION` | The text, and why sync does not use it: another device's clock or software was wrong, it arrived damaged, or two versions of one change arrived | Save it as a new note. It stays listed, as core:sync has no way to dismiss it |
+
+  Each answer is one call to `ConflictResolver`, which writes one revision; the
+  editor has no undo, so neither has this. Every text stays on screen until that
+  call has worked, and a combined text stays if it fails. Back asks before dropping
+  a combined text the user typed in. Opening the review from the editor saves the
+  draft first, so that the review shows it. A segment that could not be read is not
+  about one note, and waits for the backend screens of M4.
+- **Conflict regions.** `ConflictDetails` gives the merged text with conflict
+  markers, which core:merge makes for a person and not to be parsed. `regionsOf` reads
+  it back all the same, as each line between markers comes from one version: if
+  neither version has a line that looks like a marker, every marker line is one. If one
+  does, the review shows the marked text as it is, and both versions in full as always.
+  The marker labels are core:sync's, and `ReviewScreenTest` fails if they change.
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
   or until dismissed. A failed read keeps what the list showed.
@@ -126,6 +158,12 @@ dispatcher, on virtual time; `JotterAppTest` runs the real screens with `runComp
 needs no display, and real IO threads, including the stale edit. `MarkdownParserTest` and
 `TaskToggleTest` need no Compose, and the latter has the property test of the toggle;
 `MarkdownPreviewTest` and `JotterPreviewTest` run the renderer and the editor's preview
-with `runComposeUiTest`. The tests for a
+with `runComposeUiTest`. `ReviewViewModelTest`
+and `ReviewScreenTest` make every state with core:sync itself: `SyncWorld` syncs the app's
+store with a second real database through `InMemoryBlobStore`, holds a file back from the
+app's listing to make an edit wait, and writes a faulty device's segment by hand for text
+that does not count. Nothing of the sync engine is mocked.
+`twoDevicesConvergeOnWhatTheUserCombined` answers a conflict on screen and syncs, and both
+devices then hold the same note and no conflict. The tests for a
 locked database hold a real lock, so each waits out the 5 s busy timeout. Android
 host tests are disabled, as in `core:storage`.
