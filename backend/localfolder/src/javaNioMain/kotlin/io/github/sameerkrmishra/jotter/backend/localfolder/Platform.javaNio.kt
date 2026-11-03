@@ -109,6 +109,8 @@ private fun fileStoreType(path: Path): String =
         Files.getFileStore(nio(path.parent ?: path)).type()
     } catch (_: IOException) {
         ""
+    } catch (_: SecurityException) {
+        "" // Android's java.nio has no file stores: getFileStore always throws this.
     }
 
 /**

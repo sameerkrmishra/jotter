@@ -38,6 +38,7 @@ The reasons behind these are recorded in [docs/adr/](docs/adr/README.md).
 |---|---|
 | `./gradlew check` | Compiles, runs all tests (JVM, Android host and Kotlin/Native `linuxX64`), Android Lint, ktlint, detekt and the 95% coverage gate |
 | `./gradlew ktlintFormat` | Reformats Kotlin sources to the project style |
+| `./gradlew connectedAndroidDeviceTest` | Runs the shared modules' tests on every connected Android device or emulator (`ANDROID_SERIAL=emulator-5554` picks one). Not part of `check` |
 
 The coverage gate is the root project's `koverVerifyCoverage` task, which `check`
 runs. The plain `koverVerify` tasks have no rule and always pass, so do not use
@@ -50,7 +51,9 @@ Its `check` job is the required status check for merging. Beside it, the
 `simulate` job runs the sync simulator over 3000 seeds, more than `check` does
 (see [core/sync/README.md](core/sync/README.md)), and the `webdav` job runs
 `backend/webdav` against real WebDAV servers in containers
-(see [backend/webdav/README.md](backend/webdav/README.md)). They are not required
+(see [backend/webdav/README.md](backend/webdav/README.md)), and the
+`android-device` job runs `connectedAndroidDeviceTest` on API 26 and API 36
+emulators. They are not required
 checks, so look at them before merging: a pull request needs them green too. The desktop module
 exists, but CI does not build its distributable yet. The APK joins CI in M5.
 
@@ -81,6 +84,10 @@ exists, but CI does not build its distributable yet. The APK joins CI in M5.
   devices with random offline edits and check that they always converge.
 - Compose UI is covered with Compose UI tests. Android code that needs the
   framework uses Robolectric.
+- A shared module whose behaviour depends on the platform (SQLite, files,
+  sockets) applies `jotter.android-device-test`, so its tests also run on
+  Android emulators. Before running them locally, start an emulator yourself
+  (for example `emulator -avd <name> -no-window`); they need no other setup.
 - Never use real user data in tests or fixtures. Use synthetic data.
 
 ## Commit messages

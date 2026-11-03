@@ -1,6 +1,7 @@
 plugins {
     id("jotter.kmp-library")
     id("jotter.quality")
+    id("jotter.android-device-test")
 }
 
 kotlin {
@@ -42,6 +43,12 @@ val liveExcluded =
         .get()
         .split(',')
         .filter { it.isNotBlank() }
+
+// A device has no route to the containers, so the live tests never run there. The filter below
+// does not reach the device test task, which is not an AbstractTestTask.
+deviceTest {
+    runnerArguments["notPackage"] = "io.github.sameerkrmishra.jotter.backend.webdav.live"
+}
 
 tasks.withType<AbstractTestTask>().configureEach {
     liveVariables.forEach { name ->

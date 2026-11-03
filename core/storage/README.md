@@ -295,4 +295,9 @@ random edits and deletions. `ClockTest` also opens two stores on one file, as
 the app and the CLI do, and writes from both, in turn and concurrently.
 
 Android host tests are disabled, as in `core:sqlite`: the Android artifact of
-`sqlite-bundled` contains SQLite only for device ABIs.
+`sqlite-bundled` contains SQLite only for device ABIs. The same tests run on
+Android devices instead (`connectedAndroidDeviceTest`, in CI on API 26 and 36).
+There, `SavedSchemaMigrationTest` also opens every saved schema
+(`databases/N.db`) through the app's open path, and checks that it migrates to the
+schema of a new database with the device's SQLite, as `verifyMigrations` does on
+the host.

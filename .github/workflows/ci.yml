@@ -105,6 +105,72 @@ jobs:
           path: core/sync/build/test-results/jvmTest/
           retention-days: 7
 
+  # The shared modules' tests on Android emulators, at minSdk and compileSdk (PLAN.md §8): the
+  # bundled SQLite, the Android file system and network stack, which the JVM jobs cannot reach.
+  # On every pull request: the repository is public, so runner minutes cost nothing, and both
+  # API levels together finish well before `check`, so a pull request waits no longer.
+  android-device:
+    name: android-device (API ${{ matrix.api-level }})
+    runs-on: ubuntu-latest
+    # Measured 2026-11-03 on the first run: 11.5 minutes on API 26 and 8 on API 36, of which
+    # building the test APKs took 3.5 to 5 and the emulator with the tests 4.5 to 6.5.
+    timeout-minutes: 25
+    strategy:
+      # Both API levels report, even when one fails.
+      fail-fast: false
+      matrix:
+        api-level: [26, 36]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+
+      # The emulator needs hardware acceleration, and the runner's user may not open /dev/kvm.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Builds the test APKs before the emulator starts, so that its time goes to the tests.
+      - run: ./gradlew assembleAndroidDeviceTest
+
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: default
+          arch: x86_64
+          cores: 3
+          ram-size: 3072M
+          disk-size: 4096M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          # --continue: every module reports, not only the first that fails.
+          script: ./gradlew connectedAndroidDeviceTest --continue
+
+      # A runner argument that filtered out every test of a module would pass silently.
+      - if: ${{ !cancelled() }}
+        run: .github/scripts/device-test-results.sh
+
+      - if: ${{ !success() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: device-test-results-api-${{ matrix.api-level }}
+          path: |
+            **/build/outputs/androidTest-results/
+            **/build/reports/androidTests/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # backend:webdav against real WebDAV servers in containers (lighttpd, Apache, rclone), beside
   # `check`, which tests it against an in-memory server only (backend/webdav/README.md). The runner
   # has Docker. The script pins the images by digest and fails unless every live test class ran.

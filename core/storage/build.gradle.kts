@@ -1,6 +1,7 @@
 plugins {
     id("jotter.kmp-library")
     id("jotter.quality")
+    id("jotter.android-device-test")
     alias(libs.plugins.sqldelight)
 }
 
@@ -49,6 +50,8 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.okio)
         }
+        // The saved schemas, for SavedSchemaMigrationTest on the device.
+        getByName("androidDeviceTest").resources.srcDir("src/commonMain/sqldelight/databases")
     }
 }
 

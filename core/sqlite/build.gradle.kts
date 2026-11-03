@@ -1,18 +1,11 @@
 plugins {
     id("jotter.kmp-library")
     id("jotter.quality")
+    // The shared tests also run on Android devices: connectedAndroidDeviceTest. See README.md.
+    id("jotter.android-device-test")
 }
 
 kotlin {
-    android {
-        // The shared tests (commonTest) also run on an Android device or emulator:
-        // ./gradlew :core:sqlite:connectedAndroidDeviceTest. Not part of `check`, because CI has no
-        // emulator. See README.md.
-        withDeviceTestBuilder { sourceSetTreeName = "test" }.configure {
-            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        }
-    }
-
     sourceSets {
         commonMain.dependencies {
             // SqlDriver and SqlSchema appear in this module's public API.
@@ -25,9 +18,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.okio)
             implementation(libs.sqldelight.coroutines.extensions)
-        }
-        getByName("androidDeviceTest").dependencies {
-            implementation(libs.androidx.test.runner)
         }
     }
 }
