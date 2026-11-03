@@ -112,8 +112,9 @@ jobs:
   android-device:
     name: android-device (API ${{ matrix.api-level }})
     runs-on: ubuntu-latest
-    # Locally, with the test APKs built, the tests took 5 minutes on API 26 and 8 on API 36.
-    timeout-minutes: 40
+    # Measured 2026-11-03 on the first run: 11.5 minutes on API 26 and 8 on API 36, of which
+    # building the test APKs took 3.5 to 5 and the emulator with the tests 4.5 to 6.5.
+    timeout-minutes: 25
     strategy:
       # Both API levels report, even when one fails.
       fail-fast: false
