@@ -33,11 +33,10 @@ line or exception message that mentions one by mistake does not give it away; on
 `reveal()` returns it. Removing a backend deletes its secrets.
 
 **The code depends on the `SecretStore` interface in `app:sync`**: `read`, `write`,
-`delete`, failing with `SecretStoreException`. Tests use an in-memory double. M4's
-local folders need no secret, so the apps get `NoSecretStore`, which holds nothing and
-refuses to store anything. The WebDAV and PC hub tasks add the Linux store below, give
-it to `BackendManager` in place of `NoSecretStore`, and read their secret from it in
-their branch of the backend factory.
+`delete`, failing with `SecretStoreException`. Tests use an in-memory double.
+`NoSecretStore` holds nothing and refuses to store anything. The desktop app and the
+CLI give `BackendManager` and the backend factory the Linux stores below, from
+`linuxSecretStores`, and the WebDAV and PC hub backends read their secret from them.
 
 **On Linux the default is the Secret Service** (the freedesktop `org.freedesktop.secrets`
 D-Bus API), which GNOME Keyring, KWallet (`ksecretd`) and KeePassXC provide. Jotter
@@ -75,9 +74,9 @@ the keyring reports no bus, no provider or no `secret-tool`; a keyring that refu
 otherwise, such as a dismissed unlock prompt, is an error and offers nothing.
 
 **This record was a design until a backend needed a secret.** The Secret Service store
-and the file are built, with their tests, by the first of WebDAV and the PC hub to
-need them, and must follow this record; until then only the interface, the test
-double and `NoSecretStore` exist.
+and the file were built, with their tests, for WebDAV, the first backend to need them,
+and the PC hub uses them too. Before that, only the interface, the test double and
+`NoSecretStore` existed, and the apps passed `NoSecretStore`.
 
 ## Consequences
 

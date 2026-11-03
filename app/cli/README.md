@@ -215,7 +215,8 @@ the same file: steps 2 to 4 are `linuxDatabasePath` in `core:storage`.
   failures into messages. `Main.kt` holds only `main()`, excluded from the
   coverage gate in `jotter.root`.
 - **Sync.** `SyncCommands.kt` builds an `app:sync` `BackendManager` for the one
-  command that needs it, with `NoSecretStore`, as folders need no secrets
+  command that needs it, with `app:sync`'s `linuxSecretStores`: the keyring through
+  `secret-tool`, or the file that `--password-in-file` chooses
   ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)), and runs it on the
   command's own thread with `runBlocking`. `jotter add` runs none of it.
 - **`clikt-core`, not `clikt`.** The usual `CliktCommand` prints through the Mordant
