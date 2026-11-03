@@ -104,9 +104,10 @@ class TwoAppsEndToEndTest {
             .single()
             .lastAttempt
 
-    /** The segment files on the stick, of every device. */
-    // Not Files.walk: a sync renames temporary files meanwhile, and that walk fails on one that
-    // went between listing and looking at it.
+    /**
+     * The segment files on the stick, of every device. Not `Files.walk`: a sync renames temporary
+     * files meanwhile, and that walk fails on one that went between listing and looking at it.
+     */
     private fun segments(): Int =
         stick.toFile().walkTopDown().count { it.name.endsWith(".json.gz") }
 
