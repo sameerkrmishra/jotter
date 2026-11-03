@@ -11,6 +11,7 @@ dependencies {
     kover(projects.core.merge)
     kover(projects.backend.api)
     kover(projects.backend.localfolder)
+    kover(projects.backend.peer)
     kover(projects.backend.webdav)
     kover(projects.core.model)
     kover(projects.core.sqlite)
@@ -18,4 +19,5 @@ dependencies {
     kover(projects.core.sync)
     kover(projects.interop.keepImport)
     kover(projects.interop.markdownExport)
+    kover(projects.server)
 }

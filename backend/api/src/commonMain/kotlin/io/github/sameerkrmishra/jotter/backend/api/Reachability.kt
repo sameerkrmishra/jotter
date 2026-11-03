@@ -30,8 +30,8 @@ public enum class UnreachableReason {
     NOT_INITIALIZED,
 
     /**
-     * The store refused the credentials, for example a wrong or revoked app password. Trying again
-     * does not help until the user changes them.
+     * The store refused the credentials: a wrong or revoked WebDAV app password, or the token of a
+     * device that the PC hub unpaired. Trying again does not help until the user changes them.
      */
     UNAUTHORIZED,
 

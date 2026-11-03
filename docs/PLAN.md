@@ -142,7 +142,7 @@ Each module has one job and a small public API. Internal details are marked
 | License | Apache-2.0 | Free use; attribution required via LICENSE + NOTICE; patent grant |
 | UI | Compose Multiplatform | One UI codebase for Android and Linux |
 | DB | SQLDelight + bundled SQLite (FTS5) | §2 |
-| HTTP | Ktor client and server | KMP-native, used for WebDAV, peer and server |
+| HTTP | Ktor client; JDK sockets and Ktor's HTTP parser for the hub ([ADR-0015](adr/0015-pc-hub-peer-protocol.md)) | KMP-native, used for WebDAV, peer and server |
 | Serialization | kotlinx.serialization (JSON) | Readable change files, easy to debug |
 | Markdown | JetBrains `markdown` parser + a Compose renderer | KMP, maintained |
 | DI | Manual constructor injection with one composition root per app | Easiest to read. No framework to learn |
@@ -344,7 +344,10 @@ The Linux desktop app can run an optional **peer server** (the `server` module,
 embedded or as a systemd user service). It exposes a BlobStore over HTTP, backed
 by a folder on the PC, and is reachable over Tailscale. The phone adds it as a
 backend like any other. If the PC is off, the phone keeps working, and both
-converge on the next successful sync.
+converge on the next successful sync. The PC's own sync uses the same folder as a
+local folder backend. Protocol, per-device tokens, the address rule that stands in
+for TLS, limits and how it runs:
+[ADR-0015](adr/0015-pc-hub-peer-protocol.md).
 
 ### 6.5 Adding and removing backends
 
@@ -408,7 +411,8 @@ records the codec, and a backend with another version's format file is left alon
   (M3); 0012 [local folder publishing](adr/0012-local-folder-publishing.md) (M3);
   0013
   [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
-  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0016
+  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0015
+  [the PC as hub](adr/0015-pc-hub-peer-protocol.md), 0016
   [where backend secrets live](adr/0016-where-secrets-live.md) and 0017
   [the WebDAV backend](adr/0017-webdav-backend.md) (M4).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
