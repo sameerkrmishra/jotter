@@ -41,3 +41,20 @@ kotlin {
 tasks.named { it == "testAndroidHostTest" }.configureEach {
     enabled = false
 }
+
+// The PC's half of the Android app's end-to-end test (app/android/scripts/hub-e2e.sh), in the
+// package `e2e`, runs only when that script sets JOTTER_HUB_E2E_DIR, and then alone. The directory
+// is a task input, so a result is never taken from the cache for another run.
+val hubEndToEnd = providers.environmentVariable("JOTTER_HUB_E2E_DIR").orNull
+
+tasks.withType<AbstractTestTask>().configureEach {
+    inputs.property("JOTTER_HUB_E2E_DIR", hubEndToEnd.orEmpty())
+    filter.run {
+        isFailOnNoMatchingTests = false
+        if (hubEndToEnd != null) {
+            includeTestsMatching("*.app.sync.e2e.*")
+        } else {
+            excludeTestsMatching("*.app.sync.e2e.*")
+        }
+    }
+}

@@ -44,6 +44,7 @@ class SyncWorkerTest {
     private val calls = AtomicInteger()
     private val test = TestGraph { secrets -> watching(StandardBackendFactory(secrets)) }
     private val stick = File(test.folder, "stick").apply { mkdirs() }
+
     // Not beside the folder: a backend may not be in a database's folder (app:sync).
     private val peerFolder = File("${test.folder.path}-peer").apply { mkdirs() }
     private val peerFile = File(peerFolder, "peer.db")
