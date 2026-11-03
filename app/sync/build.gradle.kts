@@ -5,6 +5,11 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Not "sync", like core:sync's: the CLI's distribution puts both jars in one directory.
+base {
+    archivesName = "app-sync"
+}
+
 kotlin {
     sourceSets {
         commonMain.dependencies {
