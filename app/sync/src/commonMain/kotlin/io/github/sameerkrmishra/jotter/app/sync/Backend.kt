@@ -44,6 +44,12 @@ public enum class Outcome {
     /** It ran to its end. It may still have [Attempt.issues]. */
     SYNCED,
 
+    /**
+     * The cycle ran to its end, but some files the backend listed could not be read, so this
+     * device may lack changes that are there. Not a success: it is tried again soon.
+     */
+    INCOMPLETE,
+
     /** The backend could not be reached, so nothing was read or written. */
     UNREACHABLE,
 

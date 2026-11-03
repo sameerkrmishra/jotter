@@ -71,7 +71,12 @@ syncs it.
   description, recorded in the `backend` table with the time. The last success is kept
   apart, so a backend that fails now still shows when it last synced. Issues from
   `SyncReport` (damaged, missing, unreadable or newer files, too large changes, clock
-  drift) are stored as plain sentences.
+  drift) are stored as plain sentences. Only `SYNCED` counts as a success and moves the
+  last success on. A cycle that ran to its end while some listed files could not be read
+  (`UNREADABLE`) is `INCOMPLETE`: changes may be missing, so it is retried like a
+  failure. Damaged, missing and newer files stay reported on every cycle
+  ([ADR-0014](../../docs/adr/0014-sync-failure-handling.md)) and a retry cannot change
+  them, so they do not hold the success back.
 - **Never empty, never synced by mistake.** `describe(Reachability)` never says or
   implies that a store is empty, and status always pings the backend afresh, so a
   missing folder or an empty mount point shows as such, beside the time of the last

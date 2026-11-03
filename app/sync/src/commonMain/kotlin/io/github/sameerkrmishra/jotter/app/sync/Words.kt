@@ -32,7 +32,18 @@ public fun describe(reachability: Reachability): String =
 /** How a sync ended, and what it did, in plain words. */
 internal fun describe(result: SyncResult): Pair<Outcome, String> =
     when (result) {
-        is SyncResult.Completed -> Outcome.SYNCED to "Synced. ${describe(result.report)}"
+        is SyncResult.Completed -> {
+            // A file listed and not read means changes may be missing: never call that synced.
+            val unread = result.report.issues.count(::isUnreadable)
+            if (unread == 0) {
+                Outcome.SYNCED to "Synced. ${describe(result.report)}"
+            } else {
+                Outcome.INCOMPLETE to
+                    "Not fully synced: ${files(unread)} could not be read, so what is in " +
+                    "${if (unread == 1) "it" else "them"} has not arrived. It is tried again " +
+                    "soon. ${describe(result.report)}"
+            }
+        }
         is SyncResult.Unreachable -> Outcome.UNREACHABLE to describe(result.reachability)
         is SyncResult.Incompatible ->
             Outcome.INCOMPATIBLE to
@@ -51,6 +62,10 @@ private fun describe(report: SyncReport): String {
         else -> "Received ${changes(received)}, sent ${files(sent)}."
     }
 }
+
+/** A file the backend listed and could not give, which a later try may well read. */
+private fun isUnreadable(issue: SyncIssue): Boolean =
+    issue is SyncIssue.SegmentNotApplied && issue.problem == SegmentProblem.UNREADABLE
 
 private fun changes(count: Int) = if (count == 1) "1 change" else "$count changes"
 

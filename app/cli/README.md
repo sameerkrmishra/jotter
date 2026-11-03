@@ -107,7 +107,7 @@ and `search` print nothing when nothing matches.
 | `export` | `exported`, tab, count |
 | `conflicts` | `ID`, tab, `KIND`, tab, summary, one line per item. `KIND` is `conflict`, `waiting` (an earlier change has not arrived), `waiting-for-conflict` or `set-aside` |
 | `conflicts ID` | For each version, the headers `kind:`, `version:` (`shown`, `other`, `waiting`, or for set-aside text `bad-history`, `damaged`, `collision`), `title:`, a blank line and the body, with a blank line between versions. For people, not scripts: a body can hold anything |
-| `sync` | `ID`, tab, `NAME`, tab, `OUTCOME`, tab, a description for people. `OUTCOME` is `synced`, `unreachable`, `interrupted`, `incompatible`, `unsupported` or `failed` |
+| `sync` | `ID`, tab, `NAME`, tab, `OUTCOME`, tab, a description for people. `OUTCOME` is `synced`, `incomplete` (some files could not be read), `unreachable`, `interrupted`, `incompatible`, `unsupported` or `failed` |
 | `backends` | `ID`, tab, `NAME`, tab, `LOCATION`, tab, last success (a time, or `never`), tab, outcome of the last sync (as for `sync`, or `never`) |
 | `backends add` | `ID` |
 | `backends remove` | One sentence that says where the files stay |

@@ -281,6 +281,79 @@ class BackendManagerTest {
         }
 
     @Test
+    fun filesThatCouldNotBeReadAreNoSuccess() =
+        test {
+            val shared = InMemoryBlobStore()
+            var readable = false
+            // What device a sees: the store, except that segments cannot be read, as
+            // in a folder whose permissions changed in the middle of a pull.
+            val seen =
+                object : BlobStore by shared {
+                    override suspend fun read(path: String): ByteArray {
+                        val segment = path.endsWith(".json.gz")
+                        if (!readable &&
+                            segment
+                        ) {
+                            throw BlobStoreFailureException("permission denied")
+                        }
+                        return shared.read(path)
+                    }
+                }
+            Device(this, "b", factory = NamedStores(mapOf("mem" to shared))).use { b ->
+                b.store.backends.add(record("mem"))
+                b.store.notes.create("", "milk")
+                assertEquals(
+                    Outcome.SYNCED,
+                    b.manager
+                        .syncAll()
+                        .single()
+                        .attempt.outcome,
+                )
+            }
+            Device(this, "a", factory = NamedStores(mapOf("mem" to seen))).use { a ->
+                a.store.backends.add(record("mem"))
+                val first =
+                    a.manager
+                        .syncAll()
+                        .single()
+                        .attempt
+                assertEquals(Outcome.INCOMPLETE, first.outcome)
+                assertTrue(first.detail.startsWith("Not fully synced: 1 file could not be read"))
+                assertTrue(first.issues.single().contains("could not be read"))
+                assertNull(
+                    a.manager
+                        .list()
+                        .single()
+                        .lastSuccessAt,
+                )
+                assertEquals(emptyList(), a.store.notes.list())
+
+                readable = true
+                a.clock.millis += 1_000
+                val second =
+                    a.manager
+                        .syncAll()
+                        .single()
+                        .attempt
+                assertEquals(Outcome.SYNCED, second.outcome)
+                assertEquals(
+                    second.at,
+                    a.manager
+                        .list()
+                        .single()
+                        .lastSuccessAt,
+                )
+                assertEquals(
+                    "milk",
+                    a.store.notes
+                        .list()
+                        .single()
+                        .body,
+                )
+            }
+        }
+
+    @Test
     fun aBackendThatFailsPartWayIsInterrupted() =
         test {
             val blobs =
