@@ -106,6 +106,7 @@ jotter/
 ├── app/
 │   ├── shared-ui/      # Compose Multiplatform screens and view models
 │   ├── android/        # Activity, Share target, WorkManager sync
+│   ├── sync/           # backend list and config, add/remove, status, sync scheduling
 │   ├── desktop/        # Compose Desktop entry point, Linux packaging
 │   └── cli/            # Clikt-based CLI
 └── server/             # Ktor: peer BlobStore endpoint (web app API later)
@@ -181,12 +182,14 @@ Local SQLite tables (simplified; the schema is in `core/storage`):
 - `device`: this device's id and name, and the last timestamp of its hybrid
   logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
-- `backend`: configured backends and their settings.
+- `backend`: configured backends, their settings (never a secret,
+  [ADR-0015](adr/0015-where-secrets-live.md)) and the outcome of their last sync.
 - `sync_read`: per backend, the files read in each device folder.
 - `sync_segment`, `backend_revision`: this device's segments on each backend, and
   the revisions known to be there.
 
-Schema version 2 (M3) adds these, except `backend`, which M4 adds.
+Schema version 2 (M3) adds these, except `backend`, which schema version 3 (M4)
+adds.
 
 "Delete forever" from trash writes a tombstone revision so the deletion syncs.
 Tombstones stay until log compaction (deferred).
@@ -323,8 +326,10 @@ files, which are both read
 
 Sync runs on app start, after edits (debounced), and periodically: on Android
 via WorkManager (15 min minimum, network-constrained), on desktop via a
-coroutine timer. Each backend syncs independently, and a backend that can't be
-reached is skipped and retried with backoff.
+coroutine timer (`app:sync`'s `SyncScheduler`: 5 s after edits stop, every 5
+minutes, and when the user asks). Each backend syncs independently, and a
+backend that fails is skipped and retried with backoff (30 s, doubling up to
+30 minutes), except when the user asks. The CLI syncs once with `jotter sync`.
 
 ### 6.4 The PC as hub
 
@@ -337,9 +342,11 @@ converge on the next successful sync.
 ### 6.5 Adding and removing backends
 
 - **Add:** a new backend is seeded by pushing the device's full revision
-  history, then syncs normally.
-- **Remove:** stops syncing and deletes the local sync records. Remote files stay
-  unless the user explicitly chooses "also delete remote data".
+  history, then syncs normally. A local folder that is not a Jotter store yet is
+  set up only after the user agrees (ADR-0012).
+- **Remove:** stops syncing and deletes the local sync records. Remote files stay.
+  v1 has no "also delete remote data": the user deletes them by hand, which the
+  app and the CLI say when removing.
 
 ### 6.6 Future encryption seam
 
@@ -393,7 +400,8 @@ codec. Documented as ADR-0007 in M6.
   (M3); 0012 [local folder publishing](adr/0012-local-folder-publishing.md) (M3);
   0013
   [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
-  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3).
+  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0015
+  [where backend secrets live](adr/0015-where-secrets-live.md) (M4).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.
