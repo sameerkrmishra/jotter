@@ -4,8 +4,16 @@ import com.github.ajalt.clikt.core.Context
 import com.github.ajalt.clikt.core.CoreCliktCommand
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.options.option
+import io.github.sameerkrmishra.jotter.app.sync.SecretStores
+import io.github.sameerkrmishra.jotter.app.sync.linuxSecretStores
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
+import java.io.Console
 import java.io.InputStream
+import kotlin.coroutines.EmptyCoroutineContext
+
+/** The secret stores of this user, by ADR-0016: the keyring, or the file they chose. */
+private fun linuxStores(readEnvvar: (String) -> String?): SecretStores =
+    linuxSecretStores(readEnvvar, System.getProperty("user.home"), EmptyCoroutineContext)
 
 /**
  * The root command and the CLI's composition root (ADR-0005): it builds the subcommands and finds
@@ -17,12 +25,22 @@ import java.io.InputStream
  * @param stdin Where `jotter add -` reads the note from.
  * @param argv The command line. Clikt no longer tells a command what it was, and `jotter add` must
  *   know whether it has a `--`.
+ * @param secrets Where backend secrets are kept, for the environment given. Tests replace it.
+ * @param terminal The terminal a password is read from, or null if there is none.
  */
 internal class JotterCommand(
     stdin: InputStream,
     argv: List<String>,
+    secrets: ((String) -> String?) -> SecretStores = ::linuxStores,
+    terminal: (() -> Console?)? = null,
 ) : CoreCliktCommand(name = "jotter") {
     private val location = DatabaseLocation()
+    private val sync =
+        SyncSetup(
+            location,
+            secrets,
+            if (terminal == null) Passwords(stdin) else Passwords(stdin, terminal),
+        )
 
     private val databaseOption by option(
         "--db",
@@ -39,8 +57,8 @@ internal class JotterCommand(
             SearchCommand(location),
             TagsCommand(location),
             ConflictsCommand(location),
-            SyncCommand(location),
-            BackendsCommand(location),
+            SyncCommand(sync),
+            BackendsCommand(sync),
             ImportCommand(location),
             ExportCommand(location),
         )
@@ -49,6 +67,7 @@ internal class JotterCommand(
     override fun help(context: Context): String = "Local-first notes, on the command line."
 
     override fun run() {
+        sync.readEnvvar = currentContext.readEnvvar
         location.path =
             databasePath(databaseOption, currentContext.readEnvvar, System.getProperty("user.home"))
     }

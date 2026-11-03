@@ -2,6 +2,10 @@ package io.github.sameerkrmishra.jotter.app.cli
 
 import com.github.ajalt.clikt.core.parse
 import com.github.ajalt.clikt.testing.test
+import io.github.sameerkrmishra.jotter.app.sync.Secret
+import io.github.sameerkrmishra.jotter.app.sync.SecretKey
+import io.github.sameerkrmishra.jotter.app.sync.SecretStore
+import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import java.io.InputStream
 import java.nio.file.Files
@@ -57,13 +61,17 @@ internal class JotterProcess(
     }
 }
 
-/** Runs the commands as `main()` does, against the database [file]. */
+/**
+ * Runs the commands as `main()` does, against the database [file], with backend secrets in
+ * [secrets] rather than this user's keyring or files.
+ */
 internal fun runJotter(
     args: List<String>,
     file: Path,
     input: InputStream = InputStream.nullInputStream(),
+    secrets: SecretStores = TestSecrets().stores,
 ): CliResult {
-    val command = JotterCommand(input, args)
+    val command = JotterCommand(input, args, { secrets }, { null })
     val stdout = StringBuilder()
     val stderr = StringBuilder()
     val result =
@@ -79,6 +87,31 @@ internal fun runJotter(
             command.parse(it)
         }
     return CliResult(stdout.toString(), stderr.toString(), result.statusCode)
+}
+
+/** Secrets in memory, in place of the keyring and of the file a user may choose. */
+internal class TestSecrets {
+    val keyring = MemorySecrets()
+    val file = MemorySecrets()
+    val stores = SecretStores(keyring, file, "/config/jotter/secrets.json")
+}
+
+/** A [SecretStore] in memory. */
+internal class MemorySecrets : SecretStore {
+    val secrets = mutableMapOf<SecretKey, Secret>()
+
+    override suspend fun read(key: SecretKey): Secret? = secrets[key]
+
+    override suspend fun write(
+        key: SecretKey,
+        secret: Secret,
+    ) {
+        secrets[key] = secret
+    }
+
+    override suspend fun delete(key: SecretKey) {
+        secrets.remove(key)
+    }
 }
 
 /** The text of a Takeout document with synthetic content. [more] holds further JSON members. */
