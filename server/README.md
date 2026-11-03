@@ -86,5 +86,9 @@ with real hubs on `127.0.0.1` and free ports:
 - `PeerHubTest`: lifecycle, a taken port, an unset store, pairing across restarts,
   damaged token files, and the address rule.
 
-Not tested: a real tailnet, an Android device, and a token file without read
-permission.
+`UnreadableTokenFileTest` (JVM only, as it needs `chmod`) checks that a token file
+the hub may not read stops it and is never replaced. A read keeps its transfer
+until its answer is sent; that is tested on `PeerHandler` alone, as a reader too
+slow to drain the sockets cannot be made reliably.
+
+Not tested: a real tailnet and an Android device.
