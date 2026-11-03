@@ -6,8 +6,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -16,11 +17,13 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import io.github.sameerkrmishra.jotter.app.sync.Backend
+import io.github.sameerkrmishra.jotter.app.sync.PeerConfig
 import io.github.sameerkrmishra.jotter.app.sync.WebDavConfig
 
 internal const val FOLDER_FIELD = "folder"
@@ -30,6 +33,15 @@ internal const val SERVER_PASSWORD_FIELD = "server-password"
 internal const val NEW_PASSWORD_FIELD = "new-password"
 internal const val ADD_SERVER = "Add server"
 internal const val NEW_PASSWORD = "Enter new password"
+internal const val HUB_ADDRESS_FIELD = "hub-address"
+internal const val HUB_TOKEN_FIELD = "hub-token"
+internal const val ADD_HUB = "Add PC hub"
+
+/** Where a hub's token may go, for the add form. */
+internal const val HUB_CLIENT_RULE: String =
+    "Enter the PC's Tailscale address or name, and the token it showed when you paired this " +
+        "device. Jotter sends the token only to a Tailscale address or to this machine, never " +
+        "to another network."
 internal const val BACKENDS_TITLE = "Sync"
 internal const val NO_BACKENDS =
     "This device syncs with no backend yet. Add a folder, such as a USB stick or a folder " +
@@ -45,7 +57,7 @@ internal fun BackendsScreen(
     onClose: () -> Unit,
 ) {
     Column(
-        Modifier.fillMaxSize().padding(spacing),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(spacing),
         verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
         Row(
@@ -62,22 +74,24 @@ internal fun BackendsScreen(
         backends.message?.let {
             Message(it) { TextButton(onClick = backends::dismissMessage) { Text("Dismiss") } }
         }
-        AddFolder(backends)
-        AddServer(backends)
         if (backends.backends.isEmpty()) Text(NO_BACKENDS)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(spacing)) {
-            items(backends.backends, key = { it.id }) { backend ->
+        backends.backends.forEach { backend ->
+            key(backend.id) {
                 BackendCard(
                     backend,
                     backends.statusOf(backend),
                     onRemove = { backends.askToRemove(backend) },
                     onPassword =
                         { backends.askForPassword(backend) }.takeIf {
-                            backend.config is WebDavConfig
+                            backend.config is WebDavConfig || backend.config is PeerConfig
                         },
                 )
             }
         }
+        AddFolder(backends)
+        AddServer(backends)
+        AddHub(backends)
+        backends.hub?.let { HubSection(it) }
     }
     backends.settingUp?.let { path ->
         AlertDialog(
@@ -134,15 +148,21 @@ private fun BackendsDialogs(backends: BackendsViewModel) {
         )
     }
     backends.changingPassword?.let { backend ->
+        val hub = backend.config is PeerConfig
         AlertDialog(
             onDismissRequest = backends::cancelPassword,
-            title = { Text(PASSWORD_TITLE) },
+            title = { Text(if (hub) "Enter a new pairing token" else PASSWORD_TITLE) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
                     Text(
-                        "Make a new app password for Jotter in the settings of " +
-                            "${backend.config.location}'s account, and enter it here. Jotter " +
-                            "checks it with the server before it keeps it.",
+                        if (hub) {
+                            "Pair this device again on the PC, and enter the token it shows. " +
+                                "Jotter checks it with the hub before it keeps it."
+                        } else {
+                            "Make a new app password for Jotter in the settings of " +
+                                "${backend.config.location}'s account, and enter it here. " +
+                                "Jotter checks it with the server before it keeps it."
+                        },
                     )
                     PasswordField(
                         backends.davPassword,
@@ -196,6 +216,127 @@ private fun AddServer(backends: BackendsViewModel) {
                     backends.davUser.isNotBlank() &&
                     backends.davPassword.isNotEmpty(),
         ) { Text(ADD_SERVER) }
+    }
+}
+
+@Composable
+private fun AddHub(backends: BackendsViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(spacing),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = backends.hubAddress,
+                onValueChange = { backends.editHub(address = it) },
+                modifier = Modifier.weight(1f).testTag(HUB_ADDRESS_FIELD),
+                label = { Text("PC hub address, such as 100.101.102.103") },
+                singleLine = true,
+            )
+            OutlinedTextField(
+                value = backends.hubToken,
+                onValueChange = { backends.editHub(token = it) },
+                modifier = Modifier.weight(1f).testTag(HUB_TOKEN_FIELD),
+                label = { Text("Pairing token") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
+            Button(
+                onClick = backends::addHub,
+                enabled =
+                    !backends.busy &&
+                        backends.hubAddress.isNotBlank() &&
+                        backends.hubToken.isNotBlank(),
+            ) { Text(ADD_HUB) }
+        }
+        Text(HUB_CLIENT_RULE, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Running the hub on this PC: on or off, its folder and address, pairing and unpairing. */
+@Composable
+private fun HubSection(hub: HubViewModel) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(spacing), verticalArrangement = Arrangement.spacedBy(spacing)) {
+            Text(HUB_TITLE, style = MaterialTheme.typography.titleMedium)
+            Text(
+                when (val state = hub.state) {
+                    HubState.Off -> "The hub is off."
+                    is HubState.Running -> "The hub is on, at ${state.address}."
+                    is HubState.Failed -> "The hub is not running: ${state.message}"
+                },
+            )
+            hub.message?.let {
+                Message(it) { TextButton(onClick = hub::dismissMessage) { Text("Dismiss") } }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = hub.folder,
+                    onValueChange = { hub.edit(folder = it) },
+                    modifier = Modifier.weight(2f).testTag(HUB_FOLDER_FIELD),
+                    label = { Text("Hub folder") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = hub.host,
+                    onValueChange = { hub.edit(host = it) },
+                    modifier = Modifier.weight(1f).testTag(HUB_HOST_FIELD),
+                    label = { Text("Listen on") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = hub.port,
+                    onValueChange = { hub.edit(port = it) },
+                    modifier = Modifier.weight(1f).testTag(HUB_PORT_FIELD),
+                    label = { Text("Port") },
+                    singleLine = true,
+                )
+                if (hub.state is HubState.Running) {
+                    Button(onClick = hub::turnOff, enabled = !hub.busy) { Text("Turn hub off") }
+                } else {
+                    Button(onClick = hub::turnOn, enabled = !hub.busy) { Text("Turn hub on") }
+                }
+            }
+            Text(HUB_ADDRESSES, style = MaterialTheme.typography.bodySmall)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = hub.deviceName,
+                    onValueChange = { hub.edit(deviceName = it) },
+                    modifier = Modifier.weight(1f).testTag(HUB_DEVICE_FIELD),
+                    label = { Text("Device to pair, such as Phone") },
+                    singleLine = true,
+                )
+                Button(
+                    onClick = hub::pair,
+                    enabled = !hub.busy && hub.deviceName.isNotBlank(),
+                ) { Text("Pair device") }
+            }
+            hub.devices.forEach { device ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Paired: ${device.name}", Modifier.weight(1f))
+                    TextButton(onClick = { hub.unpair(device) }) { Text("Unpair ${device.name}") }
+                }
+            }
+        }
+    }
+    hub.pairing?.let { pairing ->
+        AlertDialog(
+            onDismissRequest = hub::closePairing,
+            title = { Text(PAIRED_TITLE) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+                    Text(pairedExplanation(pairing.device.name))
+                    SelectionContainer { Text(pairing.token) }
+                }
+            },
+            confirmButton = { TextButton(onClick = hub::closePairing) { Text("Done") } },
+        )
     }
 }
 

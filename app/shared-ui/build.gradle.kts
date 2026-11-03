@@ -23,6 +23,10 @@ kotlin {
             implementation(libs.compose.ui)
             implementation(libs.markdown)
         }
+        jvmMain.dependencies {
+            // The PC hub runs inside the desktop app's JVM (ADR-0015). Not on Android.
+            implementation(projects.server)
+        }
         jvmTest.dependencies {
             implementation(projects.backend.api.contract)
             implementation(libs.androidx.sqlite)

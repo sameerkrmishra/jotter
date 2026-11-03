@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
@@ -31,6 +32,7 @@ import kotlin.time.Duration.Companion.minutes
 class SyncedDevice(
     name: String,
     val secrets: TestSecrets = TestSecrets(),
+    hubFolder: Path? = null,
 ) : AutoCloseable {
     private val database = TestDatabase()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -51,14 +53,30 @@ class SyncedDevice(
             manager::syncAll,
             SyncTiming(afterEdit = AFTER_EDIT_MS.milliseconds, period = 10.minutes),
         )
-    val controls = SyncControls(manager, scheduler)
+
+    /** The hub of this device, if [hubFolder] was given: on 127.0.0.1 and a free port. */
+    val hub: PeerHubControls? =
+        hubFolder?.let {
+            PeerHubControls(
+                manager,
+                it.resolve("hub.properties"),
+                it.resolve("hub-devices.json"),
+                scope,
+                Dispatchers.IO,
+                HubSettings(it.resolve("store").toString(), "127.0.0.1", 0),
+            )
+        }
+    val controls = SyncControls(manager, scheduler, hub)
 
     fun start() {
         scheduler.start(scope, store.notes.observeRevisionMark())
     }
 
     override fun close() {
-        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
+        runBlocking {
+            hub?.turnOff()
+            scope.coroutineContext.job.cancelAndJoin()
+        }
         store.close()
         database.delete()
     }

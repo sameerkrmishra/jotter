@@ -132,7 +132,8 @@ public class AppViewModel(
     internal fun openBackends() {
         val controls = sync ?: return
         backends?.close()
-        backends = BackendsViewModel(controls.manager, controls.scheduler, scope)
+        backends =
+            BackendsViewModel(controls.manager, controls.scheduler, scope, hub = controls.hub)
     }
 
     /** Closes the backend screen. */
@@ -165,8 +166,10 @@ public class AppViewModel(
  *
  * @property manager The backends.
  * @property scheduler Syncs with them, and at once when the user asks.
+ * @property hub The hub on this PC, or null where the app cannot run one.
  */
 public class SyncControls(
     public val manager: BackendManager,
     public val scheduler: SyncScheduler,
+    public val hub: HubControls? = null,
 )

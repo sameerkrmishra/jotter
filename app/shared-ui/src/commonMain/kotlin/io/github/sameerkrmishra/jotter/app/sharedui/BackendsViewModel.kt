@@ -87,9 +87,24 @@ internal class BackendsViewModel(
     private val scheduler: SyncScheduler,
     parent: CoroutineScope,
     private val clock: Clock = Clock.System,
+    hub: HubControls? = null,
 ) {
     // A child of the app's scope, so that close() stops this screen and nothing else.
     private val scope = CoroutineScope(parent.coroutineContext + Job(parent.coroutineContext[Job]))
+
+    /** The hub on this PC, if the app can run one. */
+    val hub: HubViewModel? = hub?.let { HubViewModel(it, scope) }
+
+    /** The PC hub's address the user is typing, to add it as a backend. */
+    var hubAddress by mutableStateOf("")
+        private set
+
+    /** The pairing token the user is typing. */
+    var hubToken by mutableStateOf("")
+        private set
+
+    // How to retry the add that met no keyring, with the file instead.
+    private var retryWithFile: (suspend () -> AddResult)? = null
 
     /** The backends, oldest first, with how their last sync went. */
     var backends by mutableStateOf(emptyList<Backend>())
@@ -238,7 +253,49 @@ internal class BackendsViewModel(
     fun usePasswordFile() {
         noKeyring ?: return
         noKeyring = null
-        addServer(setUpNewStore = setUpAsked, SecretPlace.FILE)
+        val retry = retryWithFile
+        if (retry == null) {
+            addServer(setUpNewStore = setUpAsked, SecretPlace.FILE)
+        } else {
+            addWith(retry)
+        }
+    }
+
+    /** The user typed in the hub form. */
+    fun editHub(
+        address: String = hubAddress,
+        token: String = hubToken,
+    ) {
+        hubAddress = address
+        hubToken = token
+    }
+
+    /** Adds the PC hub at [hubAddress] with [hubToken]. */
+    fun addHub() {
+        val address = hubAddress
+        val token = Secret(hubToken.trim())
+        retryWithFile = { manager.addPeer(address, token, secretPlace = SecretPlace.FILE) }
+        addWith { manager.addPeer(address, token) }
+    }
+
+    private fun addWith(add: suspend () -> AddResult) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            try {
+                reporting {
+                    val result = add()
+                    if (result is AddResult.Added) {
+                        hubAddress = ""
+                        hubToken = ""
+                        retryWithFile = null
+                    }
+                    added(result)
+                }
+            } finally {
+                busy = false
+            }
+        }
     }
 
     /** The user did not want the file. Nothing was added. */
@@ -254,6 +311,7 @@ internal class BackendsViewModel(
         place: SecretPlace,
     ) {
         if (busy) return
+        retryWithFile = null
         busy = true
         setUpAsked = setUpNewStore
         val password = Secret(davPassword)
