@@ -162,4 +162,9 @@ private fun EditorMessages(
         }
     }
     editor.message?.let { Message(it) {} }
+    editor.base?.let { app.attention.byNote[it.id] }?.let { attention ->
+        Message("This note needs attention: ${attention.label}.") {
+            TextButton(onClick = { app.openReview(attention.noteId) }) { Text("Review") }
+        }
+    }
 }

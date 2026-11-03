@@ -29,6 +29,7 @@ import io.github.sameerkrmishra.jotter.app.sharedui.markdown.MARKDOWN_PREVIEW
 import io.github.sameerkrmishra.jotter.app.sharedui.markdown.taskTag
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
+import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Runnable
@@ -56,7 +57,9 @@ class JotterPreviewTest {
         runComposeUiTest {
             setContent {
                 val scope = rememberCoroutineScope()
-                JotterApp(remember { AppViewModel(store.notes, scope, io) })
+                JotterApp(
+                    remember { AppViewModel(store.notes, ConflictResolver(store), scope, io) },
+                )
             }
             block(store.notes)
         }

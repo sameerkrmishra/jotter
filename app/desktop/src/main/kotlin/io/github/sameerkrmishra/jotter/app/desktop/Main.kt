@@ -8,6 +8,7 @@ import io.github.sameerkrmishra.jotter.app.sharedui.AppViewModel
 import io.github.sameerkrmishra.jotter.app.sharedui.CannotOpenNotes
 import io.github.sameerkrmishra.jotter.app.sharedui.JotterApp
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -66,7 +67,7 @@ private fun runApp(
     autoclose: Boolean,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    val app = AppViewModel(store.notes, scope, Dispatchers.IO)
+    val app = AppViewModel(store.notes, ConflictResolver(store), scope, Dispatchers.IO)
     application(exitProcessOnExit = false) {
         val close = { app.requestExit(::exitApplication) }
         Window(onCloseRequest = close, title = "Jotter") {

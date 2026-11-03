@@ -16,8 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalWindowInfo
 
 /**
- * The whole app, for a window or an Activity to show: the note grid, or the editor while a note is
- * open. Its state lives in [viewModel].
+ * The whole app, for a window or an Activity to show: the note grid, the editor while a note is
+ * open, or the review of a note's sync problems. Its state lives in [viewModel].
  */
 @Composable
 public fun JotterApp(viewModel: AppViewModel) {
@@ -25,10 +25,11 @@ public fun JotterApp(viewModel: AppViewModel) {
     MaterialTheme {
         Surface(Modifier.fillMaxSize()) {
             val editor = viewModel.editor
-            if (editor == null) {
-                NotesScreen(viewModel)
-            } else {
-                EditorScreen(editor, viewModel)
+            val review = viewModel.review
+            when {
+                review != null -> ReviewScreen(review, viewModel::closeReview)
+                editor != null -> EditorScreen(editor, viewModel)
+                else -> NotesScreen(viewModel)
             }
             if (viewModel.pendingExit != null) {
                 ConfirmExit(viewModel)

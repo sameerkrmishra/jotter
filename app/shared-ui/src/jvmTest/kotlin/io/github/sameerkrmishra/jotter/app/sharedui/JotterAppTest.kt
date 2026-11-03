@@ -36,6 +36,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.Highlighted
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
+import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.Dispatchers
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -62,7 +63,16 @@ class JotterAppTest {
             runComposeUiTest {
                 setContent {
                     val scope = rememberCoroutineScope()
-                    JotterApp(remember { AppViewModel(store.notes, scope, Dispatchers.IO) })
+                    JotterApp(
+                        remember {
+                            AppViewModel(
+                                store.notes,
+                                ConflictResolver(store),
+                                scope,
+                                Dispatchers.IO,
+                            )
+                        },
+                    )
                 }
                 block(store.notes)
             }
@@ -268,7 +278,12 @@ class JotterAppTest {
                     val scope = rememberCoroutineScope()
                     JotterApp(
                         remember {
-                            AppViewModel(store.notes, scope, Dispatchers.IO).also {
+                            AppViewModel(
+                                store.notes,
+                                ConflictResolver(store),
+                                scope,
+                                Dispatchers.IO,
+                            ).also {
                                 viewModel = it
                             }
                         },
@@ -495,8 +510,24 @@ class JotterAppTest {
                         var useSecond by mutableStateOf(false)
                         setContent {
                             val scope = rememberCoroutineScope()
-                            val one = remember { AppViewModel(first.notes, scope, Dispatchers.IO) }
-                            val two = remember { AppViewModel(second.notes, scope, Dispatchers.IO) }
+                            val one =
+                                remember {
+                                    AppViewModel(
+                                        first.notes,
+                                        ConflictResolver(first),
+                                        scope,
+                                        Dispatchers.IO,
+                                    )
+                                }
+                            val two =
+                                remember {
+                                    AppViewModel(
+                                        second.notes,
+                                        ConflictResolver(second),
+                                        scope,
+                                        Dispatchers.IO,
+                                    )
+                                }
                             JotterApp(if (useSecond) two else one)
                         }
                         switchBetween(first.notes, second.notes) { useSecond = it }

@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.sharedui
 
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -36,7 +37,8 @@ open class ViewModelTest {
         val scope = CoroutineScope(dispatcher + Job())
         val store: NoteStore = database.open(dispatcher)
         val notes: NoteService = store.notes
-        val app = AppViewModel(notes, scope, dispatcher)
+        val conflicts = ConflictResolver(store)
+        val app = AppViewModel(notes, conflicts, scope, dispatcher)
         internal val list get() = app.list
 
         // Not advanceUntilIdle: while a draft cannot be saved, the autosave never stops trying.
