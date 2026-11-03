@@ -49,8 +49,8 @@ public data class SyncTiming(
  * A backend whose sync failed is left out of the following rounds for a while, a longer while
  * after each failure, except when the user asks; a local folder that cannot be reached is tried
  * every [SyncTiming.folderRetry] instead, and one whose server refused the password only every
- * [SyncTiming.maxBackoff], as only a new password helps. When that while is over, the backend is tried on its
- * own, without waiting for the next round, so a backend that is back syncs at once.
+ * [SyncTiming.maxBackoff], as only a new password helps. When that while is over, the backend is
+ * tried on its own, without waiting for the next round, so a backend that is back syncs at once.
  *
  * Nothing here blocks: the sync engine runs the database work, and each backend its own I/O, on
  * their dispatchers. Cancelling the job that [start] returns stops a sync wherever it is, which

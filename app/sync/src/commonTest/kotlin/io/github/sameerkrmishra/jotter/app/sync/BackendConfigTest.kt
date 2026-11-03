@@ -13,6 +13,9 @@ import kotlin.time.Instant
 
 /** How backends are stored and opened, and how their secrets are kept out of sight. */
 class BackendConfigTest {
+    private val keyring = InMemorySecretStore()
+    private val factory = StandardBackendFactory(SecretStores(keyring, NoSecretStore))
+
     @Test
     fun aLocalFolderRoundTrips() {
         val config = LocalFolderConfig("/media/stick")
@@ -39,12 +42,51 @@ class BackendConfigTest {
     fun theFactoryOpensWhatThisVersionKnows() =
         runTest {
             val folder = backend(LocalFolderConfig("/media/stick"))
-            assertIs<LocalFolderBlobStore>(StandardBackendFactory.open(folder))
+            assertIs<LocalFolderBlobStore>(factory.open(folder))
             assertFailsWith<IllegalArgumentException> {
-                StandardBackendFactory.open(backend(UnknownConfig("peer")))
+                factory.open(backend(UnknownConfig("peer")))
             }
             val stores = NamedStores(mapOf("x" to InMemoryBlobStore()))
             assertIs<InMemoryBlobStore>(stores.open(backend(LocalFolderConfig("/x"))))
+        }
+
+    @Test
+    fun aWebDavServerRoundTripsWithoutItsPassword() {
+        val config = WebDavConfig("https://dav.example.org/jotter/", "me@example.org")
+        val kind = BackendKinds.kindOf(config)
+        assertEquals("webdav", kind)
+        val settings = BackendKinds.settingsOf(config)
+        assertEquals(
+            """{"url":"https://dav.example.org/jotter/","username":"me@example.org"}""",
+            settings,
+        )
+        assertEquals(config, BackendKinds.configOf(kind, settings))
+        assertEquals(SecretPlace.KEYRING, config.secretPlace)
+        assertEquals(setOf(SecretKind.APP_PASSWORD), config.secrets)
+        assertEquals("https://dav.example.org/jotter/", config.location)
+
+        val inFile = config.copy(secretPlace = SecretPlace.FILE)
+        val fileSettings = BackendKinds.settingsOf(inFile)
+        assertTrue(fileSettings.contains(""""secrets":"file""""), fileSettings)
+        assertEquals(inFile, BackendKinds.configOf(kind, fileSettings))
+        assertEquals(
+            UnknownConfig("webdav"),
+            BackendKinds.configOf(kind, """{"url":"u","username":"n","secrets":"cloud"}"""),
+        )
+        assertEquals(SecretPlace.KEYRING, LocalFolderConfig("/x").secretPlace)
+    }
+
+    @Test
+    fun theFactoryOpensAWebDavServerWithItsStoredPassword() =
+        runTest {
+            val server = backend(WebDavConfig("http://127.0.0.1:9/jotter/", "me"))
+            assertFailsWith<MissingSecretException> { factory.open(server) }
+            keyring.write(SecretKey("x", SecretKind.APP_PASSWORD), Secret("app-password"))
+            val store = factory.open(server)
+            assertIs<AutoCloseable>(store).close()
+            val plain = backend(WebDavConfig("http://dav.example.org/", "me"))
+            keyring.write(SecretKey("x", SecretKind.APP_PASSWORD), Secret("app-password"))
+            assertFailsWith<IllegalArgumentException> { factory.open(plain) }
         }
 
     @Test

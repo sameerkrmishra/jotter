@@ -109,6 +109,7 @@ public class SecretStores(
             SecretPlace.FILE -> file
         }
 
+    /** The stores that hold nothing. */
     public companion object {
         /** For apps and tests whose backends need no secrets: both places are [NoSecretStore]. */
         public val NONE: SecretStores = SecretStores(NoSecretStore, NoSecretStore)

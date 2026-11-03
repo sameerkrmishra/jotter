@@ -17,6 +17,7 @@ kotlin {
             api(projects.core.storage)
             api(projects.core.sync)
             implementation(projects.backend.localfolder)
+            implementation(projects.backend.webdav)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.okio)

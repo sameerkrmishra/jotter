@@ -13,6 +13,7 @@ import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.FileAttribute
 import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import kotlin.coroutines.CoroutineContext
@@ -163,8 +164,9 @@ public class SecretFileStore(
         const val UID = "unix:uid"
 
         val OWNER_ONLY = setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
-        val PRIVATE_FILE = PosixFilePermissions.asFileAttribute(OWNER_ONLY)
-        val PRIVATE_DIRECTORY =
+        val PRIVATE_FILE: FileAttribute<Set<PosixFilePermission>> =
+            PosixFilePermissions.asFileAttribute(OWNER_ONLY)
+        val PRIVATE_DIRECTORY: FileAttribute<Set<PosixFilePermission>> =
             PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))
 
         val json = Json { prettyPrint = true }

@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
 import io.github.sameerkrmishra.jotter.app.sync.dto.LocalFolderSettings
+import io.github.sameerkrmishra.jotter.app.sync.dto.WebDavSettings
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
@@ -18,6 +19,9 @@ public sealed interface BackendConfig {
 
     /** The secrets it needs to be opened. [BackendManager.remove] deletes them with it. */
     public val secrets: Set<SecretKind>
+
+    /** Where its [secrets] are kept. */
+    public val secretPlace: SecretPlace get() = SecretPlace.KEYRING
 }
 
 /**
@@ -32,6 +36,24 @@ public data class LocalFolderConfig(
     override val location: String get() = path
 
     override val secrets: Set<SecretKind> get() = emptySet()
+}
+
+/**
+ * A collection on a WebDAV server, such as mailbox.org's (`backend:webdav`, ADR-0017). Its app
+ * password is in a [SecretStore], never here.
+ *
+ * @property url The collection's URL: `https`, or `http` to this machine only, ending in `/`.
+ * @property username The account's user name.
+ * @property secretPlace Where its app password is kept.
+ */
+public data class WebDavConfig(
+    val url: String,
+    val username: String,
+    override val secretPlace: SecretPlace = SecretPlace.KEYRING,
+) : BackendConfig {
+    override val location: String get() = url
+
+    override val secrets: Set<SecretKind> get() = setOf(SecretKind.APP_PASSWORD)
 }
 
 /**
@@ -52,13 +74,18 @@ public data class UnknownConfig(
 /** How a [BackendConfig] is stored: its kind and its settings as JSON. */
 internal object BackendKinds {
     const val LOCAL_FOLDER = "local-folder"
+    const val WEBDAV = "webdav"
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** How a [SecretPlace] is stored. */
+    private val places = mapOf("keyring" to SecretPlace.KEYRING, "file" to SecretPlace.FILE)
 
     /** The kind under which [config] is stored. */
     fun kindOf(config: BackendConfig): String =
         when (config) {
             is LocalFolderConfig -> LOCAL_FOLDER
+            is WebDavConfig -> WEBDAV
             is UnknownConfig -> config.kind
         }
 
@@ -69,6 +96,15 @@ internal object BackendKinds {
                 json.encodeToString(
                     LocalFolderSettings.serializer(),
                     LocalFolderSettings(config.path),
+                )
+            is WebDavConfig ->
+                json.encodeToString(
+                    WebDavSettings.serializer(),
+                    WebDavSettings(
+                        config.url,
+                        config.username,
+                        places.entries.single { it.value == config.secretPlace }.key,
+                    ),
                 )
             is UnknownConfig -> throw IllegalArgumentException("Cannot store ${config.location}")
         }
@@ -84,6 +120,7 @@ internal object BackendKinds {
                     LocalFolderConfig(
                         json.decodeFromString(LocalFolderSettings.serializer(), settings).path,
                     )
+                WEBDAV -> webDavOf(settings)
                 else -> UnknownConfig(kind)
             }
         } catch (_: SerializationException) {
@@ -91,4 +128,10 @@ internal object BackendKinds {
         } catch (_: IllegalArgumentException) {
             UnknownConfig(kind)
         }
+
+    private fun webDavOf(settings: String): WebDavConfig {
+        val stored = json.decodeFromString(WebDavSettings.serializer(), settings)
+        val place = requireNotNull(places[stored.secrets]) { "No such place: ${stored.secrets}" }
+        return WebDavConfig(stored.url, stored.username, place)
+    }
 }

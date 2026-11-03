@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
+import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
@@ -55,6 +56,28 @@ public sealed interface AddResult {
         /** Why. */
         val reason: String,
     ) : AddResult
+
+    /**
+     * No keyring answers, so the password was not stored and nothing was added. The user may
+     * choose to keep it in a file instead, in plain text (ADR-0016): ask, and call again with
+     * [SecretPlace.FILE] if they say yes.
+     */
+    public data class NoKeyring(
+        /** Why no keyring answers, in plain words. */
+        val reason: String,
+    ) : AddResult
+}
+
+/** What [BackendManager.changePassword] did. */
+public sealed interface PasswordChange {
+    /** The new password works and is stored. */
+    public data object Changed : PasswordChange
+
+    /** Nothing was changed. [reason] says why, in plain words. */
+    public data class Refused(
+        /** Why. */
+        val reason: String,
+    ) : PasswordChange
 }
 
 /**
@@ -69,19 +92,33 @@ public sealed interface AddResult {
  * @param store The database.
  * @param engine The sync engine of [store].
  * @param factory Opens a backend.
- * @param secrets Where the backends' secrets are, to delete them with a backend.
+ * @param secrets Where the backends' secrets are kept, to store them when a backend is added and
+ *   delete them with it.
  * @param io Where blocking database calls run.
  * @param clock The time of a sync and of adding a backend.
  */
-@Suppress("TooManyFunctions") // One function per operation, and the steps of adding a folder.
-public class BackendManager(
+@Suppress(
+    "TooManyFunctions", // One function per operation, and the steps of adding a backend.
+    "LongParameterList", // The internal constructor takes the WebDAV client tests replace.
+)
+public class BackendManager internal constructor(
     private val store: NoteStore,
     private val engine: SyncEngine,
     private val factory: BackendFactory,
-    private val secrets: SecretStore,
+    private val secrets: SecretStores,
     private val io: CoroutineContext,
-    private val clock: Clock = Clock.System,
+    private val clock: Clock,
+    private val webDav: WebDavOpener,
 ) {
+    public constructor(
+        store: NoteStore,
+        engine: SyncEngine,
+        factory: BackendFactory,
+        secrets: SecretStores,
+        io: CoroutineContext,
+        clock: Clock = Clock.System,
+    ) : this(store, engine, factory, secrets, io, clock, ::openWebDav)
+
     private val operations = Mutex()
 
     /** Emits the backends now and whenever they or their last sync change through [store]. */
@@ -177,17 +214,195 @@ public class BackendManager(
         } catch (e: BlobStoreException) {
             return AddResult.Refused("Cannot set up ${config.path}: ${e.message}")
         }
+        return AddResult.Added(insert(newId(), config, name))
+    }
+
+    private suspend fun insert(
+        id: String,
+        config: BackendConfig,
+        name: String,
+    ): Backend {
         val record =
             BackendRecord(
-                id = newId(),
+                id = id,
                 kind = BackendKinds.kindOf(config),
                 name = name,
                 settings = BackendKinds.settingsOf(config),
                 addedAt = clock.now(),
             )
         withContext(io) { store.backends.add(record) }
-        return AddResult.Added(backendOf(record))
+        return backendOf(record)
     }
+
+    /**
+     * Adds the collection at [url] on a WebDAV server as a backend called [name], or the server's
+     * name, signing in as [username] with [password], an app password made for Jotter.
+     *
+     * It first asks the server, with that password, whether the collection is a Jotter store.
+     * One that another device set up is simply added. One that is not yet is set up only if
+     * [setUpNewStore], which only the user may decide (ADR-0012): that checks that the server
+     * keeps files (ADR-0017) and refuses a server that would let one write replace another.
+     * Plain `http` is refused, except to this machine.
+     *
+     * The password goes to the [secretPlace] the user chose, never to the database. If no keyring
+     * answers, nothing is added and the result is [AddResult.NoKeyring].
+     */
+    @Suppress("LongParameterList") // What the user enters in the form.
+    public suspend fun addWebDav(
+        url: String,
+        username: String,
+        password: Secret,
+        name: String? = null,
+        setUpNewStore: Boolean = false,
+        secretPlace: SecretPlace = SecretPlace.KEYRING,
+    ): AddResult =
+        operations.withLock {
+            val config = WebDavConfig(withSlash(url.trim()), username.trim(), secretPlace)
+            webDavProblem(config, password)?.let { return@withLock AddResult.Refused(it) }
+            list()
+                .firstOrNull { it.config is WebDavConfig && sameAccount(it.config, config) }
+                ?.let { return@withLock AddResult.AlreadyAdded(it) }
+            val blobs =
+                try {
+                    webDav.open(config, password)
+                } catch (e: IllegalArgumentException) {
+                    return@withLock AddResult.Refused("Cannot use ${config.url}: ${e.message}.")
+                }
+            blobs.use { added(it, config, password, name ?: hostOf(config.url), setUpNewStore) }
+        }
+
+    private fun webDavProblem(
+        config: WebDavConfig,
+        password: Secret,
+    ): String? =
+        when {
+            config.username.isEmpty() -> "Enter the user name of the account."
+            password.reveal().isEmpty() -> "Enter the app password."
+            else -> null
+        }
+
+    private fun sameAccount(
+        a: WebDavConfig,
+        b: WebDavConfig,
+    ) = a.url == b.url && a.username == b.username
+
+    // Each return is one way adding can end, in the order the user meets them.
+    @Suppress("ReturnCount", "TooGenericExceptionCaught")
+    private suspend fun added(
+        blobs: NewStore,
+        config: WebDavConfig,
+        password: Secret,
+        name: String,
+        setUpNewStore: Boolean,
+    ): AddResult {
+        val reachability = blobs.ping()
+        val setUp =
+            reachability is Reachability.Unreachable &&
+                reachability.reason == UnreachableReason.NOT_INITIALIZED
+        if (reachability is Reachability.Unreachable && !(setUp && setUpNewStore)) {
+            return unusable(config, reachability)
+        }
+        val id = newId()
+        val key = SecretKey(id, SecretKind.APP_PASSWORD)
+        val place = secrets.of(config.secretPlace)
+        try {
+            place.write(key, password)
+        } catch (e: SecretStoreUnavailableException) {
+            return AddResult.NoKeyring(e.message.orEmpty())
+        } catch (e: SecretStoreException) {
+            return AddResult.Refused("Cannot store the app password: ${e.message}")
+        }
+        return try {
+            if (setUp) blobs.initialize()
+            AddResult.Added(insert(id, config, name))
+        } catch (e: BlobStoreException) {
+            place.delete(key)
+            AddResult.Refused(cannotSetUp(config, e))
+        } catch (e: Exception) {
+            place.delete(key)
+            throw e
+        }
+    }
+
+    private fun unusable(
+        config: WebDavConfig,
+        reachability: Reachability.Unreachable,
+    ): AddResult =
+        when (reachability.reason) {
+            UnreachableReason.NOT_INITIALIZED -> AddResult.NotAStoreYet(config.url)
+            UnreachableReason.MISSING ->
+                AddResult.Refused(
+                    "There is no folder at ${config.url} on the server. Create it first, for " +
+                        "example in the server's web interface, then add it again.",
+                )
+            UnreachableReason.UNAUTHORIZED ->
+                AddResult.Refused(
+                    "The server refused the user name or app password. Check both, or make a " +
+                        "new app password for Jotter in your account's settings.",
+                )
+            UnreachableReason.FAILED ->
+                AddResult.Refused("Cannot reach ${config.url}: ${reachability.detail}.")
+        }
+
+    private fun cannotSetUp(
+        config: WebDavConfig,
+        failure: BlobStoreException,
+    ): String =
+        if (failure.message.orEmpty().contains("If-None-Match")) {
+            "Jotter cannot sync through ${config.url}: the server replaces a file when it is " +
+                "written again, where it must refuse. A repeated upload could then overwrite " +
+                "another device's changes. Use another server. (${failure.message})"
+        } else {
+            "Cannot set up ${config.url}: ${failure.message}"
+        }
+
+    /** Where the secrets of [backend] are kept, in plain words, or null if it needs none. */
+    public fun whereSecretsAre(backend: Backend): String? =
+        when {
+            backend.config.secrets.isEmpty() -> null
+            backend.config.secretPlace == SecretPlace.KEYRING ->
+                "Its password is kept in the keyring."
+            else ->
+                "Its password is kept in plain text in ${secrets.fileLocation}, as chosen when " +
+                    "it was added."
+        }
+
+    /**
+     * Replaces the app password of the WebDAV backend [id] with [password], after checking that the
+     * server takes it. Use it when the server refused the old one.
+     */
+    public suspend fun changePassword(
+        id: String,
+        password: Secret,
+    ): PasswordChange =
+        operations.withLock {
+            val backend = list().firstOrNull { it.id == id }
+            val config =
+                backend?.config as? WebDavConfig
+                    ?: return@withLock PasswordChange.Refused("There is no WebDAV backend $id.")
+            if (password.reveal().isEmpty()) {
+                return@withLock PasswordChange.Refused("Enter the app password.")
+            }
+            val reachability = webDav.open(config, password).use { it.ping() }
+            if (reachability is Reachability.Unreachable &&
+                reachability.reason == UnreachableReason.UNAUTHORIZED
+            ) {
+                return@withLock PasswordChange.Refused(
+                    "The server refused this app password too. Nothing was changed.",
+                )
+            }
+            try {
+                secrets
+                    .of(
+                        config.secretPlace,
+                    ).write(SecretKey(id, SecretKind.APP_PASSWORD), password)
+            } catch (e: SecretStoreException) {
+                return@withLock PasswordChange.Refused(
+                    "Cannot store the app password: ${e.message}",
+                )
+            }
+            PasswordChange.Changed
+        }
 
     /**
      * Stops syncing with the backend [id] and forgets what this device knew of it, with its
@@ -195,15 +410,18 @@ public class BackendManager(
      * there, and adding it again copies this device's whole history again. Returns whether it was
      * there.
      *
-     * The backend leaves the list first. If the process dies before the rest, what is left are
+     * Its secrets go first: if they cannot be deleted, as when no keyring answers, nothing is
+     * removed and [SecretStoreException] says why, so that no password is left behind unseen.
+     * Then the backend leaves the list. If the process dies before the rest, what is left are
      * sync records under an id that is never used again.
      */
     public suspend fun remove(id: String): Boolean =
         operations.withLock {
             val backend = list().firstOrNull { it.id == id } ?: return@withLock false
+            val place = secrets.of(backend.config.secretPlace)
+            backend.config.secrets.forEach { place.delete(SecretKey(id, it)) }
             withContext(io) { store.backends.remove(id) }
             engine.forget(id)
-            backend.config.secrets.forEach { secrets.delete(SecretKey(id, it)) }
             true
         }
 
@@ -257,7 +475,11 @@ public class BackendManager(
             )
         } else {
             try {
-                val result = engine.sync(SyncTarget(backend.id, factory.open(backend)))
+                val result =
+                    factory
+                        .open(
+                            backend,
+                        ).closing { engine.sync(SyncTarget(backend.id, it)) }
                 val (outcome, detail) = describe(result)
                 val report =
                     when (result) {
@@ -268,6 +490,8 @@ public class BackendManager(
                 backend.ended(outcome, detail, report)
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: MissingSecretException) {
+                backend.ended(Outcome.UNAUTHORIZED, e.message.orEmpty())
             } catch (e: Exception) {
                 backend.ended(
                     Outcome.FAILED,
@@ -314,7 +538,7 @@ public class BackendManager(
         list().map { backend ->
             val reachability =
                 try {
-                    factory.open(backend).ping()
+                    factory.open(backend).closing { it.ping() }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -327,6 +551,24 @@ public class BackendManager(
         }
 
     private companion object {
+        /** Runs [block] on this store, then closes it if it holds anything, as WebDAV's does. */
+        suspend fun <T> BlobStore.closing(block: suspend (BlobStore) -> T): T =
+            try {
+                block(this)
+            } finally {
+                (this as? AutoCloseable)?.close()
+            }
+
+        fun withSlash(url: String) = if (url.endsWith('/')) url else "$url/"
+
+        /** The host of [url], as the default name of its backend. */
+        fun hostOf(url: String): String =
+            url
+                .substringAfter("://")
+                .substringBefore('/')
+                .substringBefore(':')
+                .ifEmpty { url }
+
         /** The marker file of a local folder store (ADR-0012). */
         const val MARKER = ".jotter-store"
 

@@ -1,9 +1,9 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
@@ -23,7 +23,7 @@ import kotlin.test.assertTrue
 class SecretFileStoreTest {
     private val home = createTempDirectory("jotter-secret-file")
     private val folder = home.resolve("config/jotter")
-    private val store = SecretFileStore(folder, Dispatchers.IO)
+    private val store = SecretFileStore(folder, EmptyCoroutineContext)
     private val password = SecretKey("b-1", SecretKind.APP_PASSWORD)
     private val pairing = SecretKey("b-2", SecretKind.PAIRING_SECRET)
 
@@ -124,11 +124,11 @@ class SecretFileStoreTest {
     fun theLinuxStoresFollowXdg() =
         runTest {
             val env = mapOf("XDG_CONFIG_HOME" to "$home/xdg", "DBUS_SESSION_BUS_ADDRESS" to "")
-            val stores = linuxSecretStores(env::get, "/nowhere", Dispatchers.IO)
+            val stores = linuxSecretStores(env::get, "/nowhere", EmptyCoroutineContext)
             assertEquals("$home/xdg/jotter/secrets.json", stores.fileLocation)
             assertEquals(
                 "$home/h/.config/jotter/secrets.json",
-                linuxSecretStores(mapOf("HOME" to "$home/h")::get, "/x", Dispatchers.IO)
+                linuxSecretStores(mapOf("HOME" to "$home/h")::get, "/x", EmptyCoroutineContext)
                     .fileLocation,
             )
             assertEquals(
@@ -138,14 +138,19 @@ class SecretFileStoreTest {
                     "/fallback",
                 ).toString(),
             )
-            val homeless = linuxSecretStores(mapOf<String, String>()::get, "?", Dispatchers.IO)
+            val homeless =
+                linuxSecretStores(mapOf<String, String>()::get, "?", EmptyCoroutineContext)
             assertNull(homeless.fileLocation)
             assertNull(homeless.file.read(password))
             homeless.file.delete(password)
             assertFailsWith<SecretStoreException> { homeless.file.write(password, Secret("x")) }
             // The empty bus address counts as none, so the keyring fails closed.
             assertFailsWith<SecretStoreUnavailableException> {
-                SecretServiceStore(null, Dispatchers.IO, listOf("/nonexistent")).read(password)
+                SecretServiceStore(
+                    null,
+                    EmptyCoroutineContext,
+                    listOf("/nonexistent"),
+                ).read(password)
             }
             assertTrue(stores.of(SecretPlace.KEYRING) is SecretServiceStore)
             assertEquals(stores.fileLocation, (stores.file as SecretFileStore).file.toString())

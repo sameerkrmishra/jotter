@@ -57,19 +57,32 @@ internal class InMemorySecretStore : SecretStore {
  * One device: a database in [dir] and a [BackendManager] over it. Everything runs on the caller's
  * thread, or on [io] if given.
  */
+@Suppress("LongParameterList") // Each test replaces what it needs.
 internal class Device(
     dir: TempDir,
     name: String,
     val clock: FakeClock = FakeClock(),
-    factory: BackendFactory = StandardBackendFactory,
     val secrets: SecretStore = InMemorySecretStore(),
+    val fileSecrets: SecretStore = InMemorySecretStore(),
+    webDav: WebDavOpener = WebDavOpener(::openWebDav),
+    factory: BackendFactory =
+        StandardBackendFactory(SecretStores(secrets, fileSecrets, "/config/secrets.json"), webDav),
     io: CoroutineContext = EmptyCoroutineContext,
 ) : AutoCloseable {
     // In a folder of its own: a backend folder may not be in the database's folder.
     val file = (dir.folder("db-$name") / "$name.db").toString()
     val store: NoteStore = NoteStore.open(file, name, io, clock)
     val engine = SyncEngine(store, DeviceInfo(name, "test"), io, clock)
-    val manager = BackendManager(store, engine, factory, secrets, io, clock)
+    val manager =
+        BackendManager(
+            store,
+            engine,
+            factory,
+            SecretStores(secrets, fileSecrets, "/config/secrets.json"),
+            io,
+            clock,
+            webDav,
+        )
 
     override fun close() = store.close()
 }

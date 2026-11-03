@@ -1,11 +1,11 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
@@ -45,7 +45,7 @@ class SecretServiceStoreTest {
     }
 
     private fun store(bus: String? = "unix:path=/nonexistent/test-bus") =
-        SecretServiceStore(bus, Dispatchers.IO, listOf(tool.toString()))
+        SecretServiceStore(bus, EmptyCoroutineContext, listOf(tool.toString()))
 
     @Test
     fun theSecretGoesThroughStdinAndComesBackOnStdout() =
@@ -89,7 +89,7 @@ class SecretServiceStoreTest {
             val missing =
                 SecretServiceStore(
                     "unix:path=/x",
-                    Dispatchers.IO,
+                    EmptyCoroutineContext,
                     listOf("/nonexistent/secret-tool"),
                 )
             val notInstalled =
@@ -134,7 +134,7 @@ class SecretServiceStoreTest {
             val slow =
                 SecretServiceStore(
                     "unix:path=/x",
-                    Dispatchers.IO,
+                    EmptyCoroutineContext,
                     listOf(tool.toString()),
                     300.milliseconds,
                 )
@@ -150,12 +150,12 @@ class SecretServiceStoreTest {
     fun theRealToolFailsClosedWithoutAKeyring() =
         runTest {
             if (!installed("dbus-daemon") || !installed("secret-tool")) return@runTest
-            val noBus = SecretServiceStore(null, Dispatchers.IO)
+            val noBus = SecretServiceStore(null, EmptyCoroutineContext)
             val closed = assertFailsWith<SecretStoreUnavailableException> { noBus.read(key) }
             assertTrue(closed.message!!.contains("no desktop session"), closed.message)
 
             PrivateBus().use { bus ->
-                val store = SecretServiceStore(bus.address, Dispatchers.IO)
+                val store = SecretServiceStore(bus.address, EmptyCoroutineContext)
                 val failure =
                     assertFailsWith<SecretStoreUnavailableException> {
                         store.write(key, Secret(password))
