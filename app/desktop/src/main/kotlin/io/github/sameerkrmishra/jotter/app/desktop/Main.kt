@@ -7,8 +7,15 @@ import androidx.compose.ui.window.application
 import io.github.sameerkrmishra.jotter.app.sharedui.AppViewModel
 import io.github.sameerkrmishra.jotter.app.sharedui.CannotOpenNotes
 import io.github.sameerkrmishra.jotter.app.sharedui.JotterApp
+import io.github.sameerkrmishra.jotter.app.sharedui.SyncControls
+import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.NoSecretStore
+import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
+import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
+import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
+import io.github.sameerkrmishra.jotter.core.sync.SyncEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,7 +74,20 @@ private fun runApp(
     autoclose: Boolean,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    val app = AppViewModel(store.notes, ConflictResolver(store), scope, Dispatchers.IO)
+    val engine = SyncEngine(store, DeviceInfo(DEVICE_NAME, "linux"), Dispatchers.IO)
+    val manager =
+        BackendManager(store, engine, StandardBackendFactory, NoSecretStore, Dispatchers.IO)
+    val scheduler = SyncScheduler(manager::syncAll)
+    // In the app's scope, so that exit cancels a running sync before the store closes.
+    scheduler.start(scope, store.notes.observeRevisionMark())
+    val app =
+        AppViewModel(
+            store.notes,
+            ConflictResolver(store),
+            scope,
+            Dispatchers.IO,
+            SyncControls(manager, scheduler),
+        )
     application(exitProcessOnExit = false) {
         val close = { app.requestExit(::exitApplication) }
         Window(onCloseRequest = close, title = "Jotter") {
