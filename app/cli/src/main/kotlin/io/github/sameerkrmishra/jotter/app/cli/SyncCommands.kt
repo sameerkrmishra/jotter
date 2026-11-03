@@ -129,15 +129,18 @@ private class AddBackendCommand(
 
     override fun run() {
         val path = folder.toAbsolutePath().toString()
-        when (val result = withBackends(location.path) { it.addLocalFolder(path, name, setUp) }) {
-            is AddResult.Added -> echo(result.backend.id)
-            is AddResult.NotAStoreYet -> throw CliktError(notAStoreYet(result.path))
-            is AddResult.AlreadyAdded ->
-                throw CliktError(
-                    "jotter: ${result.backend.config.location} is already the backend ${result.backend.id}",
-                )
-            is AddResult.Refused -> throw CliktError("jotter: ${result.reason}")
-        }
+        val result = withBackends(location.path) { it.addLocalFolder(path, name, setUp) }
+        val failure =
+            when (result) {
+                is AddResult.Added -> return echo(result.backend.id)
+                is AddResult.NotAStoreYet -> notAStoreYet(result.path)
+                is AddResult.AlreadyAdded -> {
+                    val backend = result.backend
+                    "jotter: ${backend.config.location} is already the backend ${backend.id}"
+                }
+                is AddResult.Refused -> "jotter: ${result.reason}"
+            }
+        throw CliktError(failure)
     }
 
     private fun notAStoreYet(path: String) =
