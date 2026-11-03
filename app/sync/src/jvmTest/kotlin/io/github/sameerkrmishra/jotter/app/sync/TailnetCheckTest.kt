@@ -6,6 +6,10 @@ import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.server.HubConfig
 import io.github.sameerkrmishra.jotter.server.PeerHub
+import io.ktor.client.engine.HttpClientEngine
+import io.ktor.client.engine.cio.CIO
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.Test
@@ -94,6 +98,77 @@ class TailnetCheckTest {
                 }
             }
         }
+
+    /** Lets every host through, on engines of its own that it keeps to look at. */
+    private class GivesEngines : TailnetCheck {
+        val engines = mutableListOf<HttpClientEngine>()
+
+        override fun refuse(host: String): String? = null
+
+        override fun engine(host: String): HttpClientEngine = CIO.create().also { engines += it }
+    }
+
+    @Test
+    fun aHubIsReachedThroughTheEngineTheCheckGives() =
+        runTest {
+            TempDir().use { dir ->
+                val hub =
+                    PeerHub(
+                        HubConfig(
+                            storeRoot = dir.path / "hub",
+                            tokenFile = dir.path / "hub-devices.json",
+                            host = "127.0.0.1",
+                            port = 0,
+                        ),
+                    )
+                hub.setUpStore()
+                val port = hub.start().port
+                try {
+                    Device(dir, "phone").use { phone ->
+                        val check = GivesEngines()
+                        val secrets = SecretStores(phone.secrets, phone.fileSecrets)
+                        val manager =
+                            BackendManager(
+                                phone.store,
+                                phone.engine,
+                                StandardBackendFactory(secrets, check),
+                                secrets,
+                                EmptyCoroutineContext,
+                                tailnet = check,
+                            )
+                        val token = Secret(hub.pair("phone").token)
+                        assertIs<AddResult.Added>(manager.addPeer("127.0.0.1:$port", token))
+                        phone.store.notes.create("", "milk")
+                        assertEquals(
+                            Outcome.SYNCED,
+                            manager
+                                .syncAll()
+                                .single()
+                                .attempt.outcome,
+                        )
+                        assertTrue(check.engines.size >= 2, "adding and syncing")
+                        // Each store closed its engine when it was done.
+                        check.engines.forEach { it.coroutineContext.job.join() }
+                    }
+                } finally {
+                    hub.stop()
+                }
+            }
+        }
+
+    @Test
+    fun anEngineIsClosedWhenTheTokenCannotBeUsed() {
+        val check = GivesEngines()
+        assertFailsWith<IllegalArgumentException> {
+            openPeer(PeerConfig("127.0.0.1", 1), Secret("not a token!"), check)
+        }
+        runBlocking {
+            check.engines
+                .single()
+                .coroutineContext.job
+                .join()
+        }
+    }
 
     @Test
     fun theHubThatCannotBeReachedSendsNothingAndChecksPaths() =

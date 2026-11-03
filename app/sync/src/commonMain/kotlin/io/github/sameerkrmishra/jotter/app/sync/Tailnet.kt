@@ -7,6 +7,7 @@ import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPath
 import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPrefix
+import io.ktor.client.engine.HttpClientEngine
 
 /**
  * Whether a hub's pairing token may go to a host now, beyond the hub client's address rule
@@ -18,6 +19,14 @@ import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPrefix
 public fun interface TailnetCheck {
     /** Why a token must not go to [host] now, in plain words, or null if it may. */
     public fun refuse(host: String): String?
+
+    /**
+     * The HTTP engine for the hub at [host], once [refuse] let it through, or null for the hub
+     * client's own. Android gives one whose sockets are bound to Tailscale's network, so that a
+     * request fails, rather than leaves by another network, if the VPN goes away meanwhile. The
+     * hub client owns it and closes it.
+     */
+    public fun engine(host: String): HttpClientEngine? = null
 
     /** The checks every app may use. */
     public companion object {

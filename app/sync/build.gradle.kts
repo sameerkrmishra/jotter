@@ -16,6 +16,8 @@ kotlin {
             api(projects.backend.api)
             api(projects.core.storage)
             api(projects.core.sync)
+            // TailnetCheck.engine hands the hub client an HTTP engine (ADR-0018).
+            api(libs.ktor.client.core)
             implementation(projects.backend.localfolder)
             implementation(projects.backend.webdav)
             implementation(projects.backend.peer)
@@ -32,6 +34,8 @@ kotlin {
         jvmTest.dependencies {
             // A real PC hub on loopback, for the peer backend's tests. The hub is JVM only.
             implementation(projects.server)
+            // An engine for TailnetCheck.engine.
+            implementation(libs.ktor.client.cio)
         }
     }
 }
