@@ -29,6 +29,12 @@ public enum class UnreachableReason {
      */
     NOT_INITIALIZED,
 
+    /**
+     * The store refused the credentials, for example a wrong or revoked app password. Trying again
+     * does not help until the user changes them.
+     */
+    UNAUTHORIZED,
+
     /** Anything else, such as an I/O error or a server that does not answer. */
     FAILED,
 }

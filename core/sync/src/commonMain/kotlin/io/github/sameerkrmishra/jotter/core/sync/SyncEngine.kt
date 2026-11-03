@@ -2,7 +2,6 @@ package io.github.sameerkrmishra.jotter.core.sync
 
 import io.github.sameerkrmishra.jotter.backend.api.BlobAlreadyExistsException
 import io.github.sameerkrmishra.jotter.backend.api.BlobInfo
-import io.github.sameerkrmishra.jotter.backend.api.BlobNotFoundException
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
@@ -13,7 +12,6 @@ import io.github.sameerkrmishra.jotter.core.sync.dto.FormatDto
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
@@ -185,39 +183,33 @@ public class SyncEngine internal constructor(
     }
 
     /**
-     * Makes sure the backend has a `format.json` this version can use. Returns what is wrong
-     * otherwise. Two devices may create it at once, so the loser reads the winner's (ADR-0004).
+     * Makes sure the backend holds the format file of this version and no other. Returns what is
+     * wrong otherwise. Each format and codec has a path of its own, so two versions that set up
+     * one backend at once write two files instead of one replacing the other, and the check after
+     * writing finds the other's (ADR-0004).
      */
     private suspend fun formatProblem(blobs: BlobStore): String? {
-        val path = BackendLayout.FORMAT_PATH
-        val found =
+        val path = BackendLayout.formatPath(SYNC_FORMAT, SYNC_CODEC)
+        val text = json.encodeToString(FormatDto.serializer(), FormatDto(SYNC_FORMAT, SYNC_CODEC))
+        var found = blobs.list(BackendLayout.FORMATS).map { it.path }
+        // A listing without this version's file but with another's is answered below, unwritten.
+        if (found.isEmpty()) {
             try {
-                blobs.read(path)
-            } catch (_: BlobNotFoundException) {
-                null
+                blobs.writeNew(path, text.encodeToByteArray())
+            } catch (_: BlobAlreadyExistsException) {
+                // Another device of this version wrote the same file: a path has one content.
             }
-        if (found != null) return problemWith(found)
-        val text =
-            json.encodeToString(FormatDto.serializer(), FormatDto(SYNC_FORMAT, SYNC_CODEC))
-        return try {
-            blobs.writeNew(path, text.encodeToByteArray())
-            null
-        } catch (_: BlobAlreadyExistsException) {
-            problemWith(blobs.read(path))
+            found = blobs.list(BackendLayout.FORMATS).map { it.path } + path
+        }
+        val others = found.filter { it != path }
+        return when {
+            others.isNotEmpty() ->
+                "The backend holds the format ${others.joinToString { it.substringAfterLast('/') }}"
+            blobs.read(path).decodeToString() != text ->
+                "The backend's ${path.substringAfterLast('/')} is damaged"
+            else -> null
         }
     }
-
-    private fun problemWith(bytes: ByteArray): String? =
-        try {
-            val format = json.decodeFromString<FormatDto>(bytes.decodeToString())
-            when {
-                format.format != SYNC_FORMAT -> "The backend has format ${format.format}"
-                format.codec != SYNC_CODEC -> "The backend uses the codec ${format.codec}"
-                else -> null
-            }
-        } catch (_: SerializationException) {
-            "The backend's format.json is damaged"
-        }
 
     private companion object {
         val json = Json { ignoreUnknownKeys = true }

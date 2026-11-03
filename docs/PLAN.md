@@ -286,7 +286,11 @@ only when the store itself is there: an unplugged drive never reads as an empty
 store. The KDoc of `BlobStore` is the exact definition. The local folder needs a
 marker file for that, written once when the backend is added, and it publishes
 files without hard links on FAT
-([ADR-0012](adr/0012-local-folder-publishing.md)).
+([ADR-0012](adr/0012-local-folder-publishing.md)). WebDAV uses a marker too, and
+refuses a server that ignores `If-None-Match`. Whether racing writers of one path
+can both win is up to the server: Apache's `mod_dav` lets them, which sync
+tolerates because a path has one possible content
+([ADR-0017](adr/0017-webdav-backend.md)).
 
 A shared **contract test suite** in `backend/api/contract` runs against every
 implementation. A new backend is "done" when it passes.
@@ -295,7 +299,8 @@ implementation. A new backend is "done" when it passes.
 
 ```
 jotter/
-├── format.json                        # protocol version
+├── formats/
+│   └── 1-json+gzip.json               # protocol version and codec
 └── devices/
     ├── <deviceId-A>/
     │   ├── device.json                # name, platform, created
@@ -354,8 +359,9 @@ converge on the next successful sync.
 
 Segments pass through a `SegmentCodec` (v1: JSON + gzip). End-to-end encryption
 later becomes a codec (for example XChaCha20-Poly1305 with a passphrase-derived
-key) without changing backends or the merge logic. `format.json` records the
-codec. Documented as ADR-0007 in M6.
+key) without changing backends or the merge logic. The name of the format file
+records the codec, and a backend with another version's format file is left alone
+([ADR-0017](adr/0017-webdav-backend.md)). Documented as ADR-0007 in M6.
 
 ---
 
@@ -403,10 +409,12 @@ codec. Documented as ADR-0007 in M6.
   0013
   [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
   0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0016
-  [where backend secrets live](adr/0016-where-secrets-live.md) (M4).
+  [where backend secrets live](adr/0016-where-secrets-live.md) and 0017
+  [the WebDAV backend](adr/0017-webdav-backend.md) (M4).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
-  and desktop binaries. Required for every merge.
+  and desktop binaries. Required for every merge. Beside `check`, a `webdav` job
+  runs `backend/webdav` against real WebDAV servers in containers.
   TODO: an emulator job (API 26 and 36) on pushes to `main` or nightly, running
   `connectedAndroidDeviceTest`. Until then the Android device tests of
   `core/sqlite` run by hand.

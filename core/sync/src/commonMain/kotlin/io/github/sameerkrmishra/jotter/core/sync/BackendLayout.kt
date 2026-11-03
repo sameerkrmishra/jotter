@@ -20,7 +20,8 @@ internal data class SegmentFile(
 
 /** The file layout on a backend (ADR-0004, ADR-0014). */
 internal object BackendLayout {
-    const val FORMAT_PATH = "jotter/format.json"
+    /** The folder of the format files: one per format and codec, so a path has one content. */
+    const val FORMATS = "jotter/formats"
     const val DEVICES = "jotter/devices"
 
     private const val NUMBER_DIGITS = 12
@@ -30,6 +31,12 @@ internal object BackendLayout {
 
     /** The path segments of a segment file: `jotter/devices/<device>/<name>`. */
     private const val SEGMENT_PATH_PARTS = 4
+
+    /** The format file of [format] with [codec], such as `jotter/formats/1-json+gzip.json`. */
+    fun formatPath(
+        format: Int,
+        codec: String,
+    ): String = "$FORMATS/$format-$codec.json"
 
     fun deviceFolder(device: DeviceId): String = "$DEVICES/$device"
 

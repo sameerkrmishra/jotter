@@ -53,7 +53,7 @@ internal data class StampDto(
     val revision: String,
 )
 
-/** `format.json`. Unknown keys are allowed here: a newer file must still say its format. */
+/** A format file, `jotter/formats/<format>-<codec>.json`, which says the same as its name. */
 @Serializable
 internal data class FormatDto(
     val format: Int,
