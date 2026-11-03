@@ -20,12 +20,13 @@ internal fun listLine(note: Note): String =
         utcSeconds(note.updatedAt.physicalMillis),
         if (note.isPinned) "pinned" else EMPTY,
         tagList(note).ifEmpty { EMPTY },
-        summary(note),
+        summary(note.title, note.body),
     ).joinToString(SEPARATOR)
 
 /** The line of `jotter search`. */
 internal fun searchLine(hit: SearchHit): String =
-    listOf(hit.note.id, summary(hit.note), oneLine(hit.snippet.text)).joinToString(SEPARATOR)
+    listOf(hit.note.id, summary(hit.note.title, hit.note.body), oneLine(hit.snippet.text))
+        .joinToString(SEPARATOR)
 
 /** The line of `jotter tags`. */
 internal fun tagLine(tag: TagCount): String = "${tag.tag}$SEPARATOR${tag.count}"
@@ -77,18 +78,21 @@ private fun tagList(note: Note): String =
         .sorted()
         .joinToString(",")
 
-/** The title, or else the first line of the body that has text. */
-private fun summary(note: Note): String {
+/** The [title], or else the first line of [body] that has text. */
+internal fun summary(
+    title: String,
+    body: String,
+): String {
     val firstLine =
-        note.body
+        body
             .lineSequence()
             .firstOrNull(String::isNotBlank)
             .orEmpty()
-    return oneLine(note.title.ifBlank { firstLine })
+    return oneLine(title.ifBlank { firstLine })
 }
 
 /** Makes [text] fit one column of one line: scripts rely on a line per note. */
-private fun oneLine(text: String): String =
+internal fun oneLine(text: String): String =
     text.map { if (it.isISOControl()) ' ' else it }.joinToString("").trim()
 
 /** Whole seconds in UTC: a fixed width, and the same output in every time zone. */

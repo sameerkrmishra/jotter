@@ -59,9 +59,15 @@ internal class DatabaseLocation {
 internal fun <T> withNotes(
     path: Path,
     block: (NoteService) -> T,
+): T = withStore(path) { block(it.notes) }
+
+/** [withNotes], for a command that needs the whole store, such as what sync left to look at. */
+internal fun <T> withStore(
+    path: Path,
+    block: (NoteStore) -> T,
 ): T =
     try {
-        open(path).use { store -> block(store.notes) }
+        open(path).use(block)
     } catch (_: StorageBusyException) {
         throw locked(path)
     } catch (e: SQLiteException) {

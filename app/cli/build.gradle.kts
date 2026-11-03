@@ -28,6 +28,7 @@ tasks.test {
 
 dependencies {
     implementation(projects.core.storage)
+    implementation(projects.core.sync)
     implementation(projects.interop.keepImport)
     implementation(projects.interop.markdownExport)
     // The exception NoteStore.open lets through, to report it without a stack trace.
@@ -35,6 +36,9 @@ dependencies {
     implementation(libs.clikt.core)
 
     testImplementation(libs.clikt)
+    // To make conflicts with core:sync between two databases.
+    testImplementation(projects.backend.api.contract)
+    testImplementation(libs.kotlinx.coroutines.core)
     // To hold locks on a test database and to make files that are not Jotter's.
     testImplementation(libs.androidx.sqlite.bundled)
 }
