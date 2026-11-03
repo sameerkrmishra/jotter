@@ -32,15 +32,16 @@ The KDoc of `BlobStore` is the definition. The parts that are easy to get wrong:
   remote stores, so a backend calls this first in every method. `list` allows the
   empty prefix through `requireValidBlobPrefix`.
 - **All failures are `BlobStoreException`s**, a sealed class. So the sync engine
-  can tell "the segment number is taken" from "skip this backend for now" from
+  can tell "the segment's path is taken" from "skip this backend for now" from
   "the disk is full" without knowing the backend.
 
 ## Design
 
 - No I/O types in the API: `ByteArray` and `String`, no okio, so a backend such as
   WebDAV does not inherit a file library.
-- `BlobInfo` has only `path` and `size`. Sync finds new segments by their numbers,
-  so it needs no timestamps, which many stores would not report faithfully.
+- `BlobInfo` has only `path` and `size`. Sync finds new segments by name, against the
+  names it has read, so it needs no timestamps, which many stores would not
+  report faithfully.
 
 ## Tests
 
