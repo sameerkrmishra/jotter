@@ -18,6 +18,7 @@ kotlin {
             api(projects.core.sync)
             implementation(projects.backend.localfolder)
             implementation(projects.backend.webdav)
+            implementation(projects.backend.peer)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.okio)
@@ -27,6 +28,10 @@ kotlin {
             // To make the database fail a write.
             implementation(libs.androidx.sqlite.bundled)
             implementation(libs.kotlinx.coroutines.test)
+        }
+        jvmTest.dependencies {
+            // A real PC hub on loopback, for the peer backend's tests. The hub is JVM only.
+            implementation(projects.server)
         }
     }
 }

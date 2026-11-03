@@ -100,7 +100,7 @@ public data class BackendStatus(
     val reachability: Reachability,
 ) {
     /** [reachability] in plain words. */
-    public val reachabilityText: String get() = describe(reachability)
+    public val reachabilityText: String get() = describe(reachability, backend.config)
 }
 
 internal fun backendOf(record: BackendRecord): Backend =

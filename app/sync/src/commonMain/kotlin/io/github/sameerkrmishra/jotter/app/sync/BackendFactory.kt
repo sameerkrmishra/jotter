@@ -2,6 +2,8 @@ package io.github.sameerkrmishra.jotter.app.sync
 
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.localfolder.LocalFolderBlobStore
+import io.github.sameerkrmishra.jotter.backend.peer.PeerAddress
+import io.github.sameerkrmishra.jotter.backend.peer.PeerBlobStore
 import io.github.sameerkrmishra.jotter.backend.webdav.WebDavBlobStore
 import io.github.sameerkrmishra.jotter.backend.webdav.WebDavCredentials
 import okio.Path.Companion.toPath
@@ -27,8 +29,9 @@ public class MissingSecretException(
 ) : SecretStoreException(message)
 
 /**
- * The backends of this version: local folders and WebDAV servers. A WebDAV server's app password
- * is read from [secrets] each time it is opened (ADR-0016).
+ * The backends of this version: local folders, WebDAV servers and the PC hub. A WebDAV server's
+ * app password and a hub's pairing token are read from [secrets] each time it is opened
+ * (ADR-0016).
  */
 public class StandardBackendFactory internal constructor(
     private val secrets: SecretStores,
@@ -46,9 +49,31 @@ public class StandardBackendFactory internal constructor(
                         ?: throw MissingSecretException(NO_PASSWORD)
                 webDav.open(config, password)
             }
+            is PeerConfig -> {
+                val key = SecretKey(backend.id, SecretKind.PAIRING_SECRET)
+                val token =
+                    secrets.of(config.secretPlace).read(key)
+                        ?: throw MissingSecretException(NO_TOKEN)
+                openPeer(config, token)
+            }
             is UnknownConfig -> throw IllegalArgumentException("Cannot open ${config.location}")
         }
 }
+
+/**
+ * The hub client for [config] with [token].
+ *
+ * @throws IllegalArgumentException if the address or the token cannot be used.
+ */
+internal fun openPeer(
+    config: PeerConfig,
+    token: Secret,
+): PeerBlobStore = PeerBlobStore(PeerAddress(config.host, config.port), token.reveal())
+
+/** What a hub backend without its token says. */
+internal const val NO_TOKEN: String =
+    "No pairing token for this hub is stored on this device, as after restoring the notes on " +
+        "another computer. Pair this device on the PC again and enter the new token."
 
 /** A store that a new backend may need to set up, as `initialize()` does. */
 internal interface NewStore :

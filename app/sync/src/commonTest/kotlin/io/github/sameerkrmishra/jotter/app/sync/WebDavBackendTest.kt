@@ -331,7 +331,7 @@ class WebDavBackendTest {
                     device.manager.changePassword(backend.id, Secret("")),
                 )
                 assertEquals(
-                    PasswordChange.Refused("There is no WebDAV backend nope."),
+                    PasswordChange.Refused("nope needs no password."),
                     device.manager.changePassword("nope", next),
                 )
             }

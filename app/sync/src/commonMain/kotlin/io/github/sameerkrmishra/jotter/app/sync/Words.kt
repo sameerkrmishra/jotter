@@ -32,6 +32,34 @@ public fun describe(reachability: Reachability): String =
     }
 
 /**
+ * What a hub that refuses this device's token means: the device was unpaired on the PC, or the
+ * hub's devices were reset.
+ */
+internal const val UNPAIRED: String =
+    "The PC hub refused this device's pairing token: it was unpaired on the PC. Pair this " +
+        "device again on the PC and enter the new token for this backend. Until then Jotter " +
+        "tries again only every 30 minutes."
+
+/** [describe], with the words for the kind of backend [config] is. */
+internal fun describe(
+    reachability: Reachability,
+    config: BackendConfig,
+): String =
+    if (config is PeerConfig) {
+        when {
+            reachability is Reachability.Unreachable &&
+                reachability.reason == UnreachableReason.UNAUTHORIZED -> UNPAIRED
+            reachability is Reachability.Unreachable &&
+                reachability.reason == UnreachableReason.NOT_INITIALIZED ->
+                "The PC hub answers, but its folder is not set up as a Jotter store " +
+                    "(${reachability.detail}). Set the hub up again on the PC."
+            else -> describe(reachability)
+        }
+    } else {
+        describe(reachability)
+    }
+
+/**
  * What a server that refuses the password means, and what to do. Retrying cannot help, so the app
  * tries again only rarely until the user enters a new one.
  */

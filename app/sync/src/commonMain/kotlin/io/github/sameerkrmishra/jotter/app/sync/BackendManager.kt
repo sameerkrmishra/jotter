@@ -5,6 +5,7 @@ import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.localfolder.LocalFolderBlobStore
+import io.github.sameerkrmishra.jotter.backend.peer.PeerAddress
 import io.github.sameerkrmishra.jotter.core.storage.BackendRecord
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.SyncAttempt
@@ -360,15 +361,17 @@ public class BackendManager internal constructor(
     public val secretsFile: String? get() = secrets.fileLocation
 
     /** Where the secrets of [backend] are kept, in plain words, or null if it needs none. */
-    public fun whereSecretsAre(backend: Backend): String? =
-        when {
+    public fun whereSecretsAre(backend: Backend): String? {
+        val what = if (backend.config is PeerConfig) "pairing token" else "password"
+        return when {
             backend.config.secrets.isEmpty() -> null
             backend.config.secretPlace == SecretPlace.KEYRING ->
-                "Its password is kept in the keyring."
+                "Its $what is kept in the keyring."
             else ->
-                "Its password is kept in plain text in ${secrets.fileLocation}, as chosen when " +
+                "Its $what is kept in plain text in ${secrets.fileLocation}, as chosen when " +
                     "it was added."
         }
+    }
 
     /**
      * Replaces the app password of the WebDAV backend [id] with [password], after checking that the
@@ -379,32 +382,125 @@ public class BackendManager internal constructor(
         password: Secret,
     ): PasswordChange =
         operations.withLock {
-            val backend = list().firstOrNull { it.id == id }
-            val config =
-                backend?.config as? WebDavConfig
-                    ?: return@withLock PasswordChange.Refused("There is no WebDAV backend $id.")
+            val config = list().firstOrNull { it.id == id }?.config
+            val (kind, words) =
+                when (config) {
+                    is WebDavConfig -> SecretKind.APP_PASSWORD to "app password"
+                    is PeerConfig -> SecretKind.PAIRING_SECRET to "pairing token"
+                    else -> return@withLock PasswordChange.Refused("$id needs no password.")
+                }
             if (password.reveal().isEmpty()) {
-                return@withLock PasswordChange.Refused("Enter the app password.")
+                return@withLock PasswordChange.Refused("Enter the $words.")
             }
-            val reachability = webDav.open(config, password).use { it.ping() }
+            val reachability =
+                try {
+                    openWithSecret(config, password).closing { it.ping() }
+                } catch (e: IllegalArgumentException) {
+                    return@withLock PasswordChange.Refused("Cannot use this $words: ${e.message}.")
+                }
             if (reachability is Reachability.Unreachable &&
                 reachability.reason == UnreachableReason.UNAUTHORIZED
             ) {
                 return@withLock PasswordChange.Refused(
-                    "The server refused this app password too. Nothing was changed.",
+                    "The ${if (config is PeerConfig) "hub" else "server"} refused this $words " +
+                        "too. Nothing was changed.",
                 )
             }
             try {
-                secrets
-                    .of(
-                        config.secretPlace,
-                    ).write(SecretKey(id, SecretKind.APP_PASSWORD), password)
+                secrets.of(config.secretPlace).write(SecretKey(id, kind), password)
             } catch (e: SecretStoreException) {
-                return@withLock PasswordChange.Refused(
-                    "Cannot store the app password: ${e.message}",
-                )
+                return@withLock PasswordChange.Refused("Cannot store the $words: ${e.message}")
             }
             PasswordChange.Changed
+        }
+
+    private fun openWithSecret(
+        config: BackendConfig,
+        secret: Secret,
+    ): BlobStore =
+        when (config) {
+            is PeerConfig -> openPeer(config, secret)
+            is WebDavConfig -> webDav.open(config, secret)
+            else -> throw IllegalArgumentException("${config.location} needs no secret")
+        }
+
+    /**
+     * Adds the hub on the user's PC at [address], `host` or `host:port`, as a backend called
+     * [name], or "PC hub", with the [token] that pairing this device on the PC showed (ADR-0015).
+     *
+     * The hub speaks plain HTTP inside Tailscale's encrypted tunnel, so the token goes only to a
+     * Tailscale address (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) or to this machine: an IPv4
+     * address outside those is refused here, and a name that resolves outside them is refused by
+     * the client before anything is sent. The hub must answer with this token, and its store must
+     * be set up on the PC; this device never sets it up. The token goes to [secretPlace].
+     */
+    public suspend fun addPeer(
+        address: String,
+        token: Secret,
+        name: String? = null,
+        secretPlace: SecretPlace = SecretPlace.KEYRING,
+    ): AddResult =
+        operations.withLock {
+            val config =
+                try {
+                    val parsed = PeerAddress.parse(address)
+                    PeerConfig(parsed.host, parsed.port, secretPlace)
+                } catch (e: IllegalArgumentException) {
+                    return@withLock AddResult.Refused("Not a hub address: ${e.message}.")
+                }
+            outsideTailnet(config.host)?.let { return@withLock AddResult.Refused(it) }
+            if (token.reveal().isBlank()) return@withLock AddResult.Refused(ENTER_TOKEN)
+            list()
+                .firstOrNull { it.config is PeerConfig && it.config.location == config.location }
+                ?.let { return@withLock AddResult.AlreadyAdded(it) }
+            val blobs =
+                try {
+                    openPeer(config, token)
+                } catch (e: IllegalArgumentException) {
+                    return@withLock AddResult.Refused(
+                        "Cannot use this pairing token: ${e.message}.",
+                    )
+                }
+            val reachability = blobs.closing { it.ping() }
+            if (reachability is Reachability.Unreachable) {
+                return@withLock AddResult.Refused(peerUnusable(config, reachability))
+            }
+            val id = newId()
+            val place = secrets.of(secretPlace)
+            try {
+                place.write(SecretKey(id, SecretKind.PAIRING_SECRET), token)
+            } catch (e: SecretStoreUnavailableException) {
+                return@withLock AddResult.NoKeyring(e.message.orEmpty())
+            } catch (e: SecretStoreException) {
+                return@withLock AddResult.Refused("Cannot store the pairing token: ${e.message}")
+            }
+            try {
+                AddResult.Added(insert(id, config, name ?: "PC hub"))
+            } catch (e: CancellationException) {
+                place.delete(SecretKey(id, SecretKind.PAIRING_SECRET))
+                throw e
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Exception,
+            ) {
+                place.delete(SecretKey(id, SecretKind.PAIRING_SECRET))
+                throw e
+            }
+        }
+
+    private fun peerUnusable(
+        config: PeerConfig,
+        reachability: Reachability.Unreachable,
+    ): String =
+        when (reachability.reason) {
+            UnreachableReason.UNAUTHORIZED ->
+                "The hub refused this pairing token. Pair this device again on the PC, and enter " +
+                    "the token it shows."
+            UnreachableReason.NOT_INITIALIZED, UnreachableReason.MISSING ->
+                "The hub at ${config.host}:${config.port} answers, but its folder is not set up. " +
+                    "Set the hub up on the PC first."
+            UnreachableReason.FAILED ->
+                "Cannot reach the hub at ${config.host}:${config.port}: ${reachability.detail}. " +
+                    "Check that the hub is on and that Tailscale runs on both devices."
         }
 
     /**
@@ -483,7 +579,17 @@ public class BackendManager internal constructor(
                         .open(
                             backend,
                         ).closing { engine.sync(SyncTarget(backend.id, it)) }
-                val (outcome, detail) = describe(result)
+                val (outcome, said) = describe(result)
+                // A hub's token, not a password: the words say what to do about it.
+                val detail =
+                    if (backend.config is PeerConfig) {
+                        said.replace(
+                            WRONG_PASSWORD,
+                            UNPAIRED,
+                        )
+                    } else {
+                        said
+                    }
                 val report =
                     when (result) {
                         is SyncResult.Completed -> result.report
@@ -495,6 +601,8 @@ public class BackendManager internal constructor(
                 throw e
             } catch (e: MissingSecretException) {
                 backend.ended(Outcome.UNAUTHORIZED, e.message.orEmpty())
+            } catch (e: IllegalArgumentException) {
+                backend.ended(Outcome.FAILED, "Cannot open it: ${e.message}.")
             } catch (e: Exception) {
                 backend.ended(
                     Outcome.FAILED,
@@ -561,6 +669,39 @@ public class BackendManager internal constructor(
             } finally {
                 (this as? AutoCloseable)?.close()
             }
+
+        const val ENTER_TOKEN = "Enter the pairing token that the PC showed."
+
+        /**
+         * Why the hub at [host] must not get a token, or null. An IPv4 address must be loopback or
+         * Tailscale's; a name is checked by the client when it resolves it, before each request.
+         */
+        fun outsideTailnet(host: String): String? {
+            val parts = host.split('.')
+            val octets =
+                parts.mapNotNull { part ->
+                    part.toIntOrNull()?.takeIf { it in 0..MAX_OCTET }
+                }
+            if (parts.size != IPV4_PARTS || octets.size != IPV4_PARTS) return null
+            val (first, second) = octets
+            val allowed =
+                first == LOOPBACK_FIRST ||
+                    (first == TAILSCALE_FIRST && second and TAILSCALE_MASK == TAILSCALE_SECOND)
+            return if (allowed) {
+                null
+            } else {
+                "$host is not on your tailnet or this machine. The hub speaks plain HTTP inside " +
+                    "Tailscale's encrypted tunnel, so Jotter sends its pairing token only to the " +
+                    "PC's Tailscale address (100.64.0.0/10) or name, or to this machine."
+            }
+        }
+
+        const val IPV4_PARTS = 4
+        const val MAX_OCTET = 255
+        const val LOOPBACK_FIRST = 127
+        const val TAILSCALE_FIRST = 100
+        const val TAILSCALE_MASK = 0xC0
+        const val TAILSCALE_SECOND = 0x40
 
         fun withSlash(url: String) = if (url.endsWith('/')) url else "$url/"
 

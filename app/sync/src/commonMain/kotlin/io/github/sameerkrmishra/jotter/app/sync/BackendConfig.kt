@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
 import io.github.sameerkrmishra.jotter.app.sync.dto.LocalFolderSettings
+import io.github.sameerkrmishra.jotter.app.sync.dto.PeerSettings
 import io.github.sameerkrmishra.jotter.app.sync.dto.WebDavSettings
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -57,6 +58,24 @@ public data class WebDavConfig(
 }
 
 /**
+ * The hub on the user's PC (`backend:peer`, ADR-0015), reached over Tailscale, or on this machine.
+ * Its pairing token is in a [SecretStore], never here.
+ *
+ * @property host The PC's Tailscale address or MagicDNS name, or a loopback address.
+ * @property port The hub's TCP port.
+ * @property secretPlace Where its pairing token is kept.
+ */
+public data class PeerConfig(
+    val host: String,
+    val port: Int,
+    override val secretPlace: SecretPlace = SecretPlace.KEYRING,
+) : BackendConfig {
+    override val location: String get() = "the PC hub at $host:$port"
+
+    override val secrets: Set<SecretKind> get() = setOf(SecretKind.PAIRING_SECRET)
+}
+
+/**
  * A backend this version cannot read the settings of: it was added by a newer version of Jotter,
  * or its settings are damaged. It is listed, so that the user can see and remove it, but it never
  * syncs.
@@ -75,6 +94,7 @@ public data class UnknownConfig(
 internal object BackendKinds {
     const val LOCAL_FOLDER = "local-folder"
     const val WEBDAV = "webdav"
+    const val PEER = "peer"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -86,6 +106,7 @@ internal object BackendKinds {
         when (config) {
             is LocalFolderConfig -> LOCAL_FOLDER
             is WebDavConfig -> WEBDAV
+            is PeerConfig -> PEER
             is UnknownConfig -> config.kind
         }
 
@@ -103,8 +124,13 @@ internal object BackendKinds {
                     WebDavSettings(
                         config.url,
                         config.username,
-                        places.entries.single { it.value == config.secretPlace }.key,
+                        placeName(config.secretPlace),
                     ),
+                )
+            is PeerConfig ->
+                json.encodeToString(
+                    PeerSettings.serializer(),
+                    PeerSettings(config.host, config.port, placeName(config.secretPlace)),
                 )
             is UnknownConfig -> throw IllegalArgumentException("Cannot store ${config.location}")
         }
@@ -121,6 +147,7 @@ internal object BackendKinds {
                         json.decodeFromString(LocalFolderSettings.serializer(), settings).path,
                     )
                 WEBDAV -> webDavOf(settings)
+                PEER -> peerOf(settings)
                 else -> UnknownConfig(kind)
             }
         } catch (_: SerializationException) {
@@ -128,6 +155,15 @@ internal object BackendKinds {
         } catch (_: IllegalArgumentException) {
             UnknownConfig(kind)
         }
+
+    private fun placeName(place: SecretPlace) = places.entries.single { it.value == place }.key
+
+    private fun placeOf(name: String) = requireNotNull(places[name]) { "No such place: $name" }
+
+    private fun peerOf(settings: String): PeerConfig {
+        val stored = json.decodeFromString(PeerSettings.serializer(), settings)
+        return PeerConfig(stored.host, stored.port, placeOf(stored.secrets))
+    }
 
     private fun webDavOf(settings: String): WebDavConfig {
         val stored = json.decodeFromString(WebDavSettings.serializer(), settings)
