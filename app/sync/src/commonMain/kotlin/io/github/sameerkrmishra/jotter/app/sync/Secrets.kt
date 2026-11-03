@@ -68,10 +68,52 @@ public interface SecretStore {
 }
 
 /** A [SecretStore] cannot be used. The message says why, without the secret. */
-public class SecretStoreException(
+public open class SecretStoreException(
     message: String,
     cause: Throwable? = null,
 ) : Exception(message, cause)
+
+/**
+ * No keyring answers at all: no session bus, no Secret Service, or no `secret-tool`. The user may
+ * then choose to keep the secret in a file instead (ADR-0016), which the app offers.
+ */
+public class SecretStoreUnavailableException(
+    message: String,
+) : SecretStoreException(message)
+
+/** Where the secrets of a backend are kept (ADR-0016). It is a setting, not a secret. */
+public enum class SecretPlace {
+    /** The desktop's keyring, through the Secret Service. The default. */
+    KEYRING,
+
+    /** A file readable by this user alone, in plain text, which the user chose. */
+    FILE,
+}
+
+/**
+ * The places secrets can be kept in: the [keyring] by default, and the [file] that the user may
+ * choose instead (ADR-0016).
+ *
+ * @property fileLocation Where [file] keeps its secrets, for people, such as
+ *   `~/.config/jotter/secrets.json`, or null if there is no such file.
+ */
+public class SecretStores(
+    public val keyring: SecretStore,
+    public val file: SecretStore,
+    public val fileLocation: String? = null,
+) {
+    /** The store of [place]. */
+    public fun of(place: SecretPlace): SecretStore =
+        when (place) {
+            SecretPlace.KEYRING -> keyring
+            SecretPlace.FILE -> file
+        }
+
+    public companion object {
+        /** For apps and tests whose backends need no secrets: both places are [NoSecretStore]. */
+        public val NONE: SecretStores = SecretStores(NoSecretStore, NoSecretStore)
+    }
+}
 
 /**
  * The secret store of an app whose backends need no secrets: today's, as local folders need none.
