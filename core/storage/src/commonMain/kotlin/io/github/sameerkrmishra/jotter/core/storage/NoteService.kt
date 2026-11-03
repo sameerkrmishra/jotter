@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.core.storage
 
 import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
+import app.cash.sqldelight.coroutines.mapToOne
 import app.cash.sqldelight.coroutines.mapToOneOrNull
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.HybridLogicalClock
@@ -158,6 +159,18 @@ public class NoteService internal constructor(
      */
     public fun observe(id: NoteId): Flow<Note?> =
         noteQuery(id).asFlow().mapToOneOrNull(queryContext).distinctUntilChanged()
+
+    /**
+     * Emits a number that rises whenever a revision is stored: an edit on this device, or one that
+     * sync brought in. A scheduler can use it to sync after edits. See [observe] for when it
+     * re-runs; writes by another process are seen only after the next write through this store.
+     */
+    public fun observeRevisionMark(): Flow<Long> =
+        database.revisionQueries
+            .selectLastSeq()
+            .asFlow()
+            .mapToOne(queryContext)
+            .distinctUntilChanged()
 
     /**
      * Returns the tags of the notes that are not in the trash, each with the number of such notes

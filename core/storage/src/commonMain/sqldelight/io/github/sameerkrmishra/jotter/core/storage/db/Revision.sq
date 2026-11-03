@@ -136,3 +136,7 @@ selectTagsOfNote:
 SELECT revision_tag.revision_id, revision_tag.tag
 FROM revision_tag JOIN revision ON revision.id = revision_tag.revision_id
 WHERE revision.note_id = :noteId;
+
+-- The highest arrival number so far, 0 for no revisions: it rises with every revision stored.
+selectLastSeq:
+SELECT coalesce(max(seq), 0) AS last FROM revision;

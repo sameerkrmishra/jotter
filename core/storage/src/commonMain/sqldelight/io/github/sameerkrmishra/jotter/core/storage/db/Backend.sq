@@ -1,0 +1,38 @@
+-- The backends this device syncs with (PLAN.md §4 and §6.5), and how their last sync went. kind and
+-- settings belong to app:sync, which reads and writes them: this module does not interpret them.
+-- Never a secret: those live in a secret store outside the database (ADR-0015). id is the
+-- backend_id of the sync tables. A backend added again gets a new id.
+CREATE TABLE backend (
+  id TEXT NOT NULL PRIMARY KEY,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  settings TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  -- The last sync attempt, whatever its outcome: when, how it ended, a description for people,
+  -- and the issues it reported, one per line. All NULL until the first attempt.
+  attempted_at INTEGER,
+  outcome TEXT,
+  outcome_detail TEXT,
+  issues TEXT,
+  -- The last attempt that ran to its end. Kept when a later attempt fails.
+  succeeded_at INTEGER
+) WITHOUT ROWID;
+
+selectBackends:
+SELECT * FROM backend ORDER BY added_at, id;
+
+selectBackend:
+SELECT * FROM backend WHERE id = :id;
+
+insertBackend:
+INSERT INTO backend(id, kind, name, settings, added_at)
+VALUES (:id, :kind, :name, :settings, :addedAt);
+
+deleteBackend:
+DELETE FROM backend WHERE id = :id;
+
+recordAttempt:
+UPDATE backend
+SET attempted_at = :attemptedAt, outcome = :outcome, outcome_detail = :detail, issues = :issues,
+  succeeded_at = coalesce(:succeededAt, succeeded_at)
+WHERE id = :id;
