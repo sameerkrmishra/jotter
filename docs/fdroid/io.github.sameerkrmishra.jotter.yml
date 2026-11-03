@@ -37,6 +37,10 @@ Builds:
       - update-alternatives --auto java
     gradle:
       - yes
+    # SQLDelight's schema snapshots: small SQLite files that only core:storage's migration tests
+    # read, never the app's build. Test fixtures, not prebuilt code.
+    scanignore:
+      - core/storage/src/commonMain/sqldelight/databases
 
 # TODO before submitting: the SHA-256 of the maintainer's signing certificate, from
 #   apksigner verify --print-certs jotter-0.1.0.apk
