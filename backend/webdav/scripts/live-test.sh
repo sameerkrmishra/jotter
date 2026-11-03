@@ -82,7 +82,7 @@ for target in $targets; do
 done
 
 # Apache's If-None-Match is not atomic: concurrent writers of one path can all win
-# (docs/adr/0015-webdav-backend.md). That one contract test is known to fail there.
+# (docs/adr/0017-webdav-backend.md). That one contract test is known to fail there.
 # shellcheck disable=SC2086 # $tasks is a list of task names.
 JOTTER_WEBDAV_LIVE=1 \
     JOTTER_WEBDAV_LIGHTTPD_URL="http://127.0.0.1:$lighttpd_port/" \

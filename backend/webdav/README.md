@@ -4,7 +4,7 @@ A `BlobStore` in a collection on a WebDAV server, such as mailbox.org's, a
 Nextcloud or a NAS, over the Ktor client
 ([PLAN.md §3.4](../../docs/PLAN.md#34-key-technology-choices)). What it relies on,
 and which servers it was tested with, is
-[ADR-0015](../../docs/adr/0015-webdav-backend.md).
+[ADR-0017](../../docs/adr/0017-webdav-backend.md).
 
 ```kotlin
 val store = WebDavBlobStore(
@@ -59,7 +59,7 @@ again.
   answer lost, and the caller compares the content.
 - **Two writers racing for one path** both win on a server whose
   `If-None-Match` is not atomic, such as Apache's `mod_dav`. Nothing a client can
-  send prevents that (ADR-0015). Sync does not depend on it: a path has one
+  send prevents that (ADR-0017). Sync does not depend on it: a path has one
   possible content (ADR-0014).
 - **`list`** is `PROPFIND` with `Depth: 1` per collection, never `infinity`. It
   returns all or fails: a member whose properties failed, a file without a length,
@@ -142,4 +142,4 @@ It needs Docker, curl and python3, starts each server on 127.0.0.1 at a free
 port, and removes its containers by name when it ends. Their logs are kept in
 `build/live-test/`.
 
-mailbox.org itself has not been tested: see "Not verified" in ADR-0015.
+mailbox.org itself has not been tested: see "Not verified" in ADR-0017.

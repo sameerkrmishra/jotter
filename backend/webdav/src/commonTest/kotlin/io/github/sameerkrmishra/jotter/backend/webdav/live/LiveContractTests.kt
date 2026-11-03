@@ -47,6 +47,6 @@ class LighttpdContractTest : LiveContract("JOTTER_WEBDAV_LIGHTTPD_URL")
 /**
  * Apache httpd 2.4 with mod_dav_fs. Its `If-None-Match: *` is not atomic, so
  * `concurrentWritersOfOnePathHaveExactlyOneWinner` fails on it and is excluded by
- * scripts/live-test.sh: see docs/adr/0015-webdav-backend.md.
+ * scripts/live-test.sh: see docs/adr/0017-webdav-backend.md.
  */
 class ApacheContractTest : LiveContract("JOTTER_WEBDAV_APACHE_URL")

@@ -23,7 +23,7 @@ internal const val PROBE_PREFIX: String = "${RESERVED_SEGMENT_PREFIX}probe-"
 
 /**
  * A [BlobStore] in a collection on a WebDAV server, such as mailbox.org's or a Nextcloud. See
- * `docs/adr/0015-webdav-backend.md` for what it relies on and which servers it was tested with.
+ * `docs/adr/0017-webdav-backend.md` for what it relies on and which servers it was tested with.
  *
  * The collection must exist. Before first use it is set up with [initialize], which also refuses
  * a server that would replace files. Until then the store counts as unreachable.

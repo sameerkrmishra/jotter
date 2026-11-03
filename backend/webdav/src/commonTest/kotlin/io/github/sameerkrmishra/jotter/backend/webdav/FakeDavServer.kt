@@ -24,7 +24,7 @@ internal val FAKE_CREDENTIALS = WebDavCredentials("me@example.org", "app pass: w
 
 /**
  * An in-memory WebDAV server inside a Ktor [MockEngine], for tests that need no network. It does
- * what the servers in docs/adr/0015 do, as far as the store relies on it, and can be switched to
+ * what the servers in docs/adr/0017 do, as far as the store relies on it, and can be switched to
  * each of their differences. Requests are handled one at a time, so `If-None-Match: *` is atomic
  * unless [ignoreIfNoneMatch] is set.
  */

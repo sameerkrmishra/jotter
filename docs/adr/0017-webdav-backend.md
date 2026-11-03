@@ -1,4 +1,4 @@
-# 0015. The WebDAV backend: what it asks of a server, and what no client can enforce
+# 0017. The WebDAV backend: what it asks of a server, and what no client can enforce
 
 - **Status:** Proposed
 - **Date:** 2026-11-03

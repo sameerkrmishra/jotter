@@ -287,7 +287,7 @@ files without hard links on FAT
 refuses a server that ignores `If-None-Match`. Whether racing writers of one path
 can both win is up to the server: Apache's `mod_dav` lets them, which sync
 tolerates because a path has one possible content
-([ADR-0015](adr/0015-webdav-backend.md)).
+([ADR-0017](adr/0017-webdav-backend.md)).
 
 A shared **contract test suite** in `backend/api/contract` runs against every
 implementation. A new backend is "done" when it passes.
@@ -397,8 +397,8 @@ codec. Documented as ADR-0007 in M6.
   (M3); 0012 [local folder publishing](adr/0012-local-folder-publishing.md) (M3);
   0013
   [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
-  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0015
-  [the WebDAV backend](adr/0015-webdav-backend.md) (M4).
+  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0017
+  [the WebDAV backend](adr/0017-webdav-backend.md) (M4).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge. Beside `check`, a `webdav` job
