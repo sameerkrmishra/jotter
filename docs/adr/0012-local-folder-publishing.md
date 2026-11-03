@@ -20,8 +20,9 @@ The usual tools each fall short:
   visible while it fills up, and a crash leaves half of it there.
 - `link(temp, final)` is atomic and refuses an existing target. But FAT and exFAT
   have no hard links: Linux's vfat and exfat drivers define no `.link` operation.
-  An Android app cannot make them either: an AOSP SELinux `neverallow` rule denies
-  it. Since which Android version is unconfirmed; "Android 6" is from memory.
+  An Android app cannot make them either: SELinux denies it. The device tests
+  (M5) show `link` failing with `EACCES` in an app's own storage on API 26 and
+  36, and failing in its folder in shared storage too.
 - `renameat2(RENAME_NOREPLACE)` would suit FAT on Linux too, but the JVM cannot
   reach it: JDK 21 has no such call in `java.nio`, and the foreign function API
   is still a preview there.
@@ -196,17 +197,22 @@ M5 must decide how Android users reach a USB stick or shared folder: a separate
 ### Not verified
 
 The fallback was tested by disabling `link`, on the file system of the temporary
-directory. It has not run on a real FAT or exFAT mount, or on an Android device.
-`testAndroidHostTest` runs on a host JVM, so `strictStat` and `strictListNames`
-have not run on Android's own `java.nio`, and whether `FileChannel.force` works on
-a directory there is unknown.
+directory. It has not run on a real FAT or exFAT mount.
 
-That `fcntl` locks work on Android, on app storage or the storage FUSE layer, is
-unconfirmed. If they do not, the fallback fails with an error on Android, which
-has no hard links, so the backend would be unusable there until M5 deals with it.
-It would not break the guarantee. The two processes in the tests are both JVM or
-both Native; that the two exclude each other follows from both being `fcntl` locks
-over the same range.
+*Verified in M5* on API 26 and 36 emulators (`connectedAndroidDeviceTest`): the
+contract suite passes in the app's own storage and in its folder in shared
+storage (sdcardfs on API 26, FUSE on 36), on Android's own `java.nio`. Whether a
+directory `fsync` there syncs, or fails as "not supported" and is tolerated, was
+not checked. Neither storage has hard links for an app, so
+on Android the store always publishes by rename under the lock. Three processes of
+the app racing for the same paths (`TwoProcessDeviceTest`) each win distinct
+paths, on both storages; with a lock that is never taken they replace each
+other's files, so the `fcntl` lock is what holds the guarantee there. The device
+run also found that Android's `Files.getFileStore` always throws
+`SecurityException`, which escaped `writeNew` after an unrecognised link error; it
+now counts as an unknown file store. The two processes in the JVM and Native tests
+are both JVM or both Native; that the two exclude each other follows from both
+being `fcntl` locks over the same range.
 
 Read and directory `fsync` errors cannot be injected from a Kotlin test. The tests
 replace those calls, and real `EACCES` comes from `chmod`. Real `EIO` from `readdir`

@@ -4,6 +4,7 @@ import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.jvm
 plugins {
     id("jotter.kmp-library")
     id("jotter.quality")
+    id("jotter.android-device-test")
 }
 
 kotlin {
@@ -29,4 +30,11 @@ kotlin {
             implementation(projects.backend.api.contract)
         }
     }
+}
+
+// An app on Android has no hard links (AndroidStorageTest), so the device skips the tests that
+// need them. Without links, a store without the lock cannot write at all.
+deviceTest {
+    runnerArguments["notAnnotation"] =
+        "io.github.sameerkrmishra.jotter.backend.localfolder.NeedsHardLinks"
 }

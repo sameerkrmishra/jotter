@@ -160,4 +160,9 @@ timeout -s TERM 110m python3 core/sync/scripts/mutants.py --first 0 --budget-min
 ```
 
 The tests of `SyncEngineTest` each pin one failure rule. Android host tests are
-disabled, as in `core:storage`.
+disabled, as in `core:storage`; the tests run on Android devices instead
+(`connectedAndroidDeviceTest`, in CI on API 26 and 36), where the simulator runs
+30 seeds and the regression seeds, one after another. A longer range takes
+instrumentation arguments:
+`-Pandroid.testInstrumentationRunnerArguments.jotter_sim_cases=200` (and
+`jotter_sim_start`).
