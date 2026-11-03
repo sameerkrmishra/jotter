@@ -70,6 +70,27 @@ class MainActivityTest {
     }
 
     @Test
+    fun emojiAreEditedAndShownWithoutEmojiCompat() {
+        // EmojiCompat's initializer is removed from the manifest, so the system font draws them.
+        // An emoji of Unicode 15, newer than API 26's font, must still be kept whole.
+        val text = "tea 🙂 🫨"
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitText("New note")
+            compose.onNodeWithText("New note").performClick()
+            compose.onNodeWithTag("body").performTextInput(text)
+            pressBack(scenario)
+            compose.awaitText(text)
+            assertEquals(
+                text,
+                test.ready.store.notes
+                    .list()
+                    .single()
+                    .body,
+            )
+        }
+    }
+
+    @Test
     fun turningThePhoneKeepsTheDraft() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.awaitText("New note")

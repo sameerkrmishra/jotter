@@ -22,10 +22,10 @@ What F-Droid needs from Jotter, and what was checked
    fdroiddata with the recipe in `metadata/`, if possible on F-Droid's build server image
    (`fdroidserver` in Docker). Neither has been run.
 4. Look at what `fdroid scanner` reports. Expected: `gradle/wrapper/gradle-wrapper.jar`, which
-   F-Droid replaces with its own Gradle, and possibly the SQLDelight schema snapshots
-   (`core/storage/src/commonMain/sqldelight/databases/*.db`, SQLite files used only by the
-   migration tests); if the scanner flags them, a `scandelete` line for that folder is safe, as
-   `assembleRelease` does not read them.
+   F-Droid replaces with its own Gradle. The SQLDelight schema snapshots
+   (`core/storage/src/commonMain/sqldelight/databases/*.db`, SQLite files that only
+   `core:storage`'s migration checks and tests read, never `assembleRelease`) are test fixtures;
+   the recipe's `scanignore` names their folder.
 
 ## Inclusion rules
 
@@ -41,12 +41,12 @@ What F-Droid needs from Jotter, and what was checked
 **Anti-features:** none expected. Nothing would need `Ads`, `Tracking`, `NonFreeNet`,
 `NonFreeDep`, `NonFreeAdd` or `NonFreeComp`. Two things a reviewer may ask about:
 
-- **`androidx.emoji2`** (through Compose) registers `EmojiCompatInitializer`, which looks for a
-  *system-installed* downloadable-emoji font provider, on most phones Google Play Services'. It
-  does not bundle or require Play Services, and on a phone without it emoji fall back to the
-  system font. F-Droid has not treated this as `NonFreeDep` for other Compose apps; removing the
-  initializer from the manifest would avoid the question, at the cost of newer emoji on old
-  Android versions.
+- **`androidx.emoji2`** comes with Compose. Its `EmojiCompatInitializer` would ask a
+  system-installed font provider, on most phones Google Play Services, for a newer emoji font.
+  The app's manifest removes that initializer, so Jotter never asks: Compose then draws emoji
+  with the system font (it checks `EmojiCompat.isConfigured()` first), and an emoji newer than
+  the phone's Android version shows as a blank box. `MainActivityTest` writes and shows a note
+  with a Unicode 15 emoji on API 26 and 36.
 - **Tailscale** is a third-party app the PC hub relies on, not a dependency of Jotter: Jotter
   only checks whether a VPN with a Tailscale address carries it (ADR-0018). Tailscale's Android
   client is open source, and its coordination server can be self-hosted (Headscale). WebDAV sync

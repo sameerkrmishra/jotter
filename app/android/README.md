@@ -99,6 +99,9 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
   ending the process does not save it again. The intent's extras are kept out of that state.
 - **Edge to edge.** Android 15 and later draw apps under the system bars; the screens are
   padded by `safeDrawing`, which includes the keyboard.
+- **No EmojiCompat.** The manifest removes emoji2's `EmojiCompatInitializer`, which would ask a
+  font provider such as Google Play Services for an emoji font (docs/fdroid). Compose draws
+  emoji with the system font; one newer than the phone's Android shows as a blank box.
 
 ## Tests
 
@@ -114,7 +117,7 @@ Device tests (`src/androidTest`; CI's `android-device` job runs them on API 26 a
 
 | Test | What it shows |
 |---|---|
-| `MainActivityTest` | A note written in the app is stored; Back leaves the editor and then the app; turning the phone keeps the draft; leaving the screen stores it; the Sync screen offers WebDAV and the hub, and says why there is no folder; the password and token fields ask for a password keyboard without autocorrection (`EditorInfo.inputType`) |
+| `MainActivityTest` | A note written in the app is stored; emoji, also one newer than API 26, are edited and shown without EmojiCompat; Back leaves the editor and then the app; turning the phone keeps the draft; leaving the screen stores it; the Sync screen offers WebDAV and the hub, and says why there is no folder; the password and token fields ask for a password keyboard without autocorrection (`EditorInfo.inputType`) |
 | `ShareActivityTest` | Shared text becomes one note, also when the phone turns; 110,000 characters are stored whole; an image is refused; text beside a file is kept; an empty share saves nothing; an extra that cannot be unparcelled does not crash the window |
 | `SyncWorkerTest` | `SyncWorker` syncs both ways with another device through a folder and returns after its round, with no backend call on the main thread; the periodic job exists only while a backend does; a database that cannot open ends the job quietly |
 | `KeystoreSecretsTest` | The sealed store with a real Keystore key; a lost key means entering the secret again |
