@@ -7,7 +7,9 @@ that the CLI could want does not belong here.
 
 ```kotlin
 val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-val app = AppViewModel(store.notes, ConflictResolver(store), scope, Dispatchers.IO)
+val sync = SyncControls(manager, scheduler) // app:sync, see app/desktop
+scheduler.start(scope, store.notes.observeRevisionMark())
+val app = AppViewModel(store.notes, ConflictResolver(store), scope, Dispatchers.IO, sync)
 JotterApp(app) // in a window
 // When the user closes it:
 app.requestExit { exit() } // saves first, and asks if that fails
@@ -15,20 +17,25 @@ app.requestExit { exit() } // saves first, and asks if that fails
 scope.coroutineContext.job.cancelAndJoin() // before store.close()
 ```
 
-**Dependency rule:** depends on `core:storage` and `core:sync`, and on `core:sync`'s
-public API alone. Only `app/*` may depend on it.
+**Dependency rule:** depends on `core:storage`, `core:sync` and `app:sync`, and on
+`core:sync`'s public API alone. Only `app/*` may depend on it. What the CLI shares,
+such as the backend list, adding and removing backends and the sync scheduler, is in
+`app:sync`.
 
 ## What is here
 
 | Type | What it is |
 |---|---|
-| `AppViewModel` | The one public class: the list, the open editor, `refresh` and `requestExit`. Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
+| `AppViewModel` | The main public class: the list, the open editor, `refresh` and `requestExit`. Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
+| `SyncControls` | The backend manager and scheduler of `app:sync`, for `AppViewModel`. Without it the app shows no backend screen |
 | `JotterApp` | The one public composable, which calls `refresh` whenever its window gains focus |
 | `CannotOpenNotes` | What an app shows instead if the database could not be opened |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
 | `EditorViewModel`, `EditorScreen` | The text editor with its Markdown preview, and adding and removing tags |
 | `AttentionViewModel` | The notes that sync left something on, from `ConflictResolver`'s lists: open conflicts, hidden heads, text that does not count, and combined texts not yet saved |
 | `ReviewViewModel`, `ReviewScreen`, `ReviewParts` | The review of one such note: what happened in plain words, every text in full, and the answers |
+| `BackendsViewModel`, `BackendsScreen` | The backend screen: each backend with whether it can be reached now, when it last synced, its issues and where its password is kept; adding a folder or a WebDAV server (asking before setting one up, and offering the password file when no keyring answers); entering a new password after the server refused one; adding the PC hub; removing a backend; "Sync now" |
+| `HubControls`, `HubViewModel`, `PeerHubControls` | Running the hub on this PC from the backend screen: on or off, its folder and address (loopback or Tailscale only, said plainly), pairing a device with its token shown once, and unpairing. `PeerHubControls` (JVM) is the `server` module's `PeerHub`; it adds the hub's folder as this PC's own local folder backend and keeps its settings, which hold no secret, in `$XDG_CONFIG_HOME/jotter/hub.properties` |
 | `regionsOf` | Where two conflicting versions agree and where they differ, read back from core:sync's marked text |
 | `parseMarkdown`, `MarkdownDocument` | The `markdown` package: a note's text as plain blocks and spans, with no Compose in it |
 | `MarkdownPreview` | Those blocks on screen, with tappable task checkboxes |
@@ -147,14 +154,29 @@ not worth it for six lines.
   closing the app. They come back when the note is reviewed again, after a restart too,
   and the note stays under "Needs attention" meanwhile. They go when their answer is
   written, saved as a note or discarded. If keeping one fails, Back stays and closing
-  the app asks first. A segment that could not be read is not
-  about one note, and waits for the backend screens of M4.
+  the app asks first. A segment that could not be read is not about one note, so it
+  shows on the backend screen, as an issue of that backend.
 - **Conflict regions.** `ConflictDetails` gives the merged text with conflict
   markers, which core:merge makes for a person and not to be parsed. `regionsOf` reads
   it back all the same, as each line between markers comes from one version: if
   neither version has a line that looks like a marker, every marker line is one. If one
   does, the review shows the marked text as it is, and both versions in full as always.
   The marker labels are core:sync's, and `ReviewScreenTest` fails if they change.
+- **The backend screen** ("Sync" in the header, PLAN.md §6.5). Adding a folder that
+  is not a Jotter store yet asks first, and says what setting it up does and why a
+  drive must be plugged in ([ADR-0012](../../docs/adr/0012-local-folder-publishing.md));
+  one another device set up is simply added, and then syncs at once. Removing asks
+  first and says that the files stay, where, and that other devices can go on syncing
+  there. Each card says, in `app:sync`'s plain words, whether the backend can be
+  reached when the screen last asked (on opening and after each sync), when it last
+  synced ("Last synced 5 minutes ago", or "Never synced"), why the last try failed if it
+  did, and the issues of the last sync, such as a damaged file. A missing folder or an
+  empty mount point reads as such, never as empty or synced, beside the time of the
+  last success. "Sync now" syncs every backend, also one waiting after a failure.
+  Every failure, such as a locked database, shows as a message, and so does what
+  keeps the scheduler from syncing (`SyncScheduler.problem`). A backend that the
+  screen finds reachable again after a failed try syncs at once. The screen's
+  coroutines are a child of the app's scope, which closing it leaves running.
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
   or until dismissed. A failed read keeps what the list showed.
@@ -173,6 +195,11 @@ store with a second real database through `InMemoryBlobStore`, holds a file back
 app's listing to make an edit wait, and writes a faulty device's segment by hand for text
 that does not count. Nothing of the sync engine is mocked.
 `twoDevicesConvergeOnWhatTheUserCombined` answers a conflict on screen and syncs, and both
-devices then hold the same note and no conflict. The tests for a
+devices then hold the same note and no conflict. `BackendsScreenTest` and
+`TwoAppsEndToEndTest` use `SyncedDevice`, the desktop app's real sync stack (engine, backend
+manager, scheduler) on a database of its own, with real dispatchers and real folders.
+`TwoAppsEndToEndTest` shows two apps side by side: on the screen, one sets up a folder, the
+other adds it, one writes a note that reaches the other, both edit the same line, and the
+conflict appears under "Needs attention" on both and in the review. The tests for a
 locked database hold a real lock, so each waits out the 5 s busy timeout. Android
 host tests are disabled, as in `core:storage`.

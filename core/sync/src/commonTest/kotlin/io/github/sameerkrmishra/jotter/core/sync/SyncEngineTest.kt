@@ -14,6 +14,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.storage.BackendRecord
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import kotlinx.coroutines.test.TestResult
@@ -34,6 +35,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 /** A [BlobStore] whose next calls fail in ways a test asks for. */
 private class ScriptedStore(
@@ -138,7 +140,7 @@ class SyncEngineTest {
             assertEquals(1, report.pushedSegments)
             assertEquals(
                 "{\"format\":1,\"codec\":\"json+gzip\"}",
-                blobs.read("jotter/format.json").decodeToString(),
+                blobs.read("jotter/formats/1-json+gzip.json").decodeToString(),
             )
             val deviceFile = "jotter/devices/${phone.deviceId}/device.json"
             assertTrue(blobs.read(deviceFile).decodeToString().contains("\"platform\":\"test\""))
@@ -741,10 +743,21 @@ class SyncEngineTest {
             val huge =
                 object : BlobStore by memory {
                     override suspend fun list(prefix: String): List<BlobInfo> =
-                        listOf(BlobInfo(path, MAX_SEGMENT_BYTES + 1))
+                        if (prefix == BackendLayout.DEVICES) {
+                            listOf(BlobInfo(path, MAX_SEGMENT_BYTES + 1))
+                        } else {
+                            memory.list(prefix)
+                        }
 
                     override suspend fun read(path: String): ByteArray =
-                        if (path == BackendLayout.FORMAT_PATH) memory.read(path) else error("read")
+                        if (path.startsWith(
+                                BackendLayout.FORMATS,
+                            )
+                        ) {
+                            memory.read(path)
+                        } else {
+                            error("read")
+                        }
                 }
             assertIs<SyncIssue.SegmentNotApplied>(pc.sync(huge).issues.single())
         }
@@ -804,7 +817,7 @@ class SyncEngineTest {
             phone.notes.create("t", "b")
             val blobs = ScriptedStore()
             blobs.inner.writeNew(
-                BackendLayout.FORMAT_PATH,
+                BackendLayout.formatPath(2, "x"),
                 "{\"format\":2,\"codec\":\"x\"}".encodeToByteArray(),
             )
             assertIs<SyncResult.Incompatible>(phone.engine().sync(SyncTarget("b", blobs)))
@@ -817,37 +830,59 @@ class SyncEngineTest {
             val phone = device("phone")
             val codec = InMemoryBlobStore()
             codec.writeNew(
-                BackendLayout.FORMAT_PATH,
+                BackendLayout.formatPath(1, "xchacha"),
                 "{\"format\":1,\"codec\":\"xchacha\"}".encodeToByteArray(),
             )
             assertIs<SyncResult.Incompatible>(phone.engine().sync(SyncTarget("b", codec)))
             val damaged = InMemoryBlobStore()
-            damaged.writeNew(BackendLayout.FORMAT_PATH, "{".encodeToByteArray())
+            damaged.writeNew(BackendLayout.formatPath(1, "json+gzip"), "{".encodeToByteArray())
             assertIs<SyncResult.Incompatible>(phone.engine().sync(SyncTarget("b", damaged)))
         }
 
     @Test
-    fun theLoserOfTheRaceToCreateTheFormatFileReadsTheWinners(): TestResult =
+    fun aDeviceOfTheSameVersionThatWroteTheFormatFileMeanwhileIsFine(): TestResult =
         runTest {
             val phone = device("phone")
             val memory = InMemoryBlobStore()
-            var first = true
             val racing =
                 object : BlobStore by memory {
-                    override suspend fun read(path: String): ByteArray {
-                        if (first) {
-                            first = false
-                            val winner = "{\"format\":1,\"codec\":\"json+gzip\"}"
-                            val bytes = memory.runCatching { read(path) }
-                            check(bytes.isFailure)
-                            throw io.github.sameerkrmishra.jotter.backend.api
-                                .BlobNotFoundException(path)
-                                .also { memory.writeNew(path, winner.encodeToByteArray()) }
+                    override suspend fun writeNew(
+                        path: String,
+                        bytes: ByteArray,
+                    ) {
+                        if (path.startsWith(BackendLayout.FORMATS) && memory.list("").isEmpty()) {
+                            memory.writeNew(path, bytes)
+                            throw BlobAlreadyExistsException(path)
                         }
-                        return memory.read(path)
+                        memory.writeNew(path, bytes)
                     }
                 }
             assertIs<SyncResult.Completed>(phone.engine().sync(SyncTarget("b", racing)))
+        }
+
+    @Test
+    fun anotherVersionThatSetsUpTheBackendAtTheSameTimeIsFound(): TestResult =
+        runTest {
+            val phone = device("phone")
+            phone.notes.create("t", "b")
+            val memory = InMemoryBlobStore()
+            val racing =
+                object : BlobStore by memory {
+                    override suspend fun writeNew(
+                        path: String,
+                        bytes: ByteArray,
+                    ) {
+                        if (path.startsWith(BackendLayout.FORMATS)) {
+                            memory.writeNew(
+                                BackendLayout.formatPath(2, "json+gzip"),
+                                byteArrayOf(1),
+                            )
+                        }
+                        memory.writeNew(path, bytes)
+                    }
+                }
+            assertIs<SyncResult.Incompatible>(phone.engine().sync(SyncTarget("b", racing)))
+            assertTrue(memory.list(BackendLayout.DEVICES).isEmpty())
         }
 
     @Test
@@ -879,6 +914,24 @@ class SyncEngineTest {
             assertEquals(note, pc.notes.get(note.id))
             assertTrue(relay.sync.unpushed("right").isEmpty())
             assertTrue(relay.sync.unpushed("left").isEmpty())
+        }
+
+    @Test
+    fun onlyBackendsMissingFromTheBackendTableAreForgottenAsUnlisted(): TestResult =
+        runTest {
+            val phone = device("phone")
+            phone.notes.create("t", "b")
+            val engine = phone.engine()
+            phone.backends.add(
+                BackendRecord("listed", "local-folder", "x", "{}", Instant.DISTANT_PAST),
+            )
+            engine.sync(SyncTarget("listed", InMemoryBlobStore()))
+            engine.sync(SyncTarget("removed", InMemoryBlobStore()))
+            assertEquals(listOf("removed"), engine.forgetUnlisted())
+            assertTrue(phone.sync.ownSegments("removed").isEmpty())
+            assertEquals(1, phone.sync.unpushed("removed").size)
+            assertEquals(1, phone.sync.ownSegments("listed").size)
+            assertEquals(emptyList(), engine.forgetUnlisted())
         }
 
     @Test

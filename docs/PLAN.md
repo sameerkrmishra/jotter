@@ -106,6 +106,7 @@ jotter/
 ├── app/
 │   ├── shared-ui/      # Compose Multiplatform screens and view models
 │   ├── android/        # Activity, Share target, WorkManager sync
+│   ├── sync/           # backend list and config, add/remove, status, sync scheduling
 │   ├── desktop/        # Compose Desktop entry point, Linux packaging
 │   └── cli/            # Clikt-based CLI
 └── server/             # Ktor: peer BlobStore endpoint (web app API later)
@@ -141,7 +142,7 @@ Each module has one job and a small public API. Internal details are marked
 | License | Apache-2.0 | Free use; attribution required via LICENSE + NOTICE; patent grant |
 | UI | Compose Multiplatform | One UI codebase for Android and Linux |
 | DB | SQLDelight + bundled SQLite (FTS5) | §2 |
-| HTTP | Ktor client and server | KMP-native, used for WebDAV, peer and server |
+| HTTP | Ktor client; JDK sockets and Ktor's HTTP parser for the hub ([ADR-0015](adr/0015-pc-hub-peer-protocol.md)) | KMP-native, used for WebDAV, peer and server |
 | Serialization | kotlinx.serialization (JSON) | Readable change files, easy to debug |
 | Markdown | JetBrains `markdown` parser + a Compose renderer | KMP, maintained |
 | DI | Manual constructor injection with one composition root per app | Easiest to read. No framework to learn |
@@ -181,12 +182,14 @@ Local SQLite tables (simplified; the schema is in `core/storage`):
 - `device`: this device's id and name, and the last timestamp of its hybrid
   logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
-- `backend`: configured backends and their settings.
+- `backend`: configured backends, their settings (never a secret,
+  [ADR-0016](adr/0016-where-secrets-live.md)) and the outcome of their last sync.
 - `sync_read`: per backend, the files read in each device folder.
 - `sync_segment`, `backend_revision`: this device's segments on each backend, and
   the revisions known to be there.
 
-Schema version 2 (M3) adds these, except `backend`, which M4 adds.
+Schema version 2 (M3) adds these, except `backend`, which schema version 3 (M4)
+adds.
 
 "Delete forever" from trash writes a tombstone revision so the deletion syncs.
 Tombstones stay until log compaction (deferred).
@@ -283,7 +286,11 @@ only when the store itself is there: an unplugged drive never reads as an empty
 store. The KDoc of `BlobStore` is the exact definition. The local folder needs a
 marker file for that, written once when the backend is added, and it publishes
 files without hard links on FAT
-([ADR-0012](adr/0012-local-folder-publishing.md)).
+([ADR-0012](adr/0012-local-folder-publishing.md)). WebDAV uses a marker too, and
+refuses a server that ignores `If-None-Match`. Whether racing writers of one path
+can both win is up to the server: Apache's `mod_dav` lets them, which sync
+tolerates because a path has one possible content
+([ADR-0017](adr/0017-webdav-backend.md)).
 
 A shared **contract test suite** in `backend/api/contract` runs against every
 implementation. A new backend is "done" when it passes.
@@ -292,7 +299,8 @@ implementation. A new backend is "done" when it passes.
 
 ```
 jotter/
-├── format.json                        # protocol version
+├── formats/
+│   └── 1-json+gzip.json               # protocol version and codec
 └── devices/
     ├── <deviceId-A>/
     │   ├── device.json                # name, platform, created
@@ -323,8 +331,12 @@ files, which are both read
 
 Sync runs on app start, after edits (debounced), and periodically: on Android
 via WorkManager (15 min minimum, network-constrained), on desktop via a
-coroutine timer. Each backend syncs independently, and a backend that can't be
-reached is skipped and retried with backoff.
+coroutine timer (`app:sync`'s `SyncScheduler`: 5 s after edits stop, every 5
+minutes, and when the user asks). Each backend syncs independently, and a
+backend that fails is skipped and retried with backoff (30 s, doubling up to
+30 minutes), except when the user asks. A local folder that cannot be reached is
+tried every 30 s instead, and a backend that is back syncs at once. The CLI syncs
+once with `jotter sync`.
 
 ### 6.4 The PC as hub
 
@@ -332,21 +344,27 @@ The Linux desktop app can run an optional **peer server** (the `server` module,
 embedded or as a systemd user service). It exposes a BlobStore over HTTP, backed
 by a folder on the PC, and is reachable over Tailscale. The phone adds it as a
 backend like any other. If the PC is off, the phone keeps working, and both
-converge on the next successful sync.
+converge on the next successful sync. The PC's own sync uses the same folder as a
+local folder backend. Protocol, per-device tokens, the address rule that stands in
+for TLS, limits and how it runs:
+[ADR-0015](adr/0015-pc-hub-peer-protocol.md).
 
 ### 6.5 Adding and removing backends
 
 - **Add:** a new backend is seeded by pushing the device's full revision
-  history, then syncs normally.
-- **Remove:** stops syncing and deletes the local sync records. Remote files stay
-  unless the user explicitly chooses "also delete remote data".
+  history, then syncs normally. A local folder that is not a Jotter store yet is
+  set up only after the user agrees (ADR-0012).
+- **Remove:** stops syncing and deletes the local sync records. Remote files stay.
+  v1 has no "also delete remote data": the user deletes them by hand, which the
+  app and the CLI say when removing.
 
 ### 6.6 Future encryption seam
 
 Segments pass through a `SegmentCodec` (v1: JSON + gzip). End-to-end encryption
 later becomes a codec (for example XChaCha20-Poly1305 with a passphrase-derived
-key) without changing backends or the merge logic. `format.json` records the
-codec. Documented as ADR-0007 in M6.
+key) without changing backends or the merge logic. The name of the format file
+records the codec, and a backend with another version's format file is left alone
+([ADR-0017](adr/0017-webdav-backend.md)). Documented as ADR-0007 in M6.
 
 ---
 
@@ -393,10 +411,14 @@ codec. Documented as ADR-0007 in M6.
   (M3); 0012 [local folder publishing](adr/0012-local-folder-publishing.md) (M3);
   0013
   [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
-  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3).
+  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0015
+  [the PC as hub](adr/0015-pc-hub-peer-protocol.md), 0016
+  [where backend secrets live](adr/0016-where-secrets-live.md) and 0017
+  [the WebDAV backend](adr/0017-webdav-backend.md) (M4).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
-  and desktop binaries. Required for every merge.
+  and desktop binaries. Required for every merge. Beside `check`, a `webdav` job
+  runs `backend/webdav` against real WebDAV servers in containers.
   TODO: an emulator job (API 26 and 36) on pushes to `main` or nightly, running
   `connectedAndroidDeviceTest`. Until then the Android device tests of
   `core/sqlite` run by hand.

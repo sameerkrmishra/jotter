@@ -221,3 +221,12 @@ SELECT * FROM conflict ORDER BY note_id, merge_id;
 
 selectConflict:
 SELECT * FROM conflict WHERE merge_id = :mergeId;
+
+-- Backends with sync records and no row in `backend`: removed while a sync of theirs ran in
+-- another process, or by a process that died between the two steps.
+selectUnlistedBackends:
+SELECT backend_id FROM sync_read WHERE backend_id NOT IN (SELECT id FROM backend)
+UNION
+SELECT backend_id FROM sync_segment WHERE backend_id NOT IN (SELECT id FROM backend)
+UNION
+SELECT backend_id FROM backend_revision WHERE backend_id NOT IN (SELECT id FROM backend);

@@ -15,8 +15,8 @@ public sealed interface SyncResult {
     ) : SyncResult
 
     /**
-     * The backend holds a format this version cannot use, or a damaged `format.json`, so nothing
-     * was read from it or written to it.
+     * The backend holds the format file of another version, or a damaged one of this version, so
+     * no segment was read from it or written to it.
      */
     public data class Incompatible(
         /** Why, for logs and the status screen. */

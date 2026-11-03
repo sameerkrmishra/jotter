@@ -32,9 +32,10 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 | `OpenConflict`, `HiddenHead`, `HiddenReason`, `InvalidRevision`, `InvalidReason` | What the conflict screen lists |
 | `MAX_NOTE_CHARS`, `requireNoteSize`, `NoteTooLargeException` | The cap on a note's text, which keeps every note small enough to sync ([ADR-0014](../../docs/adr/0014-sync-failure-handling.md)) |
 | `IdSource`, `RandomIds` | Where new ids come from, so that a simulation can replay |
-| `NoteService` | `create`, `importNote`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows |
+| `NoteService` | `create`, `importNote`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows. `observeRevisionMark` rises whenever a revision is stored, for a sync scheduler |
 | `ImportedNote`, `ImportResult` | What `importNote` takes, and whether it imported the note or skipped it |
 | `isStorableText` | Whether a title or body will be stored unchanged, or get characters replaced with U+FFFD |
+| `BackendStore`, `BackendRecord`, `SyncAttempt` | The backends this device syncs with, and how the last sync with each went. Their kind and settings are `app:sync`'s, opaque here, and never a secret |
 | `NoteFilter` | A state (active, archived or trash) and optionally a tag |
 | `TagCount` | A tag with the number of notes outside the trash that have it |
 | `SearchHit`, `Highlighted` | A search result: the note and a snippet with its match ranges |
@@ -42,7 +43,7 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 | `StaleEditException` | An edit based on a revision that is no longer the current one |
 | `StorageBusyException` | A write, or `NoteStore.open`, found the database locked by another process for the whole busy timeout |
 
-## Schema (version 2)
+## Schema (version 3)
 
 | Table | What it holds |
 |---|---|
@@ -53,13 +54,11 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 | `note` | The current state of every note that is not deleted forever, materialised from its head revision |
 | `note_tag` | The current tags of each note. The tag list is a `GROUP BY` over it; there is no `tag` table |
 | `note_fts` | FTS5 index over `note.title` and `note.body` (external content), kept in step by triggers on `note` |
-
 | `sync_read` | Per backend, the files read in each device folder, by name |
 | `sync_segment`, `backend_revision` | This device's segments on each backend, and what is known to be there |
 | `conflict`, `hidden_head`, `invalid_revision` | Open conflicts with the text that lost, heads a note does not show, and text that does not count: mostly caches of what the revisions say, kept by `core:sync` |
 | `dismissed_invalid`, `combined_draft` | Set-aside text the user saved or dismissed on this device, and texts being combined by hand to answer a conflict. Local: never synced |
-
-`backend` (PLAN.md §4) comes with M4, as a migration.
+| `backend` | The configured backends: id, kind, name, settings (no secrets, [ADR-0016](../../docs/adr/0016-where-secrets-live.md)), when each was added, and the outcome of its last sync and last success. Schema 3 (M4), by `2.sqm` |
 
 Encoding:
 

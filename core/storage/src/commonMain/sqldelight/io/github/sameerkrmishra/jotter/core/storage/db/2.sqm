@@ -1,0 +1,13 @@
+-- Schema 3 (M4): the configured backends and how their last sync went.
+CREATE TABLE backend (
+  id TEXT NOT NULL PRIMARY KEY,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  settings TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  attempted_at INTEGER,
+  outcome TEXT,
+  outcome_detail TEXT,
+  issues TEXT,
+  succeeded_at INTEGER
+) WITHOUT ROWID;

@@ -37,15 +37,18 @@ write a new ADR and mark the old one as amended or superseded.
 | [0001](0001-local-first-architecture.md) | Local-first architecture | Accepted |
 | [0002](0002-sqlite-via-sqldelight.md) | SQLite via SQLDelight with bundled SQLite | Accepted |
 | [0003](0003-revision-dag-and-three-way-merge.md) | Revision DAG with three-way merge | Accepted, amended by 0009, 0011, 0013 |
-| [0004](0004-immutable-change-segments.md) | Immutable change segments on dumb blob stores | Accepted, amended by 0014 |
+| [0004](0004-immutable-change-segments.md) | Immutable change segments on dumb blob stores | Accepted, amended by 0014, 0017 |
 | [0005](0005-manual-dependency-injection.md) | Manual constructor injection | Accepted |
-| [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted, amended by 0010 |
+| [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted, amended by 0010, 0015 |
 | [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
 | [0010](0010-compose-ui-outside-linuxx64-rule.md) | Compose UI stays outside the linuxX64 rule | Accepted |
 | [0011](0011-touching-changes-and-merge-format.md) | Touching changes merge, and the merge rules are part of the sync format | Accepted, amended by 0013 |
 | [0012](0012-local-folder-publishing.md) | Publishing files in a local folder, and telling a store from a mount point | Proposed |
 | [0013](0013-merge-base-and-covered-heads.md) | The merge base, covered heads and the canonical form of a merge | Proposed |
 | [0014](0014-sync-failure-handling.md) | Failures in the sync cycle: validity, content names, repairs, restored backups and limits | Proposed |
+| [0015](0015-pc-hub-peer-protocol.md) | The PC as hub: protocol, security, how it runs and where it stores | Proposed |
+| [0016](0016-where-secrets-live.md) | Where backend secrets live on Linux | Proposed |
+| [0017](0017-webdav-backend.md) | The WebDAV backend: what it asks of a server, and what no client can enforce | Proposed |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.

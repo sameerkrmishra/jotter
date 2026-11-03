@@ -13,6 +13,7 @@ import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.backend.api.InvalidBlobPathException
 import io.github.sameerkrmishra.jotter.backend.api.RESERVED_SEGMENT_PREFIX
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
+import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -44,6 +45,13 @@ public abstract class BlobStoreContract {
 
     /** Makes [store], which came from [newStore], unreachable, as an unplugged drive would be. */
     protected abstract suspend fun takeAway(store: BlobStore)
+
+    /**
+     * Returns a store that exists but refuses this device's credentials, such as a WebDAV store
+     * with a revoked app password, or null for a backend that has no credentials, such as a local
+     * folder. With null, [aStoreThatRefusesTheCredentialsSaysSo] checks nothing.
+     */
+    protected open suspend fun storeWithWrongCredentials(): BlobStore? = null
 
     private fun contractTest(body: suspend () -> Unit): TestResult =
         runTest(timeout = TIMEOUT_MINUTES.minutes) { body() }
@@ -342,6 +350,24 @@ public abstract class BlobStoreContract {
             assertFailsWith<BackendUnavailableException> { store.read("a/file") }
             assertFailsWith<BackendUnavailableException> { store.read("a/missing") }
             assertFailsWith<BackendUnavailableException> { store.writeNew("b", byteArrayOf(1)) }
+        }
+
+    @Test
+    public fun aStoreThatRefusesTheCredentialsSaysSo(): TestResult =
+        contractTest {
+            val store = storeWithWrongCredentials() ?: return@contractTest
+            val unauthorized = UnreachableReason.UNAUTHORIZED
+            assertEquals(unauthorized, assertIs<Reachability.Unreachable>(store.ping()).reason)
+            listOf<suspend () -> Unit>(
+                { store.list("") },
+                { store.list("a") },
+                { store.read("a") },
+                { store.writeNew("a", byteArrayOf(1)) },
+            ).forEach { call ->
+                val failure = assertFailsWith<BackendUnavailableException> { call() }
+                assertEquals(unauthorized, failure.reachability.reason)
+            }
+            assertFailsWith<InvalidBlobPathException> { store.read("../a") }
         }
 
     @Test

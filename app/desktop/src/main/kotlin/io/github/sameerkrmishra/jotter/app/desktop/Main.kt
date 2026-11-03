@@ -6,16 +6,28 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import io.github.sameerkrmishra.jotter.app.sharedui.AppViewModel
 import io.github.sameerkrmishra.jotter.app.sharedui.CannotOpenNotes
+import io.github.sameerkrmishra.jotter.app.sharedui.HubSettings
 import io.github.sameerkrmishra.jotter.app.sharedui.JotterApp
+import io.github.sameerkrmishra.jotter.app.sharedui.PeerHubControls
+import io.github.sameerkrmishra.jotter.app.sharedui.SyncControls
+import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
+import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
+import io.github.sameerkrmishra.jotter.app.sync.linuxSecretStores
+import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
+import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
+import io.github.sameerkrmishra.jotter.core.sync.SyncEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Path
 import kotlin.system.exitProcess
 
 private const val AUTOCLOSE_ARG = "--autoclose"
@@ -67,7 +79,31 @@ private fun runApp(
     autoclose: Boolean,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    val app = AppViewModel(store.notes, ConflictResolver(store), scope, Dispatchers.IO)
+    val engine = SyncEngine(store, DeviceInfo(DEVICE_NAME, "linux"), Dispatchers.IO)
+    // The keyring through the Secret Service, or the file the user chose (ADR-0016).
+    val secrets = linuxSecretStores(System::getenv, System.getProperty("user.home"), Dispatchers.IO)
+    val manager =
+        BackendManager(
+            store,
+            engine,
+            StandardBackendFactory(secrets),
+            secrets,
+            Dispatchers.IO,
+        )
+    val scheduler = SyncScheduler(manager::syncAll)
+    val hub = hubControls(manager, scope)
+    // A hub the user left on starts again with the app.
+    scope.launch { hub.resume() }
+    // In the app's scope, so that exit cancels a running sync before the store closes.
+    scheduler.start(scope, store.notes.observeRevisionMark())
+    val app =
+        AppViewModel(
+            store.notes,
+            ConflictResolver(store),
+            scope,
+            Dispatchers.IO,
+            SyncControls(manager, scheduler, hub),
+        )
     application(exitProcessOnExit = false) {
         val close = { app.requestExit(::exitApplication) }
         Window(onCloseRequest = close, title = "Jotter") {
@@ -77,6 +113,30 @@ private fun runApp(
     }
     runBlocking { scope.coroutineContext.job.cancelAndJoin() }
     store.close()
+}
+
+/**
+ * The hub on this PC (ADR-0015). Its settings and its paired devices, as hashes, are in
+ * `$XDG_CONFIG_HOME/jotter`; its store is by default `$XDG_DATA_HOME/jotter-hub`, outside the
+ * database's folder, which may hold no backend.
+ */
+@Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
+private fun hubControls(
+    manager: BackendManager,
+    scope: CoroutineScope,
+): PeerHubControls {
+    val home =
+        System.getenv("HOME")?.takeIf { it.startsWith('/') } ?: System.getProperty("user.home")
+    val config = System.getenv("XDG_CONFIG_HOME")?.takeIf { it.startsWith('/') } ?: "$home/.config"
+    val data = System.getenv("XDG_DATA_HOME")?.takeIf { it.startsWith('/') } ?: "$home/.local/share"
+    return PeerHubControls(
+        manager,
+        Path.of(config, "jotter", "hub.properties"),
+        Path.of(config, "jotter", "hub-devices.json"),
+        scope,
+        Dispatchers.IO,
+        HubSettings("$data/jotter-hub", "127.0.0.1", PeerProtocol.DEFAULT_PORT),
+    )
 }
 
 @Composable

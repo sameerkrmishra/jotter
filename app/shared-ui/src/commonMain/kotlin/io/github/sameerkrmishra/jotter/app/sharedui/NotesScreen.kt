@@ -59,7 +59,12 @@ internal fun NotesScreen(app: AppViewModel) {
         Modifier.fillMaxSize().padding(spacing),
         verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        Header(list, app.attention.entries.size, onNewNote = { app.openEditor(null) })
+        Header(
+            list,
+            app.attention.entries.size,
+            onNewNote = { app.openEditor(null) },
+            onSync = app::openBackends.takeIf { app.syncs },
+        )
         TagFilter(list.tags, list.request.tag, list::toggleTag)
         list.message?.let {
             Message(it) { TextButton(onClick = list::dismissMessage) { Text("Dismiss") } }
@@ -103,6 +108,7 @@ private fun Header(
     list: NotesViewModel,
     needingAttention: Int,
     onNewNote: () -> Unit,
+    onSync: (() -> Unit)?,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
         OutlinedTextField(
@@ -113,6 +119,7 @@ private fun Header(
             singleLine = true,
         )
         Button(onClick = onNewNote) { Text("New note") }
+        onSync?.let { TextButton(onClick = it) { Text(BACKENDS_TITLE) } }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
         views.forEach { (state, label) ->

@@ -16,11 +16,16 @@ kotlin {
         commonMain.dependencies {
             api(projects.core.storage)
             api(projects.core.sync)
+            api(projects.app.sync)
             api(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
             implementation(libs.compose.ui)
             implementation(libs.markdown)
+        }
+        jvmMain.dependencies {
+            // The PC hub runs inside the desktop app's JVM (ADR-0015). Not on Android.
+            implementation(projects.server)
         }
         jvmTest.dependencies {
             implementation(projects.backend.api.contract)
@@ -37,4 +42,24 @@ kotlin {
 // The JVM tests cover this module, and core:storage's SQLite has no Android variant for the host.
 tasks.named { it == "testAndroidHostTest" }.configureEach {
     enabled = false
+}
+
+// The live test in the package `live` syncs two apps through a real WebDAV server that
+// backend/webdav/scripts/live-test.sh starts. It runs only when that script sets
+// JOTTER_WEBDAV_LIVE, and then alone. The URL is a task input, so a result is never taken from the
+// cache for another server.
+val webDavLive = providers.environmentVariable("JOTTER_WEBDAV_LIVE").orNull == "1"
+
+tasks.withType<AbstractTestTask>().configureEach {
+    listOf("JOTTER_WEBDAV_LIVE", "JOTTER_WEBDAV_LIGHTTPD_URL").forEach { name ->
+        inputs.property(name, providers.environmentVariable(name).orElse(""))
+    }
+    filter.run {
+        isFailOnNoMatchingTests = false
+        if (webDavLive) {
+            includeTestsMatching("*.sharedui.live.*")
+        } else {
+            excludeTestsMatching("*.sharedui.live.*")
+        }
+    }
 }

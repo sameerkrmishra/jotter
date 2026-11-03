@@ -10,7 +10,7 @@ import java.nio.file.Path
 import kotlin.coroutines.CoroutineContext
 
 /** Used only when the database is created. The file may be shared with the CLI. */
-private const val DEVICE_NAME = "Linux"
+internal const val DEVICE_NAME = "Linux"
 
 /** The notes could not be opened. The message says why, for the user. */
 internal class DatabaseUnavailableException(

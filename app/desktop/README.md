@@ -31,6 +31,14 @@ or holds it exclusively.
   to close does it (`core:sqlite`). So exit never waits for a lock. `exitProcess`
   also ends the process if an AWT thread hangs after the window closes, as one did
   in spike 0002.
+- **Sync.** `main()` builds `app:sync`'s `BackendManager` and `SyncScheduler` on the
+  store and starts the scheduler in the app's scope, so it syncs on start, 5 s after
+  edits, every 5 minutes and on "Sync now" ([PLAN.md](../../docs/PLAN.md) §6.3). The
+  engine's database work and each backend's I/O run on `Dispatchers.IO`, never on the
+  UI thread. Exit cancels the scope, which stops a running sync where it is
+  (`SyncEngine` is safe to stop anywhere), and waits for it before the store closes.
+  Backends need no secrets yet, so the app passes `NoSecretStore`
+  ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)).
 - **`--autoclose`** closes the app a few seconds after the window appears and prints
   `jotter: window shown, closing`, to prove that a build starts. It also closes the
   window for a database that cannot be opened.

@@ -5,8 +5,8 @@ The `BlobStore` interface that every sync backend implements
 with four methods. The code above it never sees what kind of store it talks to.
 
 ```kotlin
-store.writeNew("jotter/format.json", bytes) // BlobAlreadyExistsException if taken
-store.read("jotter/format.json")            // BlobNotFoundException if missing
+store.writeNew("jotter/devices/a/x", bytes)  // BlobAlreadyExistsException if taken
+store.read("jotter/devices/a/x")            // BlobNotFoundException if missing
 store.list("jotter/devices")                // every file below it, sorted
 store.ping()                                // Reachable, or Unreachable with a reason
 ```

@@ -24,6 +24,8 @@ compose.desktop {
 
 dependencies {
     implementation(projects.app.sharedUi)
+    // The hub's default port.
+    implementation(projects.backend.peer)
     implementation(libs.compose.desktop.linux.x64)
     runtimeOnly(libs.kotlinx.coroutines.swing)
 

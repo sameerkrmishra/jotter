@@ -4,6 +4,8 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
@@ -28,6 +30,8 @@ import kotlinx.coroutines.launch
  * @param scope Where the view models run: on the UI thread, for as long as the app does. Cancel it
  *   before closing the store.
  * @param io Where blocking [NoteService] calls run, off the UI thread.
+ * @param sync The backends and the scheduler that syncs with them, or null for an app that does
+ *   not sync, which then shows no backend screen.
  */
 @Stable
 public class AppViewModel(
@@ -35,6 +39,7 @@ public class AppViewModel(
     private val conflicts: ConflictResolver,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
+    private val sync: SyncControls? = null,
 ) {
     // Each new value makes the view models read the database again.
     private val refreshes = MutableStateFlow(0)
@@ -50,6 +55,13 @@ public class AppViewModel(
     /** The open review of a note's sync problems, shown over the editor or the list. */
     internal var review by mutableStateOf<ReviewViewModel?>(null)
         private set
+
+    /** The backend screen, while it is open. */
+    internal var backends by mutableStateOf<BackendsViewModel?>(null)
+        private set
+
+    /** Whether the app syncs, so that the note list offers the backend screen. */
+    internal val syncs: Boolean get() = sync != null
 
     /** How to exit, while the text could not be saved and the user has to decide. */
     internal var pendingExit by mutableStateOf<(() -> Unit)?>(null)
@@ -116,6 +128,20 @@ public class AppViewModel(
         }
     }
 
+    /** Opens the backend screen. */
+    internal fun openBackends() {
+        val controls = sync ?: return
+        backends?.close()
+        backends =
+            BackendsViewModel(controls.manager, controls.scheduler, scope, hub = controls.hub)
+    }
+
+    /** Closes the backend screen. */
+    internal fun closeBackends() {
+        backends?.close()
+        backends = null
+    }
+
     /** Answers the question that [pendingExit] asks: the user stays with their text. */
     internal fun keepEditing() {
         pendingExit = null
@@ -133,3 +159,17 @@ public class AppViewModel(
         editor = null
     }
 }
+
+/**
+ * What the app syncs with, for [AppViewModel]. The composition root starts [scheduler] and cancels
+ * it on exit.
+ *
+ * @property manager The backends.
+ * @property scheduler Syncs with them, and at once when the user asks.
+ * @property hub The hub on this PC, or null where the app cannot run one.
+ */
+public class SyncControls(
+    public val manager: BackendManager,
+    public val scheduler: SyncScheduler,
+    public val hub: HubControls? = null,
+)
