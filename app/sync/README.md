@@ -99,8 +99,9 @@ syncs it.
   a token in even where the address rule allows it: Android refuses while Tailscale's
   VPN does not carry the app, as mobile carriers use `100.64.0.0/10` too
   ([ADR-0018](../../docs/adr/0018-android-app.md)). The hub is then `OffTailnet`:
-  unreachable with the reason, at adding, syncing and status, and sent nothing. The
-  desktop and the CLI pass `TailnetCheck.NONE`, the default.
+  unreachable with the reason, at adding, syncing and status, and sent nothing. Its
+  `engine` may give the hub client an HTTP engine of the app's: Android's binds its sockets
+  to Tailscale's network. The desktop and the CLI pass `TailnetCheck.NONE`, the default.
 
 ## Design
 

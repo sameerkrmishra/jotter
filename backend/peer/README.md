@@ -20,7 +20,7 @@ depends on this one for the protocol, never the other way round.
 
 | Type | What it is |
 |---|---|
-| `PeerBlobStore` | The store. Takes the hub's address and a device token. `AutoCloseable` |
+| `PeerBlobStore` | The store. Takes the hub's address and a device token, and optionally an HTTP engine of the caller's, such as Android's on sockets bound to Tailscale's network ([ADR-0018](../../docs/adr/0018-android-app.md)); it then owns and closes that engine. `AutoCloseable` |
 | `PeerAddress` | Host and port, as the user typed them: `parse("host")` or `parse("host:port")` |
 | `PeerProtocol`, `PeerError` | The protocol, shared with the server: paths, parameters, the version header, limits, error codes |
 | `dto.BlobEntryDto`, `dto.ErrorDto` | The JSON of a listing and of an error |

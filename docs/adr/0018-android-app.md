@@ -41,8 +41,14 @@ need its own publishing rules, a new ADR and its own contract test run; it is le
 `keystoreKey`), behind ADR-0016's `SecretStore`:
 
 - One AES-256 key in the Android Keystore (`jotter-backend-secrets`), for GCM only, made on
-  first use. Its bytes never leave the Keystore, which may keep it in hardware. It needs no
-  unlocked screen, so that sync runs in the background.
+  first use. Its bytes never leave the Keystore, which may keep it in hardware. It is made
+  without `setUserAuthenticationRequired` or `setUnlockedDeviceRequired`, so it is usable
+  whenever the phone has been unlocked once since it booted: before that, Android runs no
+  app that is not direct-boot aware, which Jotter is not, and its files are still encrypted
+  anyway. That is needed for background sync, which WorkManager runs while the screen is
+  locked, often for hours; a key that needs an unlocked screen would fail every such sync.
+  The cost: on a phone that was unlocked once and then stolen while locked, the key works
+  for whoever can run code as Jotter, which Android's sandbox and a locked screen prevent.
 - Each secret is encrypted with a fresh IV that the Keystore chooses, with its name
   (`<backend id>/<kind>`) as associated data, so a sealed secret cannot be moved to another
   backend. The sealed secrets are in one JSON file in `noBackupFilesDir`, which no backup or
@@ -55,7 +61,9 @@ need its own publishing rules, a new ADR and its own contract test run; it is le
 **Backups.** Auto Backup and device transfer copy the notes database (`jotter.db` and its
 `-wal`) and nothing else: no secrets, settings or WorkManager state. A cloud backup includes it
 only if it is encrypted with the screen lock (`disableIfNoEncryptionCapabilities` on Android
-12 and later, `clientSideEncryption` on 9 to 11; Android 8 ignores the flag). A restored
+12 and later, `clientSideEncryption` on 9 to 11, in `res/xml-v28/backup_rules.xml`). Android
+8.0 and 8.1 (API 26 and 27) cannot require that, so there the default
+`res/xml/backup_rules.xml` excludes everything: nothing of Jotter's is backed up. A restored
 phone keeps its device id, which sync handles ([ADR-0014](0014-sync-failure-handling.md)),
 and asks for its passwords again.
 
@@ -82,7 +90,14 @@ root (`AppGraph`), running on `Dispatchers.Default` with the database and networ
 `app:sync`, `AndroidTailnet` here). Before a hub is opened, Android is asked whether this
 app's network is a VPN holding an address in `100.64.0.0/10` or `fd7a:115c:a1e0::/48`, as
 Tailscale's Android app is. If not, the hub is unreachable with a plain reason, at adding,
-syncing and on the status screen, and nothing is sent. Loopback is always allowed. Tailscale's
+syncing and on the status screen, and nothing is sent. Loopback is always allowed. Otherwise
+the hub client gets an HTTP engine of the app's (`TailnetCheck.engine`; Ktor's OkHttp engine,
+as CIO takes no socket factory) whose sockets are bound to that VPN network with
+`Network.bindSocket` before they connect, and connect only to an address that the VPN's routes
+(`LinkProperties.routes`) cover, read again at each connection. So if the VPN goes away in the
+middle of a sync, requests fail instead of leaving by the mobile network, and an address that
+Tailscale does not route is never connected to. The engine uses no proxy, retries nothing and
+follows no redirect, like the client's own. Tailscale's
 MagicDNS names resolve only while its VPN runs, and an app that its split tunnelling leaves
 out sees no VPN and so sends nothing. The desktop passes `TailnetCheck.NONE`: ADR-0015's rule
 is unchanged there.
@@ -97,7 +112,10 @@ as a web page's title, becomes the title on one line, unless it repeats the text
 image alone is refused in plain words; beside text, it is left out and named. Text over a
 note's cap (`MAX_NOTE_CHARS`) is refused whole, never cut. A share's intent travels in one
 binder transaction of at most 1 MB, so Android itself refuses a text of about 330,000
-characters or more before Jotter sees it; 110,000 are tested.
+characters or more before Jotter sees it; 110,000 are tested. An extra that cannot be
+unparcelled refuses the share plainly instead of crashing. The saved note's id is kept in the
+window's saved state, so a window brought back after Android ended the process does not store
+the note again; the intent's extras are not copied into that state.
 
 ## Consequences
 
@@ -117,9 +135,11 @@ characters or more before Jotter sees it; 110,000 are tested.
 - Sync after edits relies on the process living 5 s after typing stops, or on the job when
   the app leaves the screen; Android may delay that job (Doze, App Standby buckets).
 - Every 15 minutes is WorkManager's floor, and Android may stretch it.
-- The check proves that the app's network is a VPN holding a Tailscale address, not that the
-  route to the hub goes through it. Another VPN that uses a `100.64.0.0/10` address passes it.
-- The database's cloud backup on Android 8 is not required to be encrypted.
+- **A VPN of another app that uses an address in `100.64.0.0/10` passes the check, and its
+  routes then carry the token.** Android does not tell an app which app runs a VPN, so Jotter
+  cannot tell such a VPN from Tailscale's. This is a stated limit, not a protection.
+- On Android 8.0 and 8.1 nothing is backed up.
+- Two HTTP engines in the app: CIO for WebDAV and loopback, OkHttp for the hub on the tailnet.
 - `connectedDebugAndroidTest` and the end-to-end script run by hand: CI has no emulator yet.
 
 ## Alternatives considered
