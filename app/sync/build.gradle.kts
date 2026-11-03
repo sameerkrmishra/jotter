@@ -20,7 +20,8 @@ kotlin {
             api(libs.ktor.client.core)
             implementation(projects.backend.localfolder)
             implementation(projects.backend.webdav)
-            implementation(projects.backend.peer)
+            // TailnetCheck gives the hub client's PeerTransport.
+            api(projects.backend.peer)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.okio)

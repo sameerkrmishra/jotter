@@ -66,7 +66,8 @@ public class StandardBackendFactory internal constructor(
 
 /**
  * The hub client for [config] with [token], or a hub that cannot be reached and is sent nothing
- * while [tailnet] refuses its host. Its connections are made by [tailnet]'s engine, if it has one.
+ * while [tailnet] refuses its host. It reaches the hub through [tailnet]'s transport, if it has
+ * one.
  *
  * @throws IllegalArgumentException if the address or the token cannot be used.
  */
@@ -77,14 +78,14 @@ internal fun openPeer(
 ): BlobStore {
     tailnet.refuse(config.host)?.let { return OffTailnet(it) }
     val address = PeerAddress(config.host, config.port)
-    val engine = tailnet.engine(config.host)
+    val transport = tailnet.transport(config.host)
     return when {
-        engine == null -> PeerBlobStore(address, token.reveal())
+        transport == null -> PeerBlobStore(address, token.reveal())
         else ->
             try {
-                PeerBlobStore(address, token.reveal(), engine)
+                PeerBlobStore(address, token.reveal(), transport)
             } catch (e: IllegalArgumentException) {
-                engine.close()
+                transport.engine.close()
                 throw e
             }
     }

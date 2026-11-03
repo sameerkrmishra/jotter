@@ -4,6 +4,7 @@ import io.github.sameerkrmishra.jotter.backend.api.BackendUnavailableException
 import io.github.sameerkrmishra.jotter.backend.api.InvalidBlobPathException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
+import io.github.sameerkrmishra.jotter.backend.peer.PeerTransport
 import io.github.sameerkrmishra.jotter.server.HubConfig
 import io.github.sameerkrmishra.jotter.server.PeerHub
 import io.ktor.client.engine.HttpClientEngine
@@ -99,17 +100,22 @@ class TailnetCheckTest {
             }
         }
 
-    /** Lets every host through, on engines of its own that it keeps to look at. */
+    /** Lets every host through, on transports of its own whose engines and lookups it records. */
     private class GivesEngines : TailnetCheck {
         val engines = mutableListOf<HttpClientEngine>()
+        val looked = mutableListOf<String>()
 
         override fun refuse(host: String): String? = null
 
-        override fun engine(host: String): HttpClientEngine = CIO.create().also { engines += it }
+        override fun transport(host: String): PeerTransport =
+            PeerTransport(CIO.create().also { engines += it }) { name ->
+                looked += name
+                byteArrayOf(127, 0, 0, 1)
+            }
     }
 
     @Test
-    fun aHubIsReachedThroughTheEngineTheCheckGives() =
+    fun aHubIsReachedThroughTheTransportTheCheckGives() =
         runTest {
             TempDir().use { dir ->
                 val hub =
@@ -147,6 +153,7 @@ class TailnetCheckTest {
                                 .attempt.outcome,
                         )
                         assertTrue(check.engines.size >= 2, "adding and syncing")
+                        assertTrue(check.looked.isNotEmpty(), "the hub's name is looked up by it")
                         // Each store closed its engine when it was done.
                         check.engines.forEach { it.coroutineContext.job.join() }
                     }

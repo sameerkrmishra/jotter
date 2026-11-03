@@ -378,17 +378,43 @@ class PeerBlobStoreTest {
         }
 
     @Test
-    fun aGivenEngineCarriesTheRequestsAndClosesWithTheStore(): TestResult =
+    fun aGivenTransportCarriesTheRequestsAndClosesWithTheStore(): TestResult =
         test {
             val fake = FakeHub.start { send(answer(200, "{}")) }.also { fakes += it }
             val engine = CIO.create()
-            val store = PeerBlobStore(fake.address, TOKEN, engine).also { stores += it }
+            val looked = mutableListOf<String>()
+            // A name that only the transport's lookup knows: the system's is never asked.
+            val transport =
+                PeerTransport(engine) { host ->
+                    looked += host
+                    byteArrayOf(127, 0, 0, 1).takeIf { host == "hub.invalid" }
+                }
+            val address = PeerAddress("hub.invalid", fake.address.port)
+            val store = PeerBlobStore(address, TOKEN, transport).also { stores += it }
             assertEquals(Reachability.Reachable, store.ping())
             assertContains(fake.requests.single(), "GET ${PeerProtocol.PING}")
+            assertEquals(listOf("hub.invalid"), looked)
             store.close()
             // Closing ends the engine's job once its connections are gone.
             withTimeout(10.seconds) { engine.coroutineContext.job.join() }
             assertFailsWith<BackendUnavailableException> { store.read("a") }
+        }
+
+    @Test
+    fun aTransportsLookupIsTheOnlyOne(): TestResult =
+        test {
+            val fake = FakeHub.start { send(answer(200, "{}")) }.also { fakes += it }
+            // The system would find localhost; the transport's lookup does not, so nothing is sent.
+            val nameless = PeerTransport(CIO.create()) { null }
+            val address = PeerAddress("localhost", fake.address.port)
+            val unfound = PeerBlobStore(address, TOKEN, nameless).also { stores += it }
+            val failed = assertIs<Reachability.Unreachable>(unfound.ping())
+            assertEquals("Cannot find hub $address", failed.detail)
+            // Its own failure is the request's, as it is.
+            val off = Reachability.Unreachable(UnreachableReason.FAILED, "No network")
+            val gone = PeerTransport(CIO.create()) { throw BackendUnavailableException(off) }
+            assertEquals(off, PeerBlobStore(address, TOKEN, gone).also { stores += it }.ping())
+            assertTrue(fake.requests.isEmpty())
         }
 
     @Test
