@@ -110,6 +110,19 @@ class ShareActivityTest {
     }
 
     @Test
+    fun anExtraJotterCannotReadIsRefusedNotACrash() {
+        val intent =
+            send {
+                putExtra(Intent.EXTRA_TEXT, "milk")
+                putExtra("from.another.app", Unreadable())
+            }
+        ActivityScenario.launch<ShareActivity>(intent).use {
+            compose.awaitText(SHARE_UNREADABLE)
+            assertTrue(notes().isEmpty())
+        }
+    }
+
+    @Test
     fun anEmptyShareSavesNothing() {
         ActivityScenario.launch<ShareActivity>(send { putExtra(Intent.EXTRA_TEXT, " ") }).use {
             compose.awaitText(NOTHING_TO_SAVE)

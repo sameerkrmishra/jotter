@@ -17,17 +17,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
-import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
-import kotlinx.coroutines.launch
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.CreationExtras
 import kotlinx.coroutines.withContext
 
 /** The test tag of the share target's message. */
@@ -45,12 +41,20 @@ internal const val SAVED = "Saved as a new note in Jotter."
  */
 public class ShareActivity : ComponentActivity() {
     private val model: ShareViewModel by viewModels {
-        val graph = (application as JotterApplication).graph
-        val share = shareOf(intent)
         object : ViewModelProvider.Factory {
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            override fun <T : ViewModel> create(
+                modelClass: Class<T>,
+                extras: CreationExtras,
+            ): T {
+                val graph = (application as JotterApplication).graph
+                val model =
+                    ShareViewModel(
+                        readShare { shareOf(intent) },
+                        GraphNotes(graph),
+                        extras.createSavedStateHandle(),
+                    )
                 @Suppress("UNCHECKED_CAST") // The only model this factory makes.
-                return ShareViewModel(graph, share) as T
+                return model as T
             }
         }
     }
@@ -67,6 +71,30 @@ public class ShareActivity : ComponentActivity() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
         finish()
+    }
+
+    /** The notes of [graph], opened on first use, off the main thread. */
+    private class GraphNotes(
+        private val graph: AppGraph,
+    ) : SharedNotes {
+        override suspend fun create(
+            title: String,
+            body: String,
+        ): String =
+            when (val opened = graph.opened) {
+                is Opened.Failed -> throw NotesUnavailableException(opened.reason)
+                is Opened.Ready ->
+                    withContext(opened.io) {
+                        opened.store.notes
+                            .create(title, body)
+                            .id
+                            .toString()
+                    }
+            }
+
+        override fun syncSoon() {
+            graph.opened.sync?.soon()
+        }
     }
 
     private companion object {
@@ -87,61 +115,6 @@ public class ShareActivity : ComponentActivity() {
                 intent.getParcelableExtra(Intent.EXTRA_STREAM)
             }
     }
-}
-
-/** Where a share stands. */
-internal sealed interface ShareState {
-    /** The note is being stored. */
-    data object Saving : ShareState
-
-    /** It is stored; [leftOut] says what of the share was not taken, or is null. */
-    data class Saved(
-        val leftOut: String?,
-    ) : ShareState
-
-    /** Nothing was stored, and [reason] says why. */
-    data class Refused(
-        val reason: String,
-    ) : ShareState
-}
-
-/**
- * Stores one share as a new note, once: it lives as long as the share window, across turning the
- * phone. The write runs on the graph's IO dispatcher, never the main thread.
- */
-internal class ShareViewModel(
-    graph: AppGraph,
-    share: Share,
-) : ViewModel() {
-    /** Where the share stands. */
-    var state by mutableStateOf<ShareState>(ShareState.Saving)
-        private set
-
-    init {
-        when (val outcome = outcomeOf(share)) {
-            is ShareOutcome.Refused -> state = ShareState.Refused(outcome.reason)
-            is ShareOutcome.NewNote ->
-                when (val opened = graph.opened) {
-                    is Opened.Failed -> state = ShareState.Refused(opened.reason)
-                    is Opened.Ready -> viewModelScope.launch { state = save(opened, outcome) }
-                }
-        }
-    }
-
-    @Suppress("TooGenericExceptionCaught") // The driver's exceptions are not in NoteStore's API.
-    private suspend fun save(
-        opened: Opened.Ready,
-        note: ShareOutcome.NewNote,
-    ): ShareState =
-        try {
-            withContext(opened.io) { opened.store.notes.create(note.title, note.body) }
-            opened.sync.soon()
-            ShareState.Saved(note.leftOut)
-        } catch (_: StorageBusyException) {
-            ShareState.Refused("The notes are busy. Share the text again in a moment.")
-        } catch (e: RuntimeException) {
-            ShareState.Refused("The note could not be saved: ${e.message}")
-        }
 }
 
 /** The share window: what happened, and how to go on. */
