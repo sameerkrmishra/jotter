@@ -39,7 +39,7 @@ class TailnetTest {
     @Test
     fun theAppRefusesAHubOffTheTailnetWithoutTryingIt() =
         runBlocking {
-            val manager = test.ready.sync.manager
+            val manager = test.ready.manager
             val took =
                 measureTime {
                     val added = manager.addPeer("100.101.102.103", Secret("id.secret"))

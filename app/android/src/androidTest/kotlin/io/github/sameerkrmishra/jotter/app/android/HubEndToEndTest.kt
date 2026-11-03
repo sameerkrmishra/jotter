@@ -43,7 +43,7 @@ class HubEndToEndTest {
         runBlocking {
             assumeTrue("Run by scripts/hub-e2e.sh", port != null && token != null)
             val app = test.ready
-            val added = app.sync.manager.addPeer("127.0.0.1:$port", Secret(checkNotNull(token)))
+            val added = app.manager.addPeer("127.0.0.1:$port", Secret(checkNotNull(token)))
             val backend = assertIs<AddResult.Added>(added).backend
             assertEquals(PeerConfig("127.0.0.1", checkNotNull(port).toInt()), backend.config)
 
@@ -59,7 +59,7 @@ class HubEndToEndTest {
             app.store.notes.create("From the phone", "written on the phone")
             assertEquals(ListenableWorker.Result.success(), backgroundSync())
             val synced =
-                app.sync.manager
+                app.manager
                     .list()
                     .single()
             assertEquals(Outcome.SYNCED, synced.lastAttempt?.outcome, synced.lastAttempt?.detail)

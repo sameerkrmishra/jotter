@@ -103,7 +103,7 @@ class SyncWorkerTest {
             assertIs<AddResult.Added>(added)
             peer.notes.create("From the PC", "hello")
             peerManager.syncAll()
-            assertIs<AddResult.Added>(app.sync.manager.addLocalFolder(stick.path))
+            assertIs<AddResult.Added>(app.manager.addLocalFolder(stick.path))
 
             assertEquals(ListenableWorker.Result.success(), runWorker())
 
@@ -116,7 +116,7 @@ class SyncWorkerTest {
                     .title,
             )
             val backend =
-                app.sync.manager
+                app.manager
                     .list()
                     .single()
             assertEquals(Outcome.SYNCED, backend.lastAttempt?.outcome)
@@ -143,14 +143,14 @@ class SyncWorkerTest {
             val workManager = WorkManager.getInstance(test.context)
             app.sync.start()
             peerManager.addLocalFolder(stick.path, setUpNewStore = true)
-            val added = assertIs<AddResult.Added>(app.sync.manager.addLocalFolder(stick.path))
+            val added = assertIs<AddResult.Added>(app.manager.addLocalFolder(stick.path))
             awaitPeriodic(workManager) { infos ->
                 infos.any {
                     !it.state.isFinished &&
                         it.constraints.requiredNetworkType == NetworkType.CONNECTED
                 }
             }
-            app.sync.manager.remove(added.backend.id)
+            app.manager.remove(added.backend.id)
             awaitPeriodic(
                 workManager,
             ) { infos -> infos.all { it.state == WorkInfo.State.CANCELLED } }

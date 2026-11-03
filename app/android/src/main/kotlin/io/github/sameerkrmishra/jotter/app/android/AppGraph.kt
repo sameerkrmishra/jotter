@@ -23,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -98,7 +99,25 @@ internal class AppGraph(
         return try {
             file.parentFile?.mkdirs()
             val store = NoteStore.open(file.path, deviceName(), io)
-            Opened.Ready(store, newSync(store), ui, io)
+            val engine = SyncEngine(store, DeviceInfo(deviceName(), "android"), io)
+            val manager =
+                BackendManager(
+                    store,
+                    engine,
+                    factory(secrets, tailnet),
+                    secrets,
+                    io,
+                    tailnet = tailnet,
+                )
+            val sync =
+                AndroidSync(
+                    SyncScheduler(manager::syncAll, SyncTiming(period = PERIOD_MINUTES.minutes)),
+                    store.notes.observeRevisionMark(),
+                    manager.observe().map { it.isNotEmpty() },
+                    WorkManagerJobs(WorkManager.getInstance(context)),
+                    background,
+                )
+            Opened.Ready(store, manager, sync, ui, io)
         } catch (e: StorageBusyException) {
             Opened.Failed("${file.path} is locked by another process. Try again. (${e.message})")
         } catch (
@@ -107,13 +126,6 @@ internal class AppGraph(
             // The driver's exceptions are not part of NoteStore's API; the user sees why.
             Opened.Failed("Cannot open ${file.path}: ${e.message}")
         }
-    }
-
-    private fun newSync(store: NoteStore): AndroidSync {
-        val engine = SyncEngine(store, DeviceInfo(deviceName(), "android"), io)
-        val manager =
-            BackendManager(store, engine, factory(secrets, tailnet), secrets, io, tailnet = tailnet)
-        return AndroidSync(store, manager, WorkManager.getInstance(context), background)
     }
 
     /**
@@ -144,11 +156,13 @@ internal sealed interface Opened {
      * The notes are open.
      *
      * @property store The database.
-     * @property sync Its backends and scheduler.
+     * @property manager Its backends.
+     * @property sync When it syncs.
      * @property io Where its blocking calls run.
      */
     class Ready(
         val store: NoteStore,
+        val manager: BackendManager,
         override val sync: AndroidSync,
         private val ui: CoroutineScope,
         val io: CoroutineDispatcher,
@@ -161,7 +175,7 @@ internal sealed interface Opened {
                 ui,
                 io,
                 SyncControls(
-                    sync.manager,
+                    manager,
                     sync.scheduler,
                     foldersUnavailable = FOLDERS_UNAVAILABLE,
                 ),
@@ -177,25 +191,47 @@ internal sealed interface Opened {
     }
 }
 
+/** The background jobs that [AndroidSync] asks for: WorkManager's, in the app. */
+internal interface SyncJobs {
+    /** Keeps the periodic sync while [any] backend exists, and cancels it when none does. */
+    fun periodic(any: Boolean)
+
+    /** One sync soon, once there is a network. */
+    fun soon()
+}
+
+/** [SyncJobs] through WorkManager ([SyncWork]). */
+internal class WorkManagerJobs(
+    private val workManager: WorkManager,
+) : SyncJobs {
+    override fun periodic(any: Boolean) = SyncWork.periodic(workManager, any)
+
+    override fun soon() = SyncWork.soon(workManager)
+}
+
 /**
  * When the Android app syncs (PLAN.md §6.3, ADR-0018), around the scheduler of `app:sync`, which
  * runs one round at a time and keeps the backoff: on the process's start and each time the app
  * comes to the screen, 5 s after edits while the process runs, when the user asks, and through
- * [SyncWork] every 15 minutes in the background and once after the app leaves the screen.
+ * [jobs] every 15 minutes in the background and once after the app leaves the screen.
  *
- * @property manager The backends.
+ * @property scheduler The scheduler, started by [start].
+ * @param revisionMark Rises when a revision is stored, for the scheduler.
+ * @param anyBackend Whether any backend is configured, now and whenever that changes.
+ * @param jobs The background jobs.
+ * @param scope Where the scheduler and the watch of [anyBackend] run, never the main thread.
  */
 internal class AndroidSync(
-    store: NoteStore,
-    val manager: BackendManager,
-    private val workManager: WorkManager,
+    val scheduler: SyncScheduler,
+    private val revisionMark: Flow<Long>,
+    private val anyBackend: Flow<Boolean>,
+    private val jobs: SyncJobs,
     private val scope: CoroutineScope,
 ) {
-    private val revisionMark = store.notes.observeRevisionMark()
     private val started = AtomicBoolean(false)
 
-    /** The scheduler. Started by [start]. */
-    val scheduler: SyncScheduler = SyncScheduler(manager::syncAll, SyncTiming(period = 15.minutes))
+    // Unknown until the backends are first read: a sync after leaving is asked for meanwhile.
+    private val backends = AtomicBoolean(true)
 
     /**
      * Starts the scheduler, once per process, whose first round is the sync on start, and keeps
@@ -206,22 +242,17 @@ internal class AndroidSync(
         if (!started.compareAndSet(false, true)) return false
         scheduler.start(scope, revisionMark)
         scope.launch {
-            manager
-                .observe()
-                .map { it.isNotEmpty() }
+            anyBackend
                 .distinctUntilChanged()
                 // A failed read changes nothing: the job stays as it was until the next start.
                 .catch { }
                 .collect { any ->
-                    anyBackend.set(any)
-                    SyncWork.periodic(workManager, any)
+                    backends.set(any)
+                    jobs.periodic(any)
                 }
         }
         return true
     }
-
-    // Unknown until the backends are first read: then a sync after leaving is asked for anyway.
-    private val anyBackend = AtomicBoolean(true)
 
     /** The app came to the screen: a sync, as on start. */
     fun foreground() {
@@ -235,10 +266,10 @@ internal class AndroidSync(
     }
 
     /**
-     * The app left the screen, or a text was shared: a sync by WorkManager, once online. Not when
-     * there is no backend, so that leaving the app does not wake the phone for nothing.
+     * The app left the screen, or a text was shared: a sync by a background job, once online. Not
+     * when there is no backend, so that leaving the app does not wake the phone for nothing.
      */
     fun soon() {
-        if (anyBackend.get()) SyncWork.soon(workManager)
+        if (backends.get()) jobs.soon()
     }
 }
