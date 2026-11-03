@@ -73,8 +73,9 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
   as a mobile carrier may use `100.64.0.0/10` itself. Loopback is always allowed. Otherwise
   the hub client runs on `tailnetEngine` (Ktor's OkHttp engine) with `TailnetSockets`: each
   socket is bound to that VPN with `Network.bindSocket` and connects only to an address its
-  routes cover, so a VPN that goes away mid-sync makes requests fail rather than leave by the
-  mobile network. Another app's VPN on `100.64.0.0/10` passes the check; Android does not say
+  routes cover, and the hub's name is looked up on that VPN with `Network.getAllByName`, so a
+  VPN that goes away mid-sync makes requests fail rather than leave by the mobile network, and
+  a MagicDNS name is never asked of the mobile network's DNS. Another app's VPN on `100.64.0.0/10` passes the check; Android does not say
   whose VPN it is.
 - **Sharing.** `ACTION_SEND` of `text/plain` or `text/markdown`. The subject becomes the
   title, on one line and at most 200 characters, unless it repeats the text. A file or image

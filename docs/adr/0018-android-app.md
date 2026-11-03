@@ -91,15 +91,17 @@ root (`AppGraph`), running on `Dispatchers.Default` with the database and networ
 app's network is a VPN holding an address in `100.64.0.0/10` or `fd7a:115c:a1e0::/48`, as
 Tailscale's Android app is. If not, the hub is unreachable with a plain reason, at adding,
 syncing and on the status screen, and nothing is sent. Loopback is always allowed. Otherwise
-the hub client gets an HTTP engine of the app's (`TailnetCheck.engine`; Ktor's OkHttp engine,
-as CIO takes no socket factory) whose sockets are bound to that VPN network with
+the hub client gets a transport of the app's (`TailnetCheck.transport`): an HTTP engine
+(Ktor's OkHttp engine, as CIO takes no socket factory) whose sockets are bound to that VPN network with
 `Network.bindSocket` before they connect, and connect only to an address that the VPN's routes
 (`LinkProperties.routes`) cover, read again at each connection. So if the VPN goes away in the
 middle of a sync, requests fail instead of leaving by the mobile network, and an address that
 Tailscale does not route is never connected to. The engine uses no proxy, retries nothing and
-follows no redirect, like the client's own. Tailscale's
-MagicDNS names resolve only while its VPN runs, and an app that its split tunnelling leaves
-out sees no VPN and so sends nothing. The desktop passes `TailnetCheck.NONE`: ADR-0015's rule
+follows no redirect, like the client's own. The hub's name is looked up on that VPN network
+too (`Network.getAllByName`), before every request and by the engine alike, so a MagicDNS name
+is never asked of the mobile network's DNS; without the network the lookup fails with the same
+reason. Tailscale's MagicDNS names resolve only while its VPN runs, and an app that its split
+tunnelling leaves out sees no VPN and so sends nothing. The desktop passes `TailnetCheck.NONE`: ADR-0015's rule
 is unchanged there.
 
 **Tests reach the host through `adb reverse`.** `10.0.2.2`, the emulator's name for the host,
