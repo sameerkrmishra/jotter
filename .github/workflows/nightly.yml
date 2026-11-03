@@ -15,7 +15,9 @@ jobs:
   simulate:
     name: simulate
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    # CI's simulate job runs about 11 seeds a second on the same runner, so 50000 take some 80
+    # minutes. A timeout still opens an issue.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
