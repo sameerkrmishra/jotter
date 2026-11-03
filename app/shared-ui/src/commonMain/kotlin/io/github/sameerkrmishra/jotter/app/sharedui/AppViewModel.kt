@@ -35,6 +35,7 @@ import kotlinx.coroutines.launch
  *   not sync, which then shows no backend screen.
  */
 @Stable
+@Suppress("TooManyFunctions") // One small function per way of moving between screens.
 public class AppViewModel(
     private val notes: NoteService,
     private val conflicts: ConflictResolver,

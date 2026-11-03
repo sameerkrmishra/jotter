@@ -94,15 +94,28 @@ class PhoneTest {
             onNodeWithTag(BODY_FIELD).performTextInput("milk")
             assertTrue(back(app))
             awaitText("milk")
-            assertEquals("milk", device.store.notes.list().single().body)
+            assertEquals(
+                "milk",
+                device.store.notes
+                    .list()
+                    .single()
+                    .body,
+            )
 
             onNodeWithText(BACKENDS_TITLE).performClick()
             awaitText(NO_BACKENDS_NOR_FOLDERS)
             assertTrue(back(app))
             awaitText("New note")
 
-            val note = device.store.notes.list().single()
+            val note =
+                device.store.notes
+                    .list()
+                    .single()
             runOnUiThread { app.openReview(note.id) }
+            awaitText("Back")
+            // Going to the background with the review open keeps it, and it stays open.
+            val kept = runOnUiThread { app.keep() }
+            waitUntil(timeoutMillis = TIMEOUT_MS) { kept.isCompleted }
             awaitText("Back")
             assertTrue(back(app))
             awaitText("New note")
@@ -116,7 +129,13 @@ class PhoneTest {
             onNodeWithTag(BODY_FIELD).performTextInput("bread")
             val job = runOnUiThread { app.keep() }
             waitUntil(timeoutMillis = TIMEOUT_MS) { job.isCompleted }
-            assertEquals("bread", device.store.notes.list().single().body)
+            assertEquals(
+                "bread",
+                device.store.notes
+                    .list()
+                    .single()
+                    .body,
+            )
             // Still in the editor, which goes on from the saved note.
             onNodeWithTag(BODY_FIELD).performTextInput(" rolls")
             assertTrue(back(app))
@@ -127,7 +146,12 @@ class PhoneTest {
                     .body
                     .contains("rolls")
             }
-            assertEquals(1, device.store.notes.list().size)
+            assertEquals(
+                1,
+                device.store.notes
+                    .list()
+                    .size,
+            )
             // On the note list, there is nothing to keep.
             val idle = runOnUiThread { app.keep() }
             waitUntil(timeoutMillis = TIMEOUT_MS) { idle.isCompleted }

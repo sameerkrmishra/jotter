@@ -365,10 +365,13 @@ class SyncSchedulerTest {
             val backends = Backends(listOf(usb, dav))
             val gate = CompletableDeferred<Unit>()
             backends.blockNext = gate
-            val (scheduler, _) = start(backends)
+            val (scheduler, marks) = start(backends)
             // The round on start is running: it does not count for a call made now.
             val waited = backgroundScope.async { scheduler.syncAndWait() }
             val second = backgroundScope.async { scheduler.syncAndWait() }
+            testScheduler.runCurrent()
+            // An edit meanwhile goes out with that same round.
+            marks.value = 11
             testScheduler.runCurrent()
             gate.complete(Unit)
             testScheduler.runCurrent()
@@ -399,9 +402,10 @@ class SyncSchedulerTest {
             val scheduler = SyncScheduler(backends::syncAll, timing, testScheduler.timeSource)
             val job = scheduler.start(backgroundScope, MutableStateFlow(1L))
             testScheduler.runCurrent()
-            // One waits for the next round, one is in the running round's queue.
+            // One waits for the next round, behind it a request of the user's.
             val queued = backgroundScope.async { scheduler.syncAndWait() }
             testScheduler.runCurrent()
+            scheduler.syncNow()
             job.cancel()
             testScheduler.runCurrent()
             assertTrue(queued.isCancelled)
