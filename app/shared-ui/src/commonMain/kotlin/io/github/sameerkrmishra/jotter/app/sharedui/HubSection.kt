@@ -37,6 +37,7 @@ internal fun AddHub(backends: BackendsViewModel) {
                 label = { Text("Pairing token") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = SECRET_KEYBOARD,
             )
             Button(
                 onClick = backends::addHub,

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -21,6 +22,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.sameerkrmishra.jotter.app.sync.Backend
@@ -47,6 +49,13 @@ internal const val BACKENDS_TITLE = "Sync"
 internal const val NO_BACKENDS =
     "This device syncs with no backend yet. Add a folder, such as a USB stick or a folder " +
         "that another program keeps in step with other computers."
+
+/**
+ * The keyboard of a field that holds a password or a token: a password field, so that a phone's
+ * keyboard neither learns, suggests nor syncs what is typed, and no autocorrection.
+ */
+internal val SECRET_KEYBOARD =
+    KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false)
 
 /** [NO_BACKENDS] on a device that cannot add a folder. */
 internal const val NO_BACKENDS_NOR_FOLDERS =
@@ -299,6 +308,7 @@ private fun PasswordField(
         label = { Text("App password") },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = SECRET_KEYBOARD,
     )
 }
 
