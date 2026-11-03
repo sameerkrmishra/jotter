@@ -26,6 +26,7 @@ class TailscaleTest {
                 "127.0.0",
                 "1270.0.0.1",
                 "127.0.0.256",
+                "127.0.0.-1",
             )
         hosts.forEach { host ->
             assertEquals(TAILSCALE_OFF, tailnetRefusal(host, null), host)

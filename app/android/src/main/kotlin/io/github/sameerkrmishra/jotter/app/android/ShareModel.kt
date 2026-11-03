@@ -52,10 +52,10 @@ internal interface SharedNotes {
     fun syncSoon()
 }
 
-/** The notes could not be opened; the message says why, for the user. */
+/** The notes could not be opened; [reason] says why, for the user. */
 internal class NotesUnavailableException(
-    message: String,
-) : Exception(message)
+    val reason: String,
+) : Exception(reason)
 
 /**
  * Reads a share from its intent with [read]. Android unparcels every extra when the first is read,
@@ -104,7 +104,7 @@ internal class ShareViewModel(
             notes.syncSoon()
             ShareState.Saved(note.leftOut)
         } catch (e: NotesUnavailableException) {
-            ShareState.Refused(e.message.orEmpty())
+            ShareState.Refused(e.reason)
         } catch (_: StorageBusyException) {
             ShareState.Refused(NOTES_BUSY)
         } catch (e: RuntimeException) {

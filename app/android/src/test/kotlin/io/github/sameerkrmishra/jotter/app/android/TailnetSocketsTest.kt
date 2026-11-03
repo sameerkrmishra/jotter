@@ -65,6 +65,10 @@ class TailnetSocketsTest {
     fun withoutTheNetworkNothingConnects() {
         val none = TailnetSockets(null) { true }
         assertFailsWith<IOException> { none.createSocket(loopback, server.localPort) }
+        // An address of another kind has nothing to check either.
+        assertFailsWith<IOException> {
+            sockets().createSocket().connect(object : java.net.SocketAddress() {})
+        }
         // A name that is not resolved has no address to check.
         assertFailsWith<IOException> {
             sockets().createSocket().connect(
