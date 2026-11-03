@@ -16,6 +16,7 @@ kotlin {
         commonMain.dependencies {
             api(projects.core.storage)
             api(projects.core.sync)
+            api(projects.app.sync)
             api(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)

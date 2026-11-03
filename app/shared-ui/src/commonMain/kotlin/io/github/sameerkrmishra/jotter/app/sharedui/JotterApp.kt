@@ -26,8 +26,10 @@ public fun JotterApp(viewModel: AppViewModel) {
         Surface(Modifier.fillMaxSize()) {
             val editor = viewModel.editor
             val review = viewModel.review
+            val backends = viewModel.backends
             when {
                 review != null -> ReviewScreen(review, viewModel::closeReview)
+                backends != null -> BackendsScreen(backends, viewModel::closeBackends)
                 editor != null -> EditorScreen(editor, viewModel)
                 else -> NotesScreen(viewModel)
             }
