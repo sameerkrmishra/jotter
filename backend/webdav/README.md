@@ -110,7 +110,9 @@ again.
 ## Tests
 
 In `check`, on the JVM (counted by the coverage gate), linuxX64 and the Android
-host:
+host, and on Android devices (`connectedAndroidDeviceTest`, in CI on API 26 and
+36), where the loopback servers run inside the test app. The live tests below do
+not run on a device:
 
 - `FakeServerContractTest` runs the contract suite against `FakeDavServer`, a
   WebDAV server in memory inside Ktor's `MockEngine`.

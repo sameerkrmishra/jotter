@@ -66,8 +66,9 @@ steady one) and the tailnet rule. It runs the client against `FakeHub`, a raw so
 loopback that answers as a broken hub would: no protocol header, a body cut short
 or too long, no length, impossible listings, every error code with right and wrong
 statuses, redirects, silence, and nothing listening. `PeerAddressTest` covers the
-address. Both run on the JVM (counted by the coverage gate), the Android host and
-linuxX64.
+address. Both run on the JVM (counted by the coverage gate), the Android host,
+linuxX64 and Android devices (`connectedAndroidDeviceTest`, in CI on API 26 and
+36), where `FakeHub` listens inside the test app.
 
 The contract suite runs through this client against a real hub in the `server`
 module's tests. The coverage gate counts this module's own tests only.
