@@ -21,8 +21,8 @@ backend, so the PC is a device on its own hub.
 
 **Dependency rule:** depends on `backend:peer` (the protocol), `backend:localfolder`
 (the store), Ktor's HTTP parser, okio, atomicfu, coroutines and
-kotlinx.serialization. No other Jotter module, and no app module depends on it
-yet. **JVM only**: the hub runs inside the desktop app's JVM on JDK sockets, outside
+kotlinx.serialization. No other Jotter module. `app:shared-ui`'s JVM code runs it in
+the desktop app (`PeerHubControls`). **JVM only**: the hub runs inside the desktop app's JVM on JDK sockets, outside
 the linuxX64 rule (ADR-0015 amends ADR-0006 for this module).
 
 ## API

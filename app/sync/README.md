@@ -21,14 +21,14 @@ SyncScheduler(manager::syncAll).start(scope, store.notes.observeRevisionMark())
 ```
 
 **Dependency rule:** `core:storage`, `core:sync`, `backend:api` (all in its API) and
-each backend implementation it can open, today `backend:localfolder` and
-`backend:webdav`. No UI.
+each backend implementation it can open: `backend:localfolder`, `backend:webdav` and
+`backend:peer`. No UI. Its JVM tests use the `server` module's hub.
 
 ## API
 
 | Type | What it is |
 |---|---|
-| `BackendConfig`, `LocalFolderConfig`, `WebDavConfig`, `UnknownConfig` | Where a backend is and what secrets it needs. Stored as `kind` and JSON `settings` in the `backend` table, never with a secret. `UnknownConfig` is a kind this version cannot read, listed so that it can be removed, never synced |
+| `BackendConfig`, `LocalFolderConfig`, `WebDavConfig`, `PeerConfig`, `UnknownConfig` | Where a backend is and what secrets it needs. Stored as `kind` and JSON `settings` in the `backend` table, never with a secret. `UnknownConfig` is a kind this version cannot read, listed so that it can be removed, never synced |
 | `Backend`, `Attempt`, `Outcome`, `BackendSync`, `BackendStatus` | A configured backend, how its last sync went, what one sync did, and its reachability now |
 | `BackendFactory`, `StandardBackendFactory`, `MissingSecretException` | Opens the `BlobStore` of a backend, reading its password |
 | `BackendManager`, `AddResult`, `PasswordChange` | Adds a local folder or a WebDAV server, replaces a password, removes a backend, syncs one or all, and reports status |
@@ -83,8 +83,15 @@ syncs it.
   (`Files.createFile` with the permission attribute), then renames it into place, in
   a directory created 0700, under a lock file. It refuses a file that others may read,
   that is not the user's, or that is a link, and never quotes the file in an error.
-- **WebDAV stores are closed** after each sync and status, as each holds an HTTP
-  client.
+- **WebDAV and hub stores are closed** after each sync and status, as each holds an
+  HTTP client.
+- **Adding the PC hub** (`addPeer`, ADR-0015) refuses an IPv4 address outside loopback
+  and `100.64.0.0/10` before anything is sent; the client checks a name each time it
+  resolves it. The hub must answer `Reachable` with the token: a refused token, a hub
+  whose folder is not set up, or one that cannot be reached is `Refused` in plain words,
+  and this device never sets the hub up. The token is a `PAIRING_SECRET` in the
+  `SecretStore`. A refused token later reads as "unpaired on the PC"; `changePassword`
+  takes the new token after pairing again.
 
 ## Design
 
@@ -143,7 +150,8 @@ syncs it.
 
 ## Tests
 
-`WebDavBackendTest` adds, changes and removes WebDAV backends against a stand-in
+`PeerBackendTest` (JVM) syncs two devices through a real hub on 127.0.0.1, unpairs one,
+pairs it again, and checks the refusals. `WebDavBackendTest` adds, changes and removes WebDAV backends against a stand-in
 server. `SecretServiceStoreTest` uses a stand-in `secret-tool` that logs its arguments
 and bus, to show that the secret is never in either, and runs the real `secret-tool`
 against a private `dbus-daemon` the test starts, with no keyring on it, to show it

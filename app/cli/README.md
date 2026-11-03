@@ -29,7 +29,8 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 | `jotter backends` | Lists the backends |
 | `jotter backends add PATH` | Adds a folder, such as a USB stick, as a backend and prints its id. `--name NAME`. A folder that is not a Jotter store yet needs `--new`, see below |
 | `jotter backends add webdav URL --user NAME` | Adds a collection on a WebDAV server and prints its id. The app password is read from the terminal without echo, or else from the first line of stdin, never from an argument. `--new` sets up a collection that is not a store yet; `--password-in-file` keeps the password in a file instead of the keyring, see below |
-| `jotter backends password ID` | Replaces a WebDAV backend's app password, read as above, after the server accepted it |
+| `jotter backends add peer HOST[:PORT]` | Adds the PC hub ([ADR-0015](../../docs/adr/0015-pc-hub-peer-protocol.md)) at the PC's Tailscale address or name, and prints its id. The pairing token the PC showed is read like a password. `--password-in-file` as for WebDAV |
+| `jotter backends password ID` | Replaces a WebDAV backend's app password, or the hub's pairing token after pairing again, read as above, after the server or hub accepted it |
 | `jotter backends remove ID` | Stops syncing with a backend and forgets it on this device. Its files stay where they are |
 | `jotter backends status [ID]` | Asks each backend, or one, whether it can be reached now, and prints that with its last sync and issues |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
@@ -65,7 +66,7 @@ Import 1,000 synthetic notes: median 1.1 s from process start to exit, as one tr
 
 ### Backends and sync
 
-Folders and WebDAV servers can be backends; the PC hub comes later in M4. An `ID`
+Folders, WebDAV servers and the PC hub can be backends. An `ID`
 of a backend is a whole id or a start of one that only one backend has.
 
 `backends add` never sets up a folder by itself. If the folder is not a Jotter store
@@ -91,6 +92,12 @@ over SSH, adding fails with the reason, and `--password-in-file` keeps it in pla
 in `$XDG_CONFIG_HOME/jotter/secrets.json`, readable by your user alone. A server that
 refuses the password ends a sync as `unauthorized`; `backends password` replaces it.
 `backends remove` deletes the password first, and removes nothing if it cannot.
+
+`backends add peer` refuses an IPv4 address outside loopback and Tailscale's
+`100.64.0.0/10`, because the hub speaks plain HTTP inside Tailscale's tunnel; a name is
+checked when it resolves, before each request. The hub must accept the token, and its
+folder must be set up on the PC. When the PC unpairs this device, a sync ends as
+`unauthorized` and says to pair again; `backends password` takes the new token.
 
 `sync` does in one run what the desktop app does in the background, and records the
 outcome, which the app's backend screen and `backends status` show too. It may run
