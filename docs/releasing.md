@@ -37,7 +37,8 @@ in the repository for it.
    unset JOTTER_KEYSTORE_PASSWORD
    ```
 
-   `--no-configuration-cache` keeps the password out of Gradle's configuration cache. Set
+   `--no-configuration-cache` keeps the password out of Gradle's configuration cache; with
+   `JOTTER_KEYSTORE` set, the build refuses to run without it. Set
    `JOTTER_KEY_ALIAS` and `JOTTER_KEY_PASSWORD` if the key's alias is not `jotter` or its
    password differs from the store's. The signed APK is
    `app/android/build/outputs/apk/release/android-release.apk`.

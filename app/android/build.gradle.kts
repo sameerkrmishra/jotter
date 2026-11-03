@@ -1,3 +1,6 @@
+import org.gradle.api.configuration.BuildFeatures
+import javax.inject.Inject
+
 plugins {
     // Before jotter.quality, which reads it.
     id("jotter.android-app")
@@ -18,6 +21,23 @@ require(releaseVersionCode > 0) { "jotter.versionCode must be positive" }
 // file in the repository. Without it, as in CI and on F-Droid's build server, the release APK is
 // unsigned.
 val releaseKeystore = providers.environmentVariable("JOTTER_KEYSTORE").orNull
+
+// The configuration cache would store the signing passwords on disk with the build's
+// configuration, so signing refuses to run with it.
+abstract class Features
+    @Inject
+    constructor(
+        val build: BuildFeatures,
+    )
+val configurationCacheRequested =
+    objects
+        .newInstance<Features>()
+        .build.configurationCache.requested
+        .getOrElse(false)
+require(releaseKeystore == null || !configurationCacheRequested) {
+    "JOTTER_KEYSTORE is set: sign with --no-configuration-cache, so that the passwords are not " +
+        "stored in the configuration cache (docs/releasing.md)"
+}
 
 android {
     namespace = "io.github.sameerkrmishra.jotter.app.android"
