@@ -34,7 +34,9 @@ jobs:
   reproducible:
     name: reproducible
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Measured 2026-11-03 on the first run: 8 minutes, the first build 5 m 10 s (downloading the
+    # dependencies) and the second 2 m 36 s. No Kotlin/Native toolchain is needed.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

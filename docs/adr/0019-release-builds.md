@@ -66,7 +66,10 @@ from one commit, each from its own `git archive` copy in its own directory, with
 cache, in different time zones, locales and umasks, minutes apart, and fails unless the two are
 byte-identical (diffoscope, or `zipinfo` and a file comparison, shows a difference). CI's
 `reproducible` workflow runs it with Temurin for one build and Zulu for the other on every push
-to `main`, on tags, and on pull requests that change the build.
+to `main`, on tags, and on pull requests that change the build. On 2026-11-04 four builds of the
+same sources (two local with Temurin 21.0.12 in a worktree and in exported trees, two in CI with
+Temurin 21.0.13 and Zulu 21.0.13) gave the same APK, SHA-256 `06981c62…fdab0061`. The release
+build needs no Kotlin/Native toolchain.
 
 ## Consequences
 
