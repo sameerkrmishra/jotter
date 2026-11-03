@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.sync
 
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
+import io.github.sameerkrmishra.jotter.backend.api.BlobInfo
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreFailureException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
@@ -277,6 +278,46 @@ class BackendManagerTest {
                     Reachability.Unreachable(UnreachableReason.FAILED, "The keyring is locked"),
                     status.reachability,
                 )
+            }
+        }
+
+    @Test
+    fun recordsOfABackendRemovedDuringASyncAreForgottenByTheNextOne() =
+        test {
+            val dir = this
+            val shared = InMemoryBlobStore()
+            var removeDuringList = true
+            // Another process, the CLI, removes the backend while this one lists the store.
+            val blobs =
+                object : BlobStore by shared {
+                    override suspend fun list(prefix: String): List<BlobInfo> {
+                        if (removeDuringList) {
+                            removeDuringList = false
+                            Device(dir, "a").use { cli -> assertTrue(cli.manager.remove("mem")) }
+                        }
+                        return shared.list(prefix)
+                    }
+                }
+            Device(dir, "a", factory = NamedStores(mapOf("mem" to blobs))).use { app ->
+                app.store.backends.add(record("mem"))
+                app.store.notes.create("", "milk")
+                app.manager.sync("mem")
+                assertEquals(emptyList(), app.manager.list())
+                assertTrue(syncRows(app.file) > 0, "the race left no records to clean up")
+
+                app.manager.syncAll()
+                assertEquals(0, syncRows(app.file))
+            }
+        }
+
+    /** The rows of the sync tables, of every backend. */
+    private fun syncRows(file: String): Long =
+        BundledSQLiteDriver().open(file).use { connection ->
+            listOf("sync_read", "sync_segment", "backend_revision").sumOf { table ->
+                connection.prepare("SELECT count(*) FROM $table").use {
+                    it.step()
+                    it.getLong(0)
+                }
             }
         }
 

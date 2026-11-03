@@ -369,6 +369,16 @@ public class SyncStore internal constructor(
         }
     }
 
+    /**
+     * Forgets, in one transaction, every backend that has sync records but no row in the
+     * `backend` table, and returns their ids. One transaction, so a backend that another process
+     * adds meanwhile has its row before it has any sync records, and is never taken for one.
+     */
+    public fun forgetUnlistedBackends(): List<String> =
+        write {
+            queries.selectUnlistedBackends().executeAsList().onEach(::forgetBackend)
+        }
+
     /** Replaces the open conflicts of the note [noteId] with [conflicts]. */
     public fun replaceConflicts(
         noteId: NoteId,

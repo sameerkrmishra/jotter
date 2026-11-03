@@ -177,8 +177,27 @@ public class BackendManager(
      * Syncs with every backend that [due] accepts, one after the other, and records how each
      * went. A backend that fails does not stop the others.
      */
-    public suspend fun syncAll(due: (Backend) -> Boolean = { true }): List<BackendSync> =
-        list().filter(due).mapNotNull { sync(it.id) }
+    public suspend fun syncAll(due: (Backend) -> Boolean = { true }): List<BackendSync> {
+        forgetRemoved()
+        return list().filter(due).mapNotNull { sync(it.id) }
+    }
+
+    /**
+     * Drops the sync records of backends that were removed while another process synced with
+     * them, or by a process that died before forgetting them. Under the lock, so that no add of
+     * this process runs meanwhile; another process's add is safe, as `SyncEngine` decides in one
+     * transaction, and a new backend has its row before any sync records.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException") // Housekeeping, retried each time.
+    private suspend fun forgetRemoved() {
+        try {
+            operations.withLock { engine.forgetUnlisted() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // A locked database: the records stay until the next syncAll, and harm nothing.
+        }
+    }
 
     /**
      * Runs one sync cycle with the backend [id] and records how it went. Returns null if there is

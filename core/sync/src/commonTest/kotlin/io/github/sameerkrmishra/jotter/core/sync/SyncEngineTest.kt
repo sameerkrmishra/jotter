@@ -14,6 +14,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.RevisionContent
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.storage.BackendRecord
 import io.github.sameerkrmishra.jotter.core.storage.NoteFilter
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import kotlinx.coroutines.test.TestResult
@@ -34,6 +35,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Instant
 
 /** A [BlobStore] whose next calls fail in ways a test asks for. */
 private class ScriptedStore(
@@ -879,6 +881,24 @@ class SyncEngineTest {
             assertEquals(note, pc.notes.get(note.id))
             assertTrue(relay.sync.unpushed("right").isEmpty())
             assertTrue(relay.sync.unpushed("left").isEmpty())
+        }
+
+    @Test
+    fun onlyBackendsMissingFromTheBackendTableAreForgottenAsUnlisted(): TestResult =
+        runTest {
+            val phone = device("phone")
+            phone.notes.create("t", "b")
+            val engine = phone.engine()
+            phone.backends.add(
+                BackendRecord("listed", "local-folder", "x", "{}", Instant.DISTANT_PAST),
+            )
+            engine.sync(SyncTarget("listed", InMemoryBlobStore()))
+            engine.sync(SyncTarget("removed", InMemoryBlobStore()))
+            assertEquals(listOf("removed"), engine.forgetUnlisted())
+            assertTrue(phone.sync.ownSegments("removed").isEmpty())
+            assertEquals(1, phone.sync.unpushed("removed").size)
+            assertEquals(1, phone.sync.ownSegments("listed").size)
+            assertEquals(emptyList(), engine.forgetUnlisted())
         }
 
     @Test

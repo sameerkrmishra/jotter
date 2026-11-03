@@ -26,7 +26,7 @@ below is `internal`.
 
 | Type | What it is |
 |---|---|
-| `SyncEngine` | `sync(target)` runs one cycle: push, pull, apply. `forget(id)` drops a backend's local state. Scheduling is the caller's: `app:sync`'s `SyncScheduler` for the desktop app |
+| `SyncEngine` | `sync(target)` runs one cycle: push, pull, apply. `forget(id)` drops a backend's local state, and `forgetUnlisted()` that of every backend missing from the `backend` table. Scheduling is the caller's: `app:sync`'s `SyncScheduler` for the desktop app |
 | `SyncTarget`, `DeviceInfo` | A backend with its lasting local id, and what `device.json` says |
 | `SyncResult` | `Completed`, `Unreachable`, `Incompatible` or `Interrupted` |
 | `SyncReport`, `SyncIssue`, `SegmentProblem` | What a cycle did, and what it could not do |

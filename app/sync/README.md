@@ -65,7 +65,10 @@ syncs it.
   backend and skips one that is gone. Across processes (the CLI while the app runs)
   `SyncEngine` keeps the sync tables consistent on its own; a sync running in the app
   while the CLI removes that backend can still leave sync records for the removed id,
-  as above.
+  as can a process that dies while removing. So `syncAll` first calls
+  `SyncEngine.forgetUnlisted`, which forgets, in one transaction, every backend with
+  sync records and no row in the `backend` table. A backend that another process adds
+  meanwhile has its row before it has any records, so it is never taken for one.
 - **Outcomes.** A sync never throws, except for cancellation: a backend's failure, a
   database error or a secret store that fails end as an `Outcome` with a plain
   description, recorded in the `backend` table with the time. The last success is kept

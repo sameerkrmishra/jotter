@@ -84,6 +84,17 @@ public class SyncEngine internal constructor(
         }
     }
 
+    /**
+     * Forgets every backend that has sync records here but is not in the database's `backend`
+     * table, and returns their ids. A backend removed by one process while another synced with it
+     * leaves such records. Only for callers that keep their backends in that table: an id that is
+     * not there loses its records.
+     */
+    public suspend fun forgetUnlisted(): List<String> =
+        cycles.withLock {
+            withContext(databaseContext) { store.sync.forgetUnlistedBackends() }
+        }
+
     private suspend fun cycle(target: SyncTarget): SyncResult {
         val blobs = target.store
         val reachability = blobs.ping()
