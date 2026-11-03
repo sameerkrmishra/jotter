@@ -12,6 +12,7 @@ import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.readLine
 import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,7 +68,9 @@ internal class FaultProxy private constructor(
     private val selector: SelectorManager,
     private val server: ServerSocket,
 ) : AutoCloseable {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // A connection that breaks is what this proxy is for, not a failure of the test.
+    private val scope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> })
     private val connections = AtomicInt(0)
 
     /** The port to connect to. */

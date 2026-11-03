@@ -17,8 +17,8 @@ and an unreachable store must never look empty. Files are at most 32 MiB
 Before writing the client we measured three servers in containers, eight writers
 racing for one path a hundred times each:
 
-- **lighttpd 1.4.85** (`mod_webdav`): exactly one `201` and seven `412` in every
-  round. It is single-threaded and handles a whole request at once.
+- **lighttpd 1.4.85** (`mod_webdav`, Alpine): exactly one `201` and seven `412` in
+  every round. The tests now use 1.4.79 from Debian, which passes the same contract race. It is single-threaded and handles a whole request at once.
 - **Apache httpd 2.4.69** (`mod_dav_fs`, event or prefork MPM): a second `PUT`
   after the first gives `412`, but in a race several writers get `201`, with 100 KB
   bodies in every round. It checks, then writes a temporary file and renames it
@@ -144,9 +144,10 @@ on every target, and the CIO engine against misbehaving TCP servers.
 
 `scripts/live-test.sh` runs the contract suite on lighttpd and Apache, the refusal
 on rclone, and `LiveFaultTest` on lighttpd, on the JVM and linuxX64, over `http` on
-127.0.0.1. The images are pinned by digest in the script. On 2026-11-03 every one
-of these tests passed on both targets, 57 per target (Apache without its race
-test). The race measurements
+127.0.0.1. The images are pinned by digest in the script, and lighttpd's package by
+a Debian snapshot date. On 2026-11-03 every one of these tests passed on both
+targets, 59 per target (Apache without its race test), including the contract's
+check that wrong credentials give `UNAUTHORIZED`. The race measurements
 above came from a throwaway Python script with eight threads; the contract's own
 race test, eight coroutines on 4 KB files for 30 rounds, failed on Apache in each
 of the three JVM runs that included it.

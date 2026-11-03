@@ -13,8 +13,11 @@ prefix=jotter-test-webdav-$(od -An -N4 -tx4 /dev/urandom | tr -d ' ')
 started=""
 
 # Images by digest, so a run tests exactly these servers. Tags as of 2026-11-03.
-lighttpd_image=alpine@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f # 3.22
-lighttpd_version=1.4.85-r0
+# lighttpd comes from Debian's snapshot archive at a fixed time, which never drops a package
+# build, unlike Alpine's repositories. See backend/webdav/README.md for why not an image.
+lighttpd_image=debian@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4 # trixie-slim
+lighttpd_snapshot=20261101T000000Z
+lighttpd_version=1.4.79-2
 apache_image=httpd@sha256:c6b7745aa371570cc8460a9f08c39989583d4aa7bc8e3ed8bd77a492803ea704 # 2.4.69
 rclone_image=rclone/rclone@sha256:2687085f718d3c628f7fdfb77c52a1d344332aed543110bb88088f2c70d43eb5 # 1.75.2
 
@@ -55,9 +58,12 @@ wait_for() {
 
 lighttpd_port=$(free_port)
 start lighttpd "$lighttpd_port" -v "$PWD/$servers/lighttpd/lighttpd.conf:/conf/lighttpd.conf:ro" \
-    "$lighttpd_image" sh -c "apk add --no-cache lighttpd=$lighttpd_version \
-        lighttpd-mod_webdav=$lighttpd_version lighttpd-mod_auth=$lighttpd_version > /dev/null &&
-        mkdir -p /srv/dav /var/lib/lighttpd && chown lighttpd /srv/dav /var/lib/lighttpd &&
+    "$lighttpd_image" sh -c "rm -f /etc/apt/sources.list.d/* &&
+        echo 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/$lighttpd_snapshot trixie main' \
+            > /etc/apt/sources.list &&
+        apt-get -qq update && DEBIAN_FRONTEND=noninteractive apt-get -qq install --no-install-recommends \
+            lighttpd=$lighttpd_version lighttpd-mod-webdav=$lighttpd_version > /dev/null &&
+        mkdir -p /srv/dav /var/lib/lighttpd /etc/lighttpd &&
         echo jotter:secret > /etc/lighttpd/users && exec lighttpd -D -f /conf/lighttpd.conf"
 
 apache_port=$(free_port)

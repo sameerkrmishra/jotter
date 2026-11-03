@@ -127,7 +127,7 @@ Against real servers, by `scripts/live-test.sh`, which CI runs in its `webdav` j
 
 | Server | Image | How it differs |
 |---|---|---|
-| lighttpd 1.4.85, `mod_webdav` | `alpine:3.22` + apk | `If-None-Match` atomic. 500 for a `PUT` whose parent is missing; 301 for a `GET` of a collection |
+| lighttpd 1.4.79, `mod_webdav` | `debian:trixie-slim` + Debian snapshot | `If-None-Match` atomic. 301 for a `GET` of a collection. Serves a file for a path below it (path info) unless `static-file.disable-pathinfo` is on, as in our config. 1.4.85 on Alpine also answered 500 for a `PUT` whose parent is missing |
 | Apache httpd 2.4.69, `mod_dav_fs` | `httpd:2.4` | `If-None-Match` checked, but not atomic: concurrent writers can all win. 400 for a `PUT` or `PROPFIND` below a file; lower-case escapes in `href`s; `DAV:` properties under a second prefix |
 | rclone 1.75.2, `serve webdav` | `rclone/rclone` | Ignores `If-None-Match` and replaces files, so `initialize` refuses it |
 
@@ -143,7 +143,13 @@ backend/webdav/scripts/live-test.sh jvm        # one target
 ```
 
 It needs Docker, curl and python3, starts each server on 127.0.0.1 at a free
-port, and removes its containers by name when it ends. Their logs are kept in
+port, and removes its containers by name when it ends. Apache and rclone are their
+official images, pinned by digest. lighttpd has no official image: the script
+installs `lighttpd=1.4.79-2` into a pinned `debian:trixie-slim` from
+`snapshot.debian.org` at a fixed date, which keeps every build for good, where
+Alpine's repositories drop a superseded one and broke the earlier pin. That is still a
+download when the container starts. A pinned third-party lighttpd image would avoid it,
+but running one was refused by this machine's permission rules, so none was tried. Their logs are kept in
 `build/live-test/`.
 
 mailbox.org itself has not been tested: see "Not verified" in ADR-0017.
