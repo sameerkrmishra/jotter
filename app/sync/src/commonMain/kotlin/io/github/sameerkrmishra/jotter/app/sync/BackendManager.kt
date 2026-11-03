@@ -381,8 +381,16 @@ public class BackendManager internal constructor(
                 "${backend.id}\". Delete it later in your keyring program, such as Seahorse or " +
                 "KWalletManager, or with: secret-tool clear application jotter backend ${backend.id}"
         } else {
-            "Its $what may still be in ${secrets.fileLocation}, under ${backend.id}. Delete " +
-                "that entry, or the whole file if no other backend uses it."
+            val file = secrets.fileLocation
+            if (file != null) {
+                "Its $what may still be in $file, under ${backend.id}. Delete that entry, or " +
+                    "the whole file if no other backend uses it."
+            } else {
+                "Its $what may still be in a secrets file, under ${backend.id}, though Jotter " +
+                    "cannot tell where on this device, as no home folder is set. Look for " +
+                    "jotter/secrets.json in your config folder, such as ~/.config, and delete " +
+                    "that entry."
+            }
         }
     }
 
@@ -396,6 +404,9 @@ public class BackendManager internal constructor(
             backend.config.secrets.isEmpty() -> null
             backend.config.secretPlace == SecretPlace.KEYRING ->
                 "Its $what is kept in the keyring."
+            secrets.fileLocation == null ->
+                "Its $what is kept in a plain-text secrets file, as chosen when it was added, " +
+                    "but Jotter cannot tell where on this device, as no home folder is set."
             else ->
                 "Its $what is kept in plain text in ${secrets.fileLocation}, as chosen when " +
                     "it was added."

@@ -65,8 +65,9 @@ internal class Device(
     val secrets: SecretStore = InMemorySecretStore(),
     val fileSecrets: SecretStore = InMemorySecretStore(),
     webDav: WebDavOpener = WebDavOpener(::openWebDav),
+    fileLocation: String? = "/config/secrets.json",
     factory: BackendFactory =
-        StandardBackendFactory(SecretStores(secrets, fileSecrets, "/config/secrets.json"), webDav),
+        StandardBackendFactory(SecretStores(secrets, fileSecrets, fileLocation), webDav),
     io: CoroutineContext = EmptyCoroutineContext,
 ) : AutoCloseable {
     // In a folder of its own: a backend folder may not be in the database's folder.
@@ -78,7 +79,7 @@ internal class Device(
             store,
             engine,
             factory,
-            SecretStores(secrets, fileSecrets, "/config/secrets.json"),
+            SecretStores(secrets, fileSecrets, fileLocation),
             io,
             clock,
             webDav,

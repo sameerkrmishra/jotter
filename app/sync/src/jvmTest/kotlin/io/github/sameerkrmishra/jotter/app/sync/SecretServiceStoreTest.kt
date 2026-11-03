@@ -58,7 +58,6 @@ class SecretServiceStoreTest {
             assertEquals("second", store.read(key)?.reveal())
             store.delete(key)
             assertNull(store.read(key))
-            store.delete(key)
 
             val calls = directory.resolve("calls.log").readText()
             assertFalse(password in calls, calls)
@@ -99,6 +98,58 @@ class SecretServiceStoreTest {
                 },
             )
         }
+
+    @Test
+    fun aSilentClearOfNothingIsNotTakenForDeleted() =
+        runTest {
+            // Nothing to delete: clear ends with 1 silently. A locked KeePassXC database looks
+            // the same, and answers a search with nothing, so no other call is asked.
+            val failure = assertFailsWith<SecretStoreException> { store().delete(key) }
+            assertMayBeLocked(failure)
+            assertTrue(failure.message!!.contains("or the item already gone"), failure.message)
+            val commands = calls().filter { it.isNotEmpty() }.map { it.substringBefore(' ') }
+            assertEquals(listOf("clear"), commands)
+        }
+
+    @Test
+    fun aLockedSecretIsNotTakenForDeleted() =
+        runTest {
+            val store = store()
+            store.write(key, Secret(password))
+            // A locked keyring, or a dismissed unlock prompt: clear and lookup both end with 1
+            // without a word.
+            directory.resolve("locked").writeText("")
+            assertNull(store.read(key))
+            assertMayBeLocked(assertFailsWith<SecretStoreException> { store.delete(key) })
+
+            directory.resolve("locked").toFile().delete()
+            assertEquals(password, store.read(key)?.reveal())
+            store.delete(key)
+            assertNull(store.read(key))
+        }
+
+    @Test
+    fun aSilentClearOfAListedItemIsNotTakenForDeleted() =
+        runTest {
+            val store = store()
+            store.write(key, Secret(password))
+            // Unlocked, yet clear deleted nothing, as after a dismissed prompt.
+            directory.resolve("keep").writeText("")
+            val failure = assertFailsWith<SecretStoreException> { store.delete(key) }
+            assertMayBeLocked(failure)
+            assertEquals(password, store.read(key)?.reveal())
+        }
+
+    private fun assertMayBeLocked(failure: SecretStoreException) {
+        val message = failure.message!!
+        assertFalse(failure is SecretStoreUnavailableException)
+        assertTrue(message.contains("the keyring may be locked"), message)
+        assertTrue(message.contains("Unlock your keyring"), message)
+        assertTrue(message.contains("\"Jotter: app password of backend b-1\""), message)
+        assertFalse(password in message, message)
+    }
+
+    private fun calls() = directory.resolve("calls.log").readText().lines()
 
     @Test
     fun withoutASessionBusItFailsClosed() =
@@ -251,6 +302,11 @@ class SecretServiceStoreTest {
          * Stands in for `secret-tool`: keeps each item in a file next to itself, and logs its
          * arguments and its bus. A file `fail` makes it print that and exit with 1 (or what `exit`
          * says), and `hang` makes it wait.
+         *
+         * Like libsecret's: `clear` deletes only unlocked items and ends with 1 without a word when
+         * it deleted none. A file `locked` locks every item, as a locked keyring or a dismissed
+         * unlock prompt leaves it: `lookup` and `clear` then end with 1 without a word. `keep`
+         * makes `clear` delete nothing all the same.
          */
         val FAKE_TOOL =
             """
@@ -268,10 +324,17 @@ class SecretServiceStoreTest {
             shift
             if [ "${'$'}op" = store ]; then shift; fi
             item="${'$'}dir/item-${'$'}(echo "${'$'}*" | tr ' /' '__')"
+            locked=no
+            if [ -f "${'$'}dir/locked" ]; then locked=yes; fi
             case "${'$'}op" in
                 store) cat > "${'$'}item" ;;
-                lookup) [ -f "${'$'}item" ] || exit 1; cat "${'$'}item" ;;
-                clear) rm -f "${'$'}item" ;;
+                lookup)
+                    [ -f "${'$'}item" ] && [ ${'$'}locked = no ] || exit 1
+                    cat "${'$'}item" ;;
+                clear)
+                    [ -f "${'$'}item" ] && [ ${'$'}locked = no ] || exit 1
+                    if [ -f "${'$'}dir/keep" ]; then exit 1; fi
+                    rm "${'$'}item" ;;
             esac
             """.trimIndent() + "\n"
     }

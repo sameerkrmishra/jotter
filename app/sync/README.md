@@ -78,10 +78,12 @@ syncs it.
   stdout (`lookup`), never in an argument or the environment, with
   `DBUS_SESSION_BUS_ADDRESS` set to the session's bus or to `disabled:`, so it fails
   closed and never starts a bus or keyring of its own. No `secret-tool`, no bus or no
-  provider is `SecretStoreUnavailableException`.
+  provider is `SecretStoreUnavailableException`. Only a `clear` that ends with 0
+  counts as deleted; one that ends with 1 without a word says the keyring may be locked,
+  or the item already gone (ADR-0016).
 - **`SecretFileStore`** writes each version to a new file created 0600 with `O_EXCL`
   (`Files.createFile` with the permission attribute), then renames it into place, in
-  a directory created 0700, under a lock file. It refuses a file that others may read,
+  a directory created 0700, or tightened to 0700 unless it is a link, under a lock file. It refuses a file that others may read,
   that is not the user's, or that is a link, and never quotes the file in an error.
 - **WebDAV and hub stores are closed** after each sync and status, as each holds an
   HTTP client.

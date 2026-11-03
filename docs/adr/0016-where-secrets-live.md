@@ -73,6 +73,28 @@ decision.
 the keyring reports no bus, no provider or no `secret-tool`; a keyring that refuses
 otherwise, such as a dismissed unlock prompt, is an error and offers nothing.
 
+**Only a `clear` that succeeds counts as a delete.** `secret-tool clear` deletes only
+unlocked items and ends with 1, without a word, when it deleted none, so no item, a
+locked item and a dismissed unlock prompt all look the same. `SecretServiceStore`
+treats exit 0 as deleted and that silent exit 1 as "the keyring may be locked, or the
+item already gone", naming the item, so that removing the backend offers Remove anyway
+or `--keep-secret`. The cost: removing a backend whose secret is already gone asks the
+same, once. No further call can tell these cases apart for every provider:
+
+- libsecret 0.21.8, the version checked: `secret-tool search --all` without `--unlock`
+  does list locked items, without prompting (`tool/secret-tool.c` lines 493 to 523;
+  `libsecret/secret-methods.c` line 216 and lines 491 to 513). It ends with 0, prints
+  the item's path, label and dates on stdout and "secret is locked" on stderr, and with
+  no match ends with 0 and prints nothing. A review confirmed this against libsecret's
+  mock Secret Service on a private bus. Its manual page, which says locked items are
+  skipped without `--unlock`, is wrong.
+- KeePassXC: `Collection::searchItems` (`src/fdosecrets/objects/Collection.cpp`)
+  returns no items and no error while its database is locked, so a search would report
+  a locked KeePassXC secret as gone.
+
+Not tested against GNOME Keyring, KWallet or KeePassXC themselves, as no real keyring is
+available to the tests; the rule above does not depend on how they answer a search.
+
 **This record was a design until a backend needed a secret.** The Secret Service store
 and the file were built, with their tests, for WebDAV, the first backend to need them,
 and the PC hub uses them too. Before that, only the interface, the test double and

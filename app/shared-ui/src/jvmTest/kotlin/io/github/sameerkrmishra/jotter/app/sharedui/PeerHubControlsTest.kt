@@ -115,6 +115,46 @@ class PeerHubControlsTest {
         }
 
     @Test
+    fun anOpenConfigFolderOfItsOwnIsTightenedButNotItsParent() =
+        runBlocking {
+            val open = PosixFilePermissions.fromString("rwxr-xr-x")
+            val parent = folders.resolve("xdg")
+            val own = parent.resolve("jotter")
+            val mode = { path: Path ->
+                PosixFilePermissions.toString(Files.getPosixFilePermissions(path))
+            }
+            val loosen = {
+                Files.setPosixFilePermissions(parent, open)
+                Files.setPosixFilePermissions(own, open)
+            }
+            Files.createDirectories(own)
+            val controls =
+                PeerHubControls(
+                    device.manager,
+                    own.resolve("hub.properties"),
+                    own.resolve("hub-devices.json"),
+                    scope,
+                    Dispatchers.IO,
+                    HubSettings("$folders/store", "127.0.0.1", 0),
+                )
+            // Writing the paired devices.
+            loosen()
+            val pairing = controls.pair("Phone")
+            assertEquals("rwx------", mode(own))
+            assertEquals("rwxr-xr-x", mode(parent))
+            // Removing one writes them again.
+            loosen()
+            controls.unpair(pairing.device.id)
+            assertEquals("rwx------", mode(own))
+            assertEquals("rwxr-xr-x", mode(parent))
+            // Writing the settings.
+            loosen()
+            controls.turnOff()
+            assertEquals("rwx------", mode(own))
+            assertEquals("rwxr-xr-x", mode(parent))
+        }
+
+    @Test
     fun whatCannotBeUsedIsSaidPlainly() =
         runBlocking {
             val hub = controls()

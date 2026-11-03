@@ -60,6 +60,34 @@ class SecretFileStoreTest {
         }
 
     @Test
+    fun anOpenFolderOfItsOwnIsTightenedButNotItsParent() =
+        runTest {
+            val open = PosixFilePermissions.fromString("rwxr-xr-x")
+            Files.createDirectories(folder)
+            Files.setPosixFilePermissions(folder.parent, open)
+            Files.setPosixFilePermissions(folder, open)
+            store.write(password, Secret("one"))
+            assertEquals("rwx------", mode(folder))
+            // Like ~/.config, the parent is not the app's, and keeps its mode.
+            assertEquals("rwxr-xr-x", mode(folder.parent))
+        }
+
+    @Test
+    fun aLinkedFolderIsUsedButItsTargetKeepsItsMode() =
+        runTest {
+            // As a dotfile manager may link ~/.config/jotter to a folder of its own.
+            val target = Files.createDirectories(home.resolve("dotfiles/jotter"))
+            Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rwxr-xr-x"))
+            Files.createDirectories(folder.parent)
+            Files.createSymbolicLink(folder, target)
+            store.write(password, Secret("one"))
+            assertEquals("one", store.read(password)?.reveal())
+            assertTrue(Files.isSymbolicLink(folder))
+            assertEquals("rwxr-xr-x", mode(target))
+            assertEquals("rw-------", mode(target.resolve("secrets.json")))
+        }
+
+    @Test
     fun aFileOthersMayReadIsRefused() =
         runTest {
             store.write(password, Secret("one"))

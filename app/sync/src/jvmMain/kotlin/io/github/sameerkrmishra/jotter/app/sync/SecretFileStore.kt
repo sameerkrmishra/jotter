@@ -24,7 +24,8 @@ import kotlin.random.Random
  * keyring answers, such as over SSH (ADR-0016). Anything that can read the user's files can read
  * them.
  *
- * The directory is created with mode 0700. Every version of the file is written to a new file in
+ * The directory, which must be the app's own, is created with mode 0700, or tightened to it if it
+ * is there with more. Every version of the file is written to a new file in
  * it that is created with mode 0600, in the same call that creates it, and then renamed into
  * place: it is never readable by others, not even for a moment. A file that group or others may
  * read, that is not this user's, or that is a link, is refused. A lock file keeps two processes
@@ -76,9 +77,9 @@ public class SecretFileStore(
 
     private fun createDirectory() {
         try {
-            if (!Files.isDirectory(directory)) {
-                Files.createDirectories(directory, PRIVATE_DIRECTORY)
-            }
+            // The directory is the app's own, such as ~/.config/jotter, never a shared parent
+            // like ~/.config, so it may be tightened to 0700 if it is there with more.
+            privateOwnDirectory(directory)
         } catch (e: IOException) {
             throw SecretStoreException("Cannot create the folder $directory: ${e.message}", e)
         }
@@ -166,8 +167,6 @@ public class SecretFileStore(
         val OWNER_ONLY = setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
         val PRIVATE_FILE: FileAttribute<Set<PosixFilePermission>> =
             PosixFilePermissions.asFileAttribute(OWNER_ONLY)
-        val PRIVATE_DIRECTORY: FileAttribute<Set<PosixFilePermission>> =
-            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))
 
         val json = Json { prettyPrint = true }
         val serializer = MapSerializer(String.serializer(), String.serializer())

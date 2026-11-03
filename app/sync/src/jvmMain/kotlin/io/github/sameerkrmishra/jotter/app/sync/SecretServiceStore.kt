@@ -55,7 +55,7 @@ public class SecretServiceStore(
         key: SecretKey,
         secret: Secret,
     ) {
-        val label = "--label=Jotter: ${describe(key.kind)} of backend ${key.backendId}"
+        val label = "--label=${label(key)}"
         val result =
             run(listOf("store", label) + attributes(key), secret.reveal().encodeToByteArray())
         if (result.exit != 0) throw failure("store", result)
@@ -63,7 +63,17 @@ public class SecretServiceStore(
 
     override suspend fun delete(key: SecretKey) {
         val result = run(listOf("clear") + attributes(key), input = null)
-        if (result.exit != 0 && !result.isNothingFound) throw failure("delete", result)
+        // Only exit 0 means deleted (ADR-0016). `clear` deletes only unlocked items, and ends with
+        // 1 without a word when it deleted none: no such item, a locked one, or a dismissed unlock
+        // prompt. No other call tells these apart for every provider: libsecret's search lists
+        // locked items, but KeePassXC, its database locked, answers a search with no items and no
+        // error. So the caller hears that the item may be locked, or already gone, and the user
+        // decides, by unlocking and trying again or by removing the backend anyway.
+        when {
+            result.exit == 0 -> Unit
+            result.isNothingFound -> throw SecretStoreException(mayBeLocked(key))
+            else -> throw failure("delete", result)
+        }
     }
 
     private fun attributes(key: SecretKey) =
@@ -180,6 +190,14 @@ public class SecretServiceStore(
         const val NO_SESSION =
             "Jotter cannot reach a keyring: there is no desktop session here, as over SSH or in " +
                 "a cron job."
+
+        /** What a delete that the keyring did not confirm says, naming the item by its label. */
+        fun mayBeLocked(key: SecretKey) =
+            "The keyring did not confirm that the item \"${label(key)}\" was deleted: the " +
+                "keyring may be locked, or the item already gone. Unlock your keyring and try " +
+                "again."
+
+        fun label(key: SecretKey) = "Jotter: ${describe(key.kind)} of backend ${key.backendId}"
 
         const val NO_PROVIDER =
             "Jotter cannot reach a keyring: no keyring program, such as GNOME Keyring, KWallet " +
