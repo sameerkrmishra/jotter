@@ -14,6 +14,7 @@ import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
 import io.github.sameerkrmishra.jotter.core.storage.NoSuchNoteException
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
+import io.github.sameerkrmishra.jotter.core.storage.NoteTooLargeException
 import io.github.sameerkrmishra.jotter.core.storage.StaleEditException
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import kotlinx.coroutines.CancellationException
@@ -53,6 +54,8 @@ internal const val AUTOSAVE_MAX_MS = 60_000L
 
 internal const val INVALID_TAG_MESSAGE = "That is not a valid tag."
 internal const val SAVE_FAILED_MESSAGE = "Your text is kept here but could not be saved."
+internal const val TOO_LARGE_MESSAGE =
+    "Your text is kept here, but it is too long to save. Shorten it, or copy part of it elsewhere."
 
 /** Why the draft cannot simply be saved. Either way the draft stays until the user decides. */
 internal enum class EditorProblem {
@@ -392,6 +395,8 @@ internal class EditorViewModel(
             problem = EditorProblem.DELETED
         } catch (_: StorageBusyException) {
             message = BUSY_MESSAGE
+        } catch (_: NoteTooLargeException) {
+            message = TOO_LARGE_MESSAGE
         } catch (e: RuntimeException) {
             val failure = "$SAVE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
             // Once per failure, as the autosave retries for as long as it lasts.

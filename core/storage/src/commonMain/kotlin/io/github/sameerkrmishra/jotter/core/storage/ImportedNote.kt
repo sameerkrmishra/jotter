@@ -36,4 +36,7 @@ public enum class ImportResult {
 
     /** The note has a history here, possibly ending in deletion forever. Nothing was written. */
     SKIPPED,
+
+    /** The note is over [MAX_NOTE_CHARS], so it could never sync. Nothing was written. */
+    TOO_LARGE,
 }

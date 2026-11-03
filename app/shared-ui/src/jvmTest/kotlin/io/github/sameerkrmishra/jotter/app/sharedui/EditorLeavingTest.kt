@@ -17,7 +17,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class EditorLeavingTest : EditorTest() {
     private fun Fixture.slowApp() =
-        AppViewModel(notes, scope, StandardTestDispatcher(testScheduler))
+        AppViewModel(notes, conflicts, scope, StandardTestDispatcher(testScheduler))
 
     @Test
     fun leavingTheEditorSavesTheDraft() =
@@ -285,7 +285,7 @@ class EditorLeavingTest : EditorTest() {
     fun textTypedDuringTheTrashWriteKeepsTheNoteAndTheEditor() =
         test {
             val io = HeldDispatcher()
-            val held = AppViewModel(notes, scope, io)
+            val held = AppViewModel(notes, conflicts, scope, io)
             val editor = emptiedNote(io, held)
             val id = assertNotNull(editor.base).id
 
@@ -312,7 +312,7 @@ class EditorLeavingTest : EditorTest() {
         test {
             val note = notes.create("", "base")
             val io = HeldDispatcher()
-            val held = AppViewModel(notes, scope, io)
+            val held = AppViewModel(notes, conflicts, scope, io)
             held.openEditor(note)
             val editor = assertNotNull(held.editor)
             editor.body = "changed"
@@ -335,7 +335,7 @@ class EditorLeavingTest : EditorTest() {
     fun aNewNoteEmptiedDuringItsCreationGoesToTheTrash() =
         test {
             val io = HeldDispatcher()
-            val held = AppViewModel(notes, scope, io)
+            val held = AppViewModel(notes, conflicts, scope, io)
             held.openEditor(null)
             val editor = assertNotNull(held.editor)
             editor.body = "text"
@@ -377,7 +377,7 @@ class EditorLeavingTest : EditorTest() {
     fun aFailedTrashWriteStaysInTheEditor() =
         test {
             val io = HeldDispatcher()
-            val held = AppViewModel(notes, scope, io)
+            val held = AppViewModel(notes, conflicts, scope, io)
             val editor = emptiedNote(io, held)
             database.failWrites()
 
@@ -395,7 +395,7 @@ class EditorLeavingTest : EditorTest() {
     fun textTypedBeforeTheTrashWriteGetsTheLockKeepsTheNote() =
         test {
             val io = HeldDispatcher()
-            val held = AppViewModel(notes, scope, io)
+            val held = AppViewModel(notes, conflicts, scope, io)
             val editor = emptiedNote(io, held)
             val id = assertNotNull(editor.base).id
             editor.body = " "
@@ -425,7 +425,7 @@ class EditorLeavingTest : EditorTest() {
         test {
             val note = notes.create("", "base")
             val io = HeldDispatcher()
-            val held = AppViewModel(notes, scope, io)
+            val held = AppViewModel(notes, conflicts, scope, io)
             held.openEditor(note)
             val first = assertNotNull(held.editor)
             first.body = "changed"

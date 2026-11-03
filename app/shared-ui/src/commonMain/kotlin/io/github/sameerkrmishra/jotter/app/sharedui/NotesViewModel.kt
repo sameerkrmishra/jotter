@@ -113,7 +113,18 @@ internal class NotesViewModel(
         }
     }
 
-    fun showView(view: NoteState) = update(request.copy(view = view))
+    /** Whether the "Needs attention" view shows, in place of the notes of [request]. */
+    var showsAttention by mutableStateOf(false)
+        private set
+
+    fun showView(view: NoteState) {
+        showsAttention = false
+        update(request.copy(view = view))
+    }
+
+    fun showAttention() {
+        showsAttention = true
+    }
 
     /** Filters by [tag], or stops filtering if it is the current one. */
     fun toggleTag(tag: TagName) = update(request.copy(tag = tag.takeUnless { it == request.tag }))

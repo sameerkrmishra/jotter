@@ -24,6 +24,7 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 | `jotter search QUERY` | Searches the active notes, at most the best 100. QUERY is plain words, see `core:storage` |
 | `jotter tags` | Lists the tags of the notes outside the trash |
 | `jotter import PATH` | Imports Google Keep notes from a Takeout `Keep` directory or one `.json` file, see below |
+| `jotter conflicts [ID]` | Lists what sync needs you to look at: open conflicts, edits that wait, and text set aside. With an `ID`, prints every version of that note. It only reads: answering is the desktop app's |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
 
 `jotter add` takes anything that is not one of its options as the note, so
@@ -78,6 +79,8 @@ and `search` print nothing when nothing matches.
 | `tags` | `TAG`, tab, count |
 | `import` | Five lines of `NAME`, tab, count: `imported`, `skipped`, `ignored`, `warnings`, `failures` |
 | `export` | `exported`, tab, count |
+| `conflicts` | `ID`, tab, `KIND`, tab, summary, one line per item. `KIND` is `conflict`, `waiting` (an earlier change has not arrived), `waiting-for-conflict` or `set-aside` |
+| `conflicts ID` | For each version, the headers `kind:`, `version:` (`shown`, `other`, `waiting`, or for set-aside text `bad-history`, `damaged`, `collision`), `title:`, a blank line and the body, with a blank line between versions. For people, not scripts: a body can hold anything |
 | `show` | The headers `id:`, `title:`, `tags:`, `state:` (`active`, `archived`, `trash`), `pinned:` (`yes`, `no`), `created:`, `updated:`, a blank line, and the body as it is |
 
 The summary is the title, or else the first line of the body with text in it.

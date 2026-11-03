@@ -10,8 +10,8 @@ import io.github.sameerkrmishra.jotter.core.storage.db.NoteQueries
  * Keeps the `note` and `note_tag` tables, which the UI and search read, in step with each note's
  * head revision.
  *
- * In M1 every note has exactly one head: a user revision always builds on the current head, in
- * the same transaction that materialises it. Computing heads and merging them is M3's job.
+ * A user revision builds on the head the note shows, in the same transaction that materialises
+ * it, so it is then the head to show. Computing heads and merging them is `core:sync`'s job.
  */
 internal class NoteMaterialiser(
     private val queries: NoteQueries,
@@ -28,6 +28,15 @@ internal class NoteMaterialiser(
      * [head] must already be stored, as the `note` row refers to it.
      */
     fun materialise(head: Revision) {
+        materialiseChecked(head)
+    }
+
+    /** Removes the note [noteId] from what the UI reads, when no revision of it counts. */
+    fun remove(noteId: String) {
+        queries.deleteNote(noteId)
+    }
+
+    private fun materialiseChecked(head: Revision) {
         val noteId = head.noteId.toString()
         queries.transaction {
             when (val content = head.content) {

@@ -4,6 +4,7 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
+import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import java.io.IOException
@@ -91,6 +92,13 @@ class CliTest {
         val note = checkNotNull(withStore { it.get(NoteId.parse(id)) })
         assertEquals("Groceries", note.title)
         assertEquals(setOf("Shopping", "two words"), note.tags.map { it.toString() }.toSet())
+    }
+
+    @Test
+    fun aNoteOverTheSizeLimitFailsWithAClearError() {
+        val tooLong = "x".repeat(MAX_NOTE_CHARS + 1)
+
+        assertFails("the note is too long", jotter("add", "-", stdin = tooLong))
     }
 
     @Test

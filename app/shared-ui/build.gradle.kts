@@ -15,6 +15,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.core.storage)
+            api(projects.core.sync)
             api(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
@@ -22,6 +23,7 @@ kotlin {
             implementation(libs.markdown)
         }
         jvmTest.dependencies {
+            implementation(projects.backend.api.contract)
             implementation(libs.androidx.sqlite)
             implementation(libs.androidx.sqlite.bundled)
             implementation(libs.compose.desktop.linux.x64)

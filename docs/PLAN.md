@@ -95,7 +95,8 @@ jotter/
 │   ├── sync/           # revision DAG, change segments, SyncEngine
 │   └── logging/        # thin wrapper over Kermit + rotating file sink
 ├── backend/
-│   ├── api/            # BlobStore interface + contract test suite
+│   ├── api/            # BlobStore interface
+│   │   └── contract/   # contract test suite, for the tests of other modules
 │   ├── localfolder/    # BlobStore over a filesystem directory
 │   ├── webdav/         # BlobStore over WebDAV (Ktor client)
 │   └── peer/           # BlobStore client for the PC hub server
@@ -181,10 +182,11 @@ Local SQLite tables (simplified; the schema is in `core/storage`):
   logical clock.
 - `conflict`: notes whose revisions could not be merged automatically.
 - `backend`: configured backends and their settings.
-- `sync_cursor`: per backend, per remote device: the last segment applied.
+- `sync_read`: per backend, the files read in each device folder.
+- `sync_segment`, `backend_revision`: this device's segments on each backend, and
+  the revisions known to be there.
 
-Schema version 1 (M1) has no `conflict`, `backend` or `sync_cursor` table.
-M3 and M4, which need them, add them with schema migrations.
+Schema version 2 (M3) adds these, except `backend`, which M4 adds.
 
 "Delete forever" from trash writes a tombstone revision so the deletion syncs.
 Tombstones stay until log compaction (deferred).
@@ -233,8 +235,9 @@ last-writer-wins fields merge by the rules above. Body and title come from the
 head with the higher stamp, so every device picks the same one. The merge
 records that it is conflicted and which parent lost. Every device that applies
 it stores the losing text in `conflict`. The UI shows a badge and offers "keep
-mine", "keep theirs", "keep both as separate notes" or "edit merged text"
-(side-by-side, with conflict markers pre-filled). New edits while the conflict
+the shown version", "keep the other version", "keep both as separate notes" or
+"combine by hand" (both versions in full, where they differ, and the text with
+conflict markers pre-filled; see `app/shared-ui`). New edits while the conflict
 is open take the conflicted merge as parent. Resolving creates a user revision
 on top of the head that descends from the conflicted merge. It names the
 conflicted merge it resolves, so other devices learn the conflict is closed.
@@ -244,7 +247,16 @@ id (byte order), merging two at a time. Each step is a real automatic merge.
 The fold stops at the first conflict; remaining heads stay heads until it is
 resolved. This is deterministic for a given set of heads but not independent
 of arrival order. Devices converge because they keep merging whatever heads are
-present until one remains. See ADR-0003.
+present until one live head remains. A merge head whose user revisions another
+head also has is covered and does not count; without that, devices out of step
+would merge each other's merges for ever. When several best common ancestors
+exist, the one with the highest stamp is the base. See ADR-0003 and
+[ADR-0013](adr/0013-merge-base-and-covered-heads.md).
+
+**Touching changes:** edits of adjacent lines merge, unlike in git and diff3,
+and identical insertions count as one. The merge rules and the diff's search
+limit are part of the sync format, because merged text is hashed. See
+[ADR-0011](adr/0011-touching-changes-and-merge-format.md).
 
 ---
 
@@ -266,7 +278,14 @@ interface BlobStore {
 }
 ```
 
-A shared **contract test suite** in `backend/api` runs against every
+`list(prefix)` matches whole path segments, recursively, and `ping` is reachable
+only when the store itself is there: an unplugged drive never reads as an empty
+store. The KDoc of `BlobStore` is the exact definition. The local folder needs a
+marker file for that, written once when the backend is added, and it publishes
+files without hard links on FAT
+([ADR-0012](adr/0012-local-folder-publishing.md)).
+
+A shared **contract test suite** in `backend/api/contract` runs against every
 implementation. A new backend is "done" when it passes.
 
 ### 6.2 Layout on a backend
@@ -277,13 +296,17 @@ jotter/
 └── devices/
     ├── <deviceId-A>/
     │   ├── device.json                # name, platform, created
-    │   ├── 000000000001.json.gz       # change segment
-    │   └── 000000000002.json.gz
+    │   ├── 000000000001-<hash>.json.gz  # change segment
+    │   └── 000000000002-<hash>.json.gz
     └── <deviceId-B>/...
 ```
 
-A **segment** is an immutable batch of revisions created on one device, numbered
-sequentially per device.
+A **segment** is an immutable batch of revisions created on one device. Its name
+is a number that rises per device, then a hash of its content: the first 16 bytes of
+the SHA-256 of its JSON, as 32 lowercase hex digits. So a path has one possible
+content, a restored device cannot overwrite anything, and a number used twice gives two
+files, which are both read
+([ADR-0014](adr/0014-sync-failure-handling.md)).
 
 ### 6.3 Sync cycle (per backend)
 
@@ -291,11 +314,12 @@ sequentially per device.
    segment under our own device folder. Re-pushing revisions that arrived from
    other devices is allowed, which lets backends relay between devices that
    never share a backend directly.
-2. **Pull:** list every device folder. For each, read segments past our
-   cursor.
+2. **Pull:** list every device folder, our own too. Read every segment not yet
+   read. Names are compared, not numbers.
 3. **Apply:** insert revisions (idempotent by revision id), recompute heads,
-   merge (§5), update the `note` table and FTS, advance cursors. All in one
-   database transaction.
+   merge (§5), update the `note` table and FTS, record what was read. All in one
+   database transaction. What goes wrong with one segment stays with that segment
+   ([ADR-0014](adr/0014-sync-failure-handling.md)).
 
 Sync runs on app start, after edits (debounced), and periodically: on Android
 via WorkManager (15 min minimum, network-constrained), on desktop via a
@@ -314,7 +338,7 @@ converge on the next successful sync.
 
 - **Add:** a new backend is seeded by pushing the device's full revision
   history, then syncs normally.
-- **Remove:** stops syncing and deletes local cursors. Remote files stay
+- **Remove:** stops syncing and deletes the local sync records. Remote files stay
   unless the user explicitly chooses "also delete remote data".
 
 ### 6.6 Future encryption seam
@@ -364,7 +388,12 @@ codec. Documented as ADR-0007 in M6.
   native-compatible shared modules (M1); 0007 encryption plan and
   0008 multi-user plan (both deferred features, documented in M6); 0009
   [import keeps source timestamps](adr/0009-import-preserves-source-timestamps.md)
-  (M2).
+  (M2); 0011
+  [touching changes and the merge format](adr/0011-touching-changes-and-merge-format.md)
+  (M3); 0012 [local folder publishing](adr/0012-local-folder-publishing.md) (M3);
+  0013
+  [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
+  0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge.
@@ -412,7 +441,7 @@ Tasks inside a milestone that touch different modules run in parallel.
 | M3 | Sync engine | `core/merge` (diff3), `core/sync`, `backend/api` + contract tests, `backend/localfolder`, conflict UI | Property-based tests: N simulated devices with random offline edits always converge |
 | M4 | WebDAV + PC hub | `backend/webdav` (tested against a containerised WebDAV server), `server` peer endpoint, backend management UI (add, remove, status, last sync) | Desktop ↔ mailbox.org ↔ second desktop converge |
 | M5 | Android | `app/android`, Share-to target, WorkManager sync, F-Droid metadata and reproducible build, CI emulator job (API 26 + 36) running `connectedAndroidDeviceTest` (TODO from §8) | Phone and PC converge over Tailscale and over WebDAV |
-| M6 | v1.0 hardening | ADR-0007 and ADR-0008, debug log export, error states, backup/restore docs, user guide, release | Tagged v1.0 on GitHub, APK + AppImage/Flatpak |
+| M6 | v1.0 hardening | ADR-0007 and ADR-0008, debug log export, error states, backup/restore docs (including how to recover a damaged segment: remove the backend on a device that holds its revisions and add it again, ADR-0014), user guide, release | Tagged v1.0 on GitHub, APK + AppImage/Flatpak |
 
 **Later:** web app, E2E encryption, multi-user + login, Dropbox/Drive/S3,
 Neovim/Emacs plugins, log compaction, home-screen widget.

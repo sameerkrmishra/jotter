@@ -23,16 +23,31 @@ private const val PREVIEW_LINES = 6
 /** The test tag of the card of the note [id]. */
 internal fun cardTag(id: Any) = "note-$id"
 
-/** A note in the grid: its title, an excerpt, its tags and a button for each of [actions]. */
+/** The test tag of the mark on a card whose note needs attention. */
+internal fun attentionTag(id: Any) = "attention-$id"
+
+/**
+ * A note in the grid: its title, an excerpt, its tags and a button for each of [actions]. If sync
+ * left something on it for the user, [attention] says what, at the top.
+ */
 @Composable
 internal fun NoteCard(
     item: NoteItem,
+    attention: NoteAttention?,
     actions: List<NoteAction>,
     onOpen: () -> Unit,
 ) {
     val note = item.note
     Card(onClick = onOpen, modifier = Modifier.testTag(cardTag(note.id))) {
         Column(Modifier.padding(spacing)) {
+            if (attention != null) {
+                Text(
+                    "Needs attention: ${attention.label}",
+                    modifier = Modifier.testTag(attentionTag(note.id)),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
             if (note.isPinned) {
                 Text("Pinned", style = MaterialTheme.typography.labelSmall)
             }

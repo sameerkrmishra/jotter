@@ -19,7 +19,8 @@ store.close() // checkpoints the WAL
 ```
 
 **Dependency rule:** depends on `core:model` and kotlinx-coroutines (both part
-of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
+of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
+`core:sync` plain reads and writes of the sync tables, and holds no rules.
 
 ## API
 
@@ -27,6 +28,10 @@ of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
 |---|---|
 | `linuxDatabasePath`, `DATABASE_ENVVAR` | Where the Linux apps keep the database, so the CLI and the desktop app agree. Plain strings, as this module has no file API |
 | `NoteStore` | Opens or creates the database file and this device's id. The composition root owns it and closes it |
+| `SyncStore`, `SyncStoreApi` | The tables behind sync. An opt-in at error level keeps it to `core:sync`, as Kotlin has no friend modules |
+| `OpenConflict`, `HiddenHead`, `HiddenReason`, `InvalidRevision`, `InvalidReason` | What the conflict screen lists |
+| `MAX_NOTE_CHARS`, `requireNoteSize`, `NoteTooLargeException` | The cap on a note's text, which keeps every note small enough to sync ([ADR-0014](../../docs/adr/0014-sync-failure-handling.md)) |
+| `IdSource`, `RandomIds` | Where new ids come from, so that a simulation can replay |
 | `NoteService` | `create`, `importNote`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows |
 | `ImportedNote`, `ImportResult` | What `importNote` takes, and whether it imported the note or skipped it |
 | `isStorableText` | Whether a title or body will be stored unchanged, or get characters replaced with U+FFFD |
@@ -37,7 +42,7 @@ of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
 | `StaleEditException` | An edit based on a revision that is no longer the current one |
 | `StorageBusyException` | A write, or `NoteStore.open`, found the database locked by another process for the whole busy timeout |
 
-## Schema (version 1)
+## Schema (version 2)
 
 | Table | What it holds |
 |---|---|
@@ -49,8 +54,12 @@ of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
 | `note_tag` | The current tags of each note. The tag list is a `GROUP BY` over it; there is no `tag` table |
 | `note_fts` | FTS5 index over `note.title` and `note.body` (external content), kept in step by triggers on `note` |
 
-`conflict`, `backend` and `sync_cursor` (PLAN.md §4) come with M3 and M4, as
-migrations.
+| `sync_read` | Per backend, the files read in each device folder, by name |
+| `sync_segment`, `backend_revision` | This device's segments on each backend, and what is known to be there |
+| `conflict`, `hidden_head`, `invalid_revision` | Open conflicts with the text that lost, heads a note does not show, and text that does not count: mostly caches of what the revisions say, kept by `core:sync` |
+| `dismissed_invalid`, `combined_draft` | Set-aside text the user saved or dismissed on this device, and texts being combined by hand to answer a conflict. Local: never synced |
+
+`backend` (PLAN.md §4) comes with M4, as a migration.
 
 Encoding:
 
@@ -250,7 +259,7 @@ wait for a second character on large collections.
 
 ## Schema changes
 
-Schema version 1 is frozen once M1 closes. From then on every change is a
+Schema version 1 was frozen when M1 closed. Every change since is a
 migration: `1.sqm` turns version 1 into 2, and so on, next to the `.sq`
 files.
 

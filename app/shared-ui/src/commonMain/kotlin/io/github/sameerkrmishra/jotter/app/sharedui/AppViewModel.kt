@@ -5,7 +5,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.sameerkrmishra.jotter.core.model.Note
+import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
+import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,14 +15,16 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * The state of the whole app: the note list and, while one is open, the editor. An app's
- * composition root builds one and passes it to [JotterApp].
+ * The state of the whole app: the note list, the notes that need attention after a sync and, while
+ * one is open, the editor or the review of a note. An app's composition root builds one and passes
+ * it to [JotterApp].
  *
  * The view models hold their state in Compose snapshot state, not in flows, because a text field
  * must see its new value in the same frame or it loses keystrokes. Their flows are internal. That
  * also makes them [Stable]: Compose is told of every change, and an instance equals only itself.
  *
  * @param notes The notes.
+ * @param conflicts What sync left for the user to decide, on the same store as [notes].
  * @param scope Where the view models run: on the UI thread, for as long as the app does. Cancel it
  *   before closing the store.
  * @param io Where blocking [NoteService] calls run, off the UI thread.
@@ -28,6 +32,7 @@ import kotlinx.coroutines.launch
 @Stable
 public class AppViewModel(
     private val notes: NoteService,
+    private val conflicts: ConflictResolver,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
 ) {
@@ -36,8 +41,14 @@ public class AppViewModel(
 
     internal val list = NotesViewModel(notes, scope, io, refreshes)
 
+    internal val attention = AttentionViewModel(notes, conflicts, scope, io, refreshes)
+
     /** The open editor, or null while the note list shows. */
     internal var editor by mutableStateOf<EditorViewModel?>(null)
+        private set
+
+    /** The open review of a note's sync problems, shown over the editor or the list. */
+    internal var review by mutableStateOf<ReviewViewModel?>(null)
         private set
 
     /** How to exit, while the text could not be saved and the user has to decide. */
@@ -53,13 +64,14 @@ public class AppViewModel(
     }
 
     /**
-     * Closes the app: saves the open editor's text and then calls [exit]. If the text cannot be
-     * saved, [JotterApp] asks the user whether to keep editing or to exit without it, so [exit] may
-     * run later or not at all.
+     * Closes the app: keeps the review's combined texts, saves the open editor's text and then
+     * calls [exit]. If either fails, [JotterApp] asks the user whether to keep editing or to exit
+     * without it, so [exit] may run later or not at all.
      */
     public fun requestExit(exit: () -> Unit) {
         scope.launch {
-            if (editor?.finish() != false) exit() else pendingExit = exit
+            val kept = review?.flush() != false
+            if (kept && editor?.finish() != false) exit() else pendingExit = exit
         }
     }
 
@@ -74,6 +86,33 @@ public class AppViewModel(
         scope.launch {
             // A second Back may have closed it already, and another editor may be open by now.
             if (leaving?.finish() == true && editor === leaving) discardEditor()
+        }
+    }
+
+    /**
+     * Opens the review of the note [noteId]. An open editor saves first, so that the review shows
+     * the text as typed. If that fails, the editor stays, with its message.
+     */
+    internal fun openReview(noteId: NoteId) {
+        scope.launch {
+            if (editor?.saveAll() != false && review?.flush() != false) {
+                review?.close()
+                review = ReviewViewModel(noteId, notes, conflicts, scope, io, refreshes)
+            }
+        }
+    }
+
+    /**
+     * Closes the review, back to the editor or the list, once its combined texts are kept on disk.
+     * If they cannot be, it stays open with its message.
+     */
+    internal fun closeReview() {
+        val leaving = review ?: return
+        scope.launch {
+            if (leaving.flush() && review === leaving) {
+                leaving.close()
+                review = null
+            }
         }
     }
 

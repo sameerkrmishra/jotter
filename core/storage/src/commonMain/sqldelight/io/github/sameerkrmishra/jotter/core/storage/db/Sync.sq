@@ -1,0 +1,223 @@
+-- What sync keeps per backend (PLAN.md §4, ADR-0004). backend_id is opaque here: the `backend`
+-- table of configured backends comes with their management in M4.
+
+-- The segment files read and applied, by name. A name holds a hash of the content, so a file is read
+-- once, whatever its number, and two files with one number are two files. What the listing shows
+-- and this table does not is what to read: a bad file simply stays unread, and blocks nothing.
+CREATE TABLE sync_read (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (backend_id, device_id, name)
+) WITHOUT ROWID;
+
+-- A segment this device wrote on a backend. It is recorded with its name and revisions before
+-- writeNew, so a retry writes the same content (ADR-0004). is_published is set once writeNew
+-- succeeded, or found the file there, which is the same content as the name holds its hash.
+CREATE TABLE sync_segment (
+  backend_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  is_published INTEGER AS kotlin.Boolean NOT NULL CHECK (is_published IN (0, 1)),
+  PRIMARY KEY (backend_id, number)
+) WITHOUT ROWID;
+
+-- The revisions known to be on a backend. segment is this device's own segment that holds the
+-- revision. Otherwise source_device and source_name say which file it was read from, so that it
+-- counts as gone when that file does.
+CREATE TABLE backend_revision (
+  backend_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL REFERENCES revision(id),
+  segment INTEGER,
+  source_device TEXT,
+  source_name TEXT,
+  PRIMARY KEY (backend_id, revision_id)
+) WITHOUT ROWID;
+
+CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
+CREATE INDEX backend_revision_by_source ON backend_revision(backend_id, source_device, source_name);
+
+-- The heads with text that a note does not show until a merge can run, with their text. A cache of
+-- what the revisions say, like conflict. is_incomplete: a parent is missing, which may never
+-- change. Otherwise an open conflict holds the merge back.
+CREATE TABLE hidden_head (
+  revision_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_incomplete INTEGER AS kotlin.Boolean NOT NULL CHECK (is_incomplete IN (0, 1))
+) WITHOUT ROWID;
+
+CREATE INDEX hidden_head_by_note ON hidden_head(note_id);
+
+-- Text that the revision DAG does not count, so that it is not lost in silence. BAD_HISTORY rows are
+-- a cache of what the revisions say. MALFORMED rows hold what could not be read, and ID_COLLISION
+-- rows both copies of an id: neither counts on a device that has seen both.
+CREATE TABLE invalid_revision (
+  revision_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('BAD_HISTORY', 'MALFORMED', 'ID_COLLISION')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (revision_id, reason, title, body)
+) WITHOUT ROWID;
+
+CREATE INDEX invalid_revision_by_note ON invalid_revision(note_id);
+
+-- The open conflicts: conflicted merges that nothing closed, with the text that lost. A cache of
+-- what the revisions say, rewritten whenever a note's revisions change. A row needs the losing
+-- revision's text, so a conflict whose loser has not arrived yet has no row.
+CREATE TABLE conflict (
+  merge_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  losing_revision_id TEXT NOT NULL,
+  losing_title TEXT NOT NULL,
+  losing_body TEXT NOT NULL
+) WITHOUT ROWID;
+
+CREATE INDEX conflict_by_note ON conflict(note_id);
+
+-- Text of invalid_revision that the user dismissed on this device, by the same key. Local: it is
+-- never synced, and another device still lists that text until its user dismisses it there.
+CREATE TABLE dismissed_invalid (
+  revision_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (revision_id, reason, title, body)
+) WITHOUT ROWID;
+
+-- Text the user is combining by hand to answer an open conflict (target: the merge) or a hidden
+-- head (target: the head), kept so that it outlives the app. base_id is the head whose text it was
+-- combined against. Local, never synced; it goes once the answer is written or the user drops it.
+CREATE TABLE combined_draft (
+  target_id TEXT NOT NULL PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  is_conflict INTEGER AS kotlin.Boolean NOT NULL CHECK (is_conflict IN (0, 1)),
+  base_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL
+) WITHOUT ROWID;
+
+selectOwnSegments:
+SELECT number, name, is_published FROM sync_segment WHERE backend_id = :backendId ORDER BY number;
+
+insertOwnSegment:
+INSERT INTO sync_segment(backend_id, number, name, is_published)
+VALUES (:backendId, :number, :name, 0);
+
+markSegmentPublished:
+UPDATE sync_segment SET is_published = 1 WHERE backend_id = :backendId AND number = :number;
+
+deleteOwnSegment:
+DELETE FROM sync_segment WHERE backend_id = :backendId AND number = :number;
+
+deleteRevisionsOfSegment:
+DELETE FROM backend_revision WHERE backend_id = :backendId AND segment = :segment;
+
+-- Revisions not yet on a backend, in arrival order, so a device's own edits keep their order.
+selectUnpushed:
+SELECT id FROM revision
+WHERE id NOT IN (SELECT revision_id FROM backend_revision WHERE backend_id = :backendId)
+ORDER BY seq;
+
+selectRevisionsOfSegment:
+SELECT revision.id
+FROM backend_revision JOIN revision ON revision.id = backend_revision.revision_id
+WHERE backend_revision.backend_id = :backendId AND backend_revision.segment = :segment
+ORDER BY revision.seq;
+
+insertPushedRevision:
+INSERT INTO backend_revision(backend_id, revision_id, segment)
+VALUES (:backendId, :revisionId, :segment);
+
+insertPulledRevision:
+INSERT OR IGNORE INTO backend_revision(
+  backend_id, revision_id, segment, source_device, source_name
+) VALUES (:backendId, :revisionId, NULL, :sourceDevice, :sourceName);
+
+insertRead:
+INSERT OR IGNORE INTO sync_read(backend_id, device_id, name)
+VALUES (:backendId, :deviceId, :name);
+
+selectReads:
+SELECT device_id, name FROM sync_read WHERE backend_id = :backendId;
+
+deleteRead:
+DELETE FROM sync_read WHERE backend_id = :backendId AND device_id = :deviceId AND name = :name;
+
+deleteRevisionsReadFrom:
+DELETE FROM backend_revision
+WHERE backend_id = :backendId AND source_device = :sourceDevice AND source_name = :sourceName;
+
+deleteBackendReads:
+DELETE FROM sync_read WHERE backend_id = :backendId;
+
+deleteBackendSegments:
+DELETE FROM sync_segment WHERE backend_id = :backendId;
+
+deleteBackendRevisions:
+DELETE FROM backend_revision WHERE backend_id = :backendId;
+
+deleteHiddenHeadsOfNote:
+DELETE FROM hidden_head WHERE note_id = :noteId;
+
+insertHiddenHead:
+INSERT INTO hidden_head(revision_id, note_id, title, body, is_incomplete)
+VALUES (:revisionId, :noteId, :title, :body, :isIncomplete);
+
+selectHiddenHeads:
+SELECT * FROM hidden_head ORDER BY note_id, revision_id;
+
+deleteBadHistoryOfNote:
+DELETE FROM invalid_revision WHERE note_id = :noteId AND reason = 'BAD_HISTORY';
+
+insertInvalidRevision:
+INSERT OR IGNORE INTO invalid_revision(revision_id, note_id, reason, title, body)
+VALUES (:revisionId, :noteId, :reason, :title, :body);
+
+selectInvalidRevisions:
+SELECT * FROM invalid_revision ORDER BY note_id, revision_id, reason, title, body;
+
+selectShownInvalidRevisions:
+SELECT * FROM invalid_revision AS i
+WHERE NOT EXISTS (
+  SELECT 1 FROM dismissed_invalid AS d
+  WHERE d.revision_id = i.revision_id AND d.reason = i.reason AND d.title = i.title
+    AND d.body = i.body
+)
+ORDER BY note_id, revision_id, reason, title, body;
+
+insertDismissedInvalid:
+INSERT OR IGNORE INTO dismissed_invalid(revision_id, reason, title, body)
+VALUES (:revisionId, :reason, :title, :body);
+
+countDismissedInvalid:
+SELECT count(*) FROM dismissed_invalid
+WHERE revision_id = :revisionId AND reason = :reason AND title = :title AND body = :body;
+
+upsertDraft:
+INSERT OR REPLACE INTO combined_draft(target_id, note_id, is_conflict, base_id, title, body)
+VALUES (:targetId, :noteId, :isConflict, :baseId, :title, :body);
+
+deleteDraft:
+DELETE FROM combined_draft WHERE target_id = :targetId;
+
+selectDrafts:
+SELECT * FROM combined_draft ORDER BY note_id, target_id;
+
+selectCollidedIds:
+SELECT DISTINCT revision_id FROM invalid_revision WHERE reason = 'ID_COLLISION';
+
+deleteConflictsOfNote:
+DELETE FROM conflict WHERE note_id = :noteId;
+
+insertConflict:
+INSERT INTO conflict(merge_id, note_id, losing_revision_id, losing_title, losing_body)
+VALUES (:mergeId, :noteId, :losingRevisionId, :losingTitle, :losingBody);
+
+selectConflicts:
+SELECT * FROM conflict ORDER BY note_id, merge_id;
+
+selectConflict:
+SELECT * FROM conflict WHERE merge_id = :mergeId;

@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.app.sharedui
 
+import io.github.sameerkrmishra.jotter.core.storage.MAX_NOTE_CHARS
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -50,6 +51,18 @@ class EditorViewModelTest : EditorTest() {
 
             assertEquals("a\uFFFDb", editor.body)
             assertFalse(editor.isDirty)
+        }
+
+    @Test
+    fun aDraftOverTheSizeLimitStaysHereAndSaysWhy() =
+        test {
+            val editor = open(null)
+            editor.body = "x".repeat(MAX_NOTE_CHARS + 1)
+
+            assertFalse(editor.save())
+
+            assertEquals(TOO_LARGE_MESSAGE, editor.message)
+            assertTrue(editor.isDirty)
         }
 
     @Test

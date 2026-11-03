@@ -1,6 +1,6 @@
 # 0004. Immutable, per-device change segments on dumb blob stores
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by [0014](0014-sync-failure-handling.md)
 - **Date:** 2026-10-21
 
 ## Context

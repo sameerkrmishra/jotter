@@ -204,7 +204,7 @@ class NotesViewModelTest : ViewModelTest() {
         test {
             val note = notes.create("note", "")
             val slowIo = StandardTestDispatcher(testScheduler)
-            val slow = AppViewModel(notes, scope, slowIo)
+            val slow = AppViewModel(notes, conflicts, scope, slowIo)
 
             slow.list.togglePinned(note)
             scope.cancel()

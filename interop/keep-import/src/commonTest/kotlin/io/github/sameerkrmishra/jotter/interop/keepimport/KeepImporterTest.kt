@@ -454,6 +454,20 @@ class KeepImporterTest {
         }
 
     @Test
+    fun aNoteOverTheSizeLimitIsReportedAndTheRunGoesOn() {
+        var calls = 0
+        val importer =
+            KeepImporter { _ ->
+                if (calls++ == 0) ImportResult.TOO_LARGE else ImportResult.IMPORTED
+            }
+
+        val report = importer.import(documents(takeout(1_000_000), takeout(2_000_000)))
+
+        assertEquals(KeepImportFailure.Kind.NOTE_TOO_LARGE, report.failures.single().kind)
+        assertEquals(1, report.imported.size)
+    }
+
+    @Test
     fun aLockedDatabaseStopsTheRunAndKeepsTheReportSoFar() {
         val stored = mutableListOf<ImportedNote>()
         val importer =

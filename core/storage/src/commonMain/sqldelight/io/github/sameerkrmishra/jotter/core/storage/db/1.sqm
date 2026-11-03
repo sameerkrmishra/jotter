@@ -1,0 +1,82 @@
+-- Schema 2 (M3): a resolution names the conflict it closes, and what sync keeps per backend.
+ALTER TABLE revision ADD COLUMN resolves TEXT;
+
+CREATE TABLE sync_read (
+  backend_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (backend_id, device_id, name)
+) WITHOUT ROWID;
+
+CREATE TABLE sync_segment (
+  backend_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  is_published INTEGER AS kotlin.Boolean NOT NULL CHECK (is_published IN (0, 1)),
+  PRIMARY KEY (backend_id, number)
+) WITHOUT ROWID;
+
+CREATE TABLE backend_revision (
+  backend_id TEXT NOT NULL,
+  revision_id TEXT NOT NULL REFERENCES revision(id),
+  segment INTEGER,
+  source_device TEXT,
+  source_name TEXT,
+  PRIMARY KEY (backend_id, revision_id)
+) WITHOUT ROWID;
+
+CREATE INDEX backend_revision_by_segment ON backend_revision(backend_id, segment);
+CREATE INDEX backend_revision_by_source ON backend_revision(backend_id, source_device, source_name);
+
+CREATE TABLE hidden_head (
+  revision_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_incomplete INTEGER AS kotlin.Boolean NOT NULL CHECK (is_incomplete IN (0, 1))
+) WITHOUT ROWID;
+
+CREATE INDEX hidden_head_by_note ON hidden_head(note_id);
+
+CREATE TABLE invalid_revision (
+  revision_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  reason TEXT NOT NULL CHECK (reason IN ('BAD_HISTORY', 'MALFORMED', 'ID_COLLISION')),
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (revision_id, reason, title, body)
+) WITHOUT ROWID;
+
+CREATE INDEX invalid_revision_by_note ON invalid_revision(note_id);
+
+CREATE TABLE conflict (
+  merge_id TEXT NOT NULL PRIMARY KEY REFERENCES revision(id),
+  note_id TEXT NOT NULL,
+  losing_revision_id TEXT NOT NULL,
+  losing_title TEXT NOT NULL,
+  losing_body TEXT NOT NULL
+) WITHOUT ROWID;
+
+CREATE INDEX conflict_by_note ON conflict(note_id);
+
+-- Text of invalid_revision that the user dismissed on this device, by the same key. Local: it is
+-- never synced, and another device still lists that text until its user dismisses it there.
+CREATE TABLE dismissed_invalid (
+  revision_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  PRIMARY KEY (revision_id, reason, title, body)
+) WITHOUT ROWID;
+
+-- Text the user is combining by hand to answer an open conflict (target: the merge) or a hidden
+-- head (target: the head), kept so that it outlives the app. base_id is the head whose text it was
+-- combined against. Local, never synced; it goes once the answer is written or the user drops it.
+CREATE TABLE combined_draft (
+  target_id TEXT NOT NULL PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  is_conflict INTEGER AS kotlin.Boolean NOT NULL CHECK (is_conflict IN (0, 1)),
+  base_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL
+) WITHOUT ROWID;
