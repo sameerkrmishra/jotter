@@ -96,5 +96,5 @@ internal fun oneLine(text: String): String =
     text.map { if (it.isISOControl()) ' ' else it }.joinToString("").trim()
 
 /** Whole seconds in UTC: a fixed width, and the same output in every time zone. */
-private fun utcSeconds(millis: Long): String =
+internal fun utcSeconds(millis: Long): String =
     Instant.fromEpochMilliseconds(millis.floorDiv(MILLIS_PER_SECOND) * MILLIS_PER_SECOND).toString()

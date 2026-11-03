@@ -1,10 +1,10 @@
 # app:cli
 
-The `jotter` command: add, list, show, search, import and export notes from a
+The `jotter` command: add, list, show, search, import, export and sync notes from a
 terminal or a script, in the same database as the desktop app. It is a
 [Clikt](https://ajalt.github.io/clikt/) application on the JVM. The notes
-themselves are `core:storage`'s job, and the file formats `interop/*`'s; this
-module only parses arguments, finds files and prints.
+themselves are `core:storage`'s job, the file formats `interop/*`'s and the backends
+`app:sync`'s; this module only parses arguments, finds files and prints.
 
 ```
 ./gradlew :app:cli:installDist
@@ -25,6 +25,11 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 | `jotter tags` | Lists the tags of the notes outside the trash |
 | `jotter import PATH` | Imports Google Keep notes from a Takeout `Keep` directory or one `.json` file, see below |
 | `jotter conflicts [ID]` | Lists what sync needs you to look at: open conflicts, edits that wait, and text set aside. With an `ID`, prints every version of that note. It only reads: answering is the desktop app's |
+| `jotter sync` | Syncs once with every backend, in turn, and prints a line for each. Fails if any did not sync, see below |
+| `jotter backends` | Lists the backends |
+| `jotter backends add PATH` | Adds a folder, such as a USB stick, as a backend and prints its id. `--name NAME`. A folder that is not a Jotter store yet needs `--new`, see below |
+| `jotter backends remove ID` | Stops syncing with a backend and forgets it on this device. Its files stay where they are |
+| `jotter backends status [ID]` | Asks each backend, or one, whether it can be reached now, and prints that with its last sync and issues |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
 
 `jotter add` takes anything that is not one of its options as the note, so
@@ -56,6 +61,27 @@ that stopped or partly failed can simply be repeated.
 
 Import 1,000 synthetic notes: median 1.1 s from process start to exit, as one transaction per note (5 runs; 0.36 s to skip them all again), on the hardware under "Startup time", with sibling builds running.
 
+### Backends and sync
+
+Only folders can be backends so far; WebDAV and the PC hub come later in M4. An `ID`
+of a backend is a whole id or a start of one that only one backend has.
+
+`backends add` never sets up a folder by itself. If the folder is not a Jotter store
+yet, it explains what setting it up does and fails: it would create a hidden file,
+`.jotter-store`, and the next sync would copy the history of all your notes into a
+`jotter` folder there. On the bare mount point of an unplugged USB stick that would
+put them on this computer's disk, so `--new` must say that this folder is meant
+([ADR-0012](../../docs/adr/0012-local-folder-publishing.md)). A folder another device
+set up is added without `--new`. A relative `PATH` is taken from the current
+directory and stored as an absolute one.
+
+`backends remove` deletes nothing in the folder: other devices can go on syncing
+there. Adding it again later copies this device's whole history there again.
+
+`sync` does in one run what the desktop app does in the background, and records the
+outcome, which the app's backend screen and `backends status` show too. It may run
+while the app is open: the sync engine is safe from two processes.
+
 ### Export
 
 The format and the file names are in
@@ -81,6 +107,11 @@ and `search` print nothing when nothing matches.
 | `export` | `exported`, tab, count |
 | `conflicts` | `ID`, tab, `KIND`, tab, summary, one line per item. `KIND` is `conflict`, `waiting` (an earlier change has not arrived), `waiting-for-conflict` or `set-aside` |
 | `conflicts ID` | For each version, the headers `kind:`, `version:` (`shown`, `other`, `waiting`, or for set-aside text `bad-history`, `damaged`, `collision`), `title:`, a blank line and the body, with a blank line between versions. For people, not scripts: a body can hold anything |
+| `sync` | `ID`, tab, `NAME`, tab, `OUTCOME`, tab, a description for people. `OUTCOME` is `synced`, `unreachable`, `interrupted`, `incompatible`, `unsupported` or `failed` |
+| `backends` | `ID`, tab, `NAME`, tab, `LOCATION`, tab, last success (a time, or `never`), tab, outcome of the last sync (as for `sync`, or `never`) |
+| `backends add` | `ID` |
+| `backends remove` | One sentence that says where the files stay |
+| `backends status` | For each backend the headers `id:`, `name:`, `location:`, `reachable:` (`yes`, `no`), `state:` (in words), `last-success:`, `last-attempt:` (a time and an outcome, or `never`), then `detail:` and one `issue:` per issue of the last sync, if there was one; a blank line between backends. For people |
 | `show` | The headers `id:`, `title:`, `tags:`, `state:` (`active`, `archived`, `trash`), `pinned:` (`yes`, `no`), `created:`, `updated:`, a blank line, and the body as it is |
 
 The summary is the title, or else the first line of the body with text in it.
@@ -95,7 +126,11 @@ and `export` one per file that took another name. These are tab-separated too:
 warning<TAB>FILE<TAB>KIND<TAB>DETAIL
 failure<TAB>FILE<TAB>KIND<TAB>DETAIL
 renamed<TAB>PLANNED NAME<TAB>WRITTEN NAME
+issue<TAB>BACKEND ID<TAB>DESCRIPTION
 ```
+
+`sync` prints an `issue` line for each problem a backend reported without failing,
+such as a damaged file from another device.
 
 `KIND` is a name from `interop:keep-import`, or `READ_ERROR` for a file that could
 not be read. `DETAIL` is `-` if there is none. No line quotes a note's title or
@@ -110,6 +145,10 @@ empty note, a file that is not a Jotter database, a database from a newer versio
 of Jotter, a directory that cannot be created, a path that cannot be opened or is
 not valid in the locale, an unreadable stdin, no usable database location, or a
 database that stayed locked.
+For `sync`, one or more backends that did not sync, with a last line that says how
+many, after the lines of all of them; `sync` without backends; and for `backends`,
+a folder that is missing, not a store without `--new`, already added, or an id that
+matches no backend or several.
 Clikt's usage errors also exit with status 1, and print the usage line first.
 
 `import` is the exception, because part of a run can succeed: after a bad file or
@@ -153,6 +192,10 @@ the same file: steps 2 to 4 are `linuxDatabasePath` in `core:storage`.
   opens it for one command and closes it, and is the one place that turns
   failures into messages. `Main.kt` holds only `main()`, excluded from the
   coverage gate in `jotter.root`.
+- **Sync.** `SyncCommands.kt` builds an `app:sync` `BackendManager` for the one
+  command that needs it, with `NoSecretStore`, as folders need no secrets
+  ([ADR-0015](../../docs/adr/0015-where-secrets-live.md)), and runs it on the
+  command's own thread with `runBlocking`. `jotter add` loads none of it.
 - **`clikt-core`, not `clikt`.** The usual `CliktCommand` prints through the Mordant
   terminal library, which expands tabs and so would break the columns above, and
   brings JNA onto the classpath. `CoreCliktCommand` prints plain text. But by

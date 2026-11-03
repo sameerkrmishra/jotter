@@ -29,6 +29,7 @@ tasks.test {
 dependencies {
     implementation(projects.core.storage)
     implementation(projects.core.sync)
+    implementation(projects.app.sync)
     implementation(projects.interop.keepImport)
     implementation(projects.interop.markdownExport)
     // The exception NoteStore.open lets through, to report it without a stack trace.

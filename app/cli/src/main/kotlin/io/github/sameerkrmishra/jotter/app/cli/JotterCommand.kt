@@ -39,6 +39,8 @@ internal class JotterCommand(
             SearchCommand(location),
             TagsCommand(location),
             ConflictsCommand(location),
+            SyncCommand(location),
+            BackendsCommand(location),
             ImportCommand(location),
             ExportCommand(location),
         )

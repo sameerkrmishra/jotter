@@ -14,7 +14,7 @@ import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
 
 /** Used only when the database is created. The file may be shared with the desktop app. */
-private const val DEVICE_NAME = "Linux"
+internal const val DEVICE_NAME = "Linux"
 
 private const val UNABLE_TO_OPEN = "unable to open database file"
 
