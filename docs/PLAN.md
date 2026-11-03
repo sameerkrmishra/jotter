@@ -390,7 +390,8 @@ codec. Documented as ADR-0007 in M6.
   [import keeps source timestamps](adr/0009-import-preserves-source-timestamps.md)
   (M2); 0011
   [touching changes and the merge format](adr/0011-touching-changes-and-merge-format.md)
-  (M3); 0013
+  (M3); 0012 [local folder publishing](adr/0012-local-folder-publishing.md) (M3);
+  0013
   [the merge base and covered heads](adr/0013-merge-base-and-covered-heads.md) and
   0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
