@@ -11,7 +11,6 @@ import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPath
 import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPrefix
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
-import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.HttpRequestBuilder
@@ -61,7 +60,7 @@ public class PeerBlobStore internal constructor(
     token: String,
     private val timeouts: PeerTimeouts,
     private val dispatcher: CoroutineDispatcher,
-    private val engine: HttpClientEngine?,
+    private val transport: PeerTransport?,
 ) : BlobStore,
     AutoCloseable {
     /**
@@ -74,18 +73,21 @@ public class PeerBlobStore internal constructor(
         this(address, token, PeerTimeouts(), Dispatchers.Default, null)
 
     /**
-     * The same, with its connections made by [engine] instead of Ktor's CIO engine, such as one
-     * whose sockets an Android app binds to Tailscale's network (ADR-0018). The engine must not
-     * retry or follow redirects itself. The store owns it and closes it with itself.
+     * The same, with its hub reached through [transport] instead of Ktor's CIO engine and the
+     * system's name lookup, such as one that an Android app keeps to Tailscale's network
+     * (ADR-0018). The store owns the transport's engine and closes it with itself.
      *
      * @throws IllegalArgumentException if [token] has characters no token has.
      */
-    public constructor(address: PeerAddress, token: String, engine: HttpClientEngine) :
-        this(address, token, PeerTimeouts(), Dispatchers.Default, engine)
+    public constructor(address: PeerAddress, token: String, transport: PeerTransport) :
+        this(address, token, PeerTimeouts(), Dispatchers.Default, transport)
 
     init {
         require(token.isNotEmpty() && token.all(::isTokenCharacter)) { "This is not a hub token" }
     }
+
+    private val lookup: (String) -> ByteArray? =
+        transport?.lookup ?: { InetSocketAddress(it, address.port).resolveAddress() }
 
     private val authorization = "Bearer $token"
     private val answers = PeerAnswers(address)
@@ -94,7 +96,7 @@ public class PeerBlobStore internal constructor(
     private var closed = false
 
     private val client =
-        engine?.let { HttpClient(it) { configure() } } ?: HttpClient(CIO) {
+        transport?.let { HttpClient(it.engine) { configure() } } ?: HttpClient(CIO) {
             configure()
             engine {
                 // A phone needs few connections, and the hub serves several devices.
@@ -177,7 +179,7 @@ public class PeerBlobStore internal constructor(
         closed = true
         client.close()
         // A client made on a given engine leaves it open.
-        engine?.close()
+        transport?.engine?.close()
     }
 
     /**
@@ -228,21 +230,13 @@ public class PeerBlobStore internal constructor(
         }
 
     /**
-     * The address that the hub's name resolves to now, which the request then goes to, so that the
-     * address checked is the address connected to.
+     * The address that the hub's name resolves to now, by the transport's lookup if there is one,
+     * which the request then goes to, so that the address checked is the address connected to.
      *
      * @throws BackendUnavailableException if it does not resolve, or resolves outside the tailnet.
      */
     private fun resolvedAddress(): ByteArray {
-        val resolved =
-            try {
-                InetSocketAddress(address.host, address.port).resolveAddress()
-            } catch (
-                // Null on the JVM, a PosixException on linuxX64: either way, no address.
-                @Suppress("TooGenericExceptionCaught") _: Exception,
-            ) {
-                null
-            } ?: throw unreachable("Cannot find hub $address")
+        val resolved = lookedUp() ?: throw unreachable("Cannot find hub $address")
         if (!isTailnetOrLoopback(resolved)) {
             throw unreachable(
                 "Hub $address is at ${urlHostOf(resolved)}, which is neither on the tailnet nor " +
@@ -251,6 +245,23 @@ public class PeerBlobStore internal constructor(
         }
         return resolved
     }
+
+    /**
+     * The hub's address by [lookup], or null if it has none: with a transport, by its lookup only,
+     * never the system's as well. A [BackendUnavailableException] of the lookup's is the request's
+     * failure.
+     */
+    private fun lookedUp(): ByteArray? =
+        try {
+            lookup(address.host)
+        } catch (e: BackendUnavailableException) {
+            throw e
+        } catch (
+            // Null on the JVM, a PosixException on linuxX64: either way, no address.
+            @Suppress("TooGenericExceptionCaught") _: Exception,
+        ) {
+            null
+        }
 
     private fun unreachable(detail: String) =
         BackendUnavailableException(Reachability.Unreachable(UnreachableReason.FAILED, detail))

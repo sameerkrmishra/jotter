@@ -48,15 +48,20 @@ class TailnetTest {
         val links = checkNotNull(connectivity.getLinkProperties(network))
         val own = links.linkAddresses.map { it.address }.first { it is Inet4Address }
         ServerSocket(0, 1, own).use { server ->
-            val routed =
-                TailnetSockets(network::bindSocket) { a -> links.routes.any { it.matches(a) } }
+            val lookup = { host: String -> network.getAllByName(host).toList() }
+            val routes = { a: java.net.InetAddress -> links.routes.any { it.matches(a) } }
+            val routed = TailnetSockets(network::bindSocket, routes, lookup)
             routed.createSocket(own, server.localPort).use { assertTrue(it.isConnected) }
-            val nowhere = TailnetSockets(network::bindSocket) { false }
+            // A name is looked up on the network, as the hub client's engine does.
+            val literal = checkNotNull(own.hostAddress)
+            routed.createSocket(literal, server.localPort).use { assertTrue(it.isConnected) }
+            assertEquals(listOf(own), routed.lookup(literal))
+            val nowhere = TailnetSockets(network::bindSocket, { false }, lookup)
             assertFailsWith<IOException> { nowhere.createSocket(own, server.localPort) }
         }
         val check = AndroidTailnet(connectivity)
-        assertNull(check.engine("127.0.0.1"), "loopback uses the client's own engine")
-        checkNotNull(check.engine("100.101.102.103")).close()
+        assertNull(check.transport("127.0.0.1"), "loopback uses the client's own transport")
+        checkNotNull(check.transport("100.101.102.103")).engine.close()
     }
 
     @Test
