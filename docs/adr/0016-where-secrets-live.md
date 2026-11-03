@@ -1,6 +1,6 @@
 # 0016. Where backend secrets live on Linux
 
-- **Status:** Proposed
+- **Status:** Proposed, amended by 0018
 - **Date:** 2026-11-03
 
 ## Context

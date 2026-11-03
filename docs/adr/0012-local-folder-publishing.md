@@ -1,6 +1,6 @@
 # 0012. Publishing files in a local folder, and telling a store from a mount point
 
-- **Status:** Proposed
+- **Status:** Proposed, amended by 0018
 - **Date:** 2026-11-02
 
 ## Context
