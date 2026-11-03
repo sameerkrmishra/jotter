@@ -17,4 +17,5 @@ dependencies {
     kover(projects.core.sync)
     kover(projects.interop.keepImport)
     kover(projects.interop.markdownExport)
+    kover(projects.server)
 }
