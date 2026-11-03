@@ -1,5 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.android
 
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
@@ -7,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
@@ -89,6 +92,50 @@ class MainActivityTest {
                     .list()
                     .any { it.body == "kept" }
             }
+        }
+    }
+
+    /** The input type that the focused field asks the keyboard for. */
+    private fun focusedInputType(scenario: ActivityScenario<MainActivity>): Int {
+        var type = 0
+        scenario.onActivity { activity ->
+            val view = checkNotNull(activity.window.decorView.findFocus()) { "nothing focused" }
+            val info = EditorInfo()
+            checkNotNull(view.onCreateInputConnection(info)) { "no text input" }
+            type = info.inputType
+        }
+        return type
+    }
+
+    private fun focus(tag: String) {
+        compose.onNodeWithTag(tag).performScrollTo().performClick()
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun passwordsAndTokensAskForAPasswordKeyboardWithoutAutocorrection() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.awaitText("Sync")
+            compose.onNodeWithText("Sync").performClick()
+            compose.awaitText(FOLDERS_UNAVAILABLE)
+            // The WebDAV form's app password and the hub's pairing token.
+            listOf("server-password", "hub-token").forEach { tag ->
+                focus(tag)
+                val type = focusedInputType(scenario)
+                assertEquals(InputType.TYPE_CLASS_TEXT, type and InputType.TYPE_MASK_CLASS, tag)
+                assertEquals(
+                    InputType.TYPE_TEXT_VARIATION_PASSWORD,
+                    type and InputType.TYPE_MASK_VARIATION,
+                    tag,
+                )
+                assertEquals(0, type and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT, tag)
+            }
+            // The check can tell: the URL is an ordinary field.
+            focus("server-url")
+            val url = focusedInputType(scenario)
+            assertTrue(
+                url and InputType.TYPE_MASK_VARIATION != InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            )
         }
     }
 
