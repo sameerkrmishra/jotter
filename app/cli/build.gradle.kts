@@ -1,0 +1,40 @@
+import org.gradle.jvm.application.scripts.TemplateBasedScriptGenerator
+
+plugins {
+    id("jotter.jvm-app")
+    id("jotter.quality")
+}
+
+application {
+    applicationName = "jotter"
+    mainClass = "io.github.sameerkrmishra.jotter.app.cli.MainKt"
+}
+
+// A smaller, faster script than Gradle's, with the JVM flags for startup. See README.md.
+tasks.startScripts {
+    val template = file("src/main/scripts/start-script.template")
+    inputs.file(template)
+    (unixStartScriptGenerator as TemplateBasedScriptGenerator).template =
+        resources.text.fromFile(template)
+}
+
+// StartScriptTest runs the real start script from the installed distribution.
+tasks.test {
+    dependsOn(tasks.installDist)
+    val installation = layout.buildDirectory.dir("install/jotter")
+    inputs.dir(installation).withPathSensitivity(PathSensitivity.RELATIVE)
+    jvmArgumentProviders.add { listOf("-Djotter.installation=${installation.get().asFile}") }
+}
+
+dependencies {
+    implementation(projects.core.storage)
+    implementation(projects.interop.keepImport)
+    implementation(projects.interop.markdownExport)
+    // The exception NoteStore.open lets through, to report it without a stack trace.
+    implementation(libs.androidx.sqlite)
+    implementation(libs.clikt.core)
+
+    testImplementation(libs.clikt)
+    // To hold locks on a test database and to make files that are not Jotter's.
+    testImplementation(libs.androidx.sqlite.bundled)
+}

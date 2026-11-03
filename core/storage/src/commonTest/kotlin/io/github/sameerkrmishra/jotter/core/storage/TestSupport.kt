@@ -7,6 +7,9 @@ import io.github.sameerkrmishra.jotter.core.sqlite.openSqliteDriver
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.TestResult
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runTest
 import okio.ByteString
 import okio.FileSystem
 import okio.Path
@@ -15,6 +18,7 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.random.Random
 import kotlin.time.Clock
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Instant
 
 /** A fresh temporary directory for one test's database files, deleted again by [close]. */
@@ -81,6 +85,17 @@ internal inline fun <T> withStore(
     queryContext: CoroutineContext = EmptyCoroutineContext,
     block: (NoteStore) -> T,
 ): T = withTempDir { dir -> openStore(dir.path, clock, queryContext).use(block) }
+
+/**
+ * `runTest` for property tests against a real database. The default timeout of one minute is wall
+ * clock time, not virtual time, and these tests spend it on real writes: on linuxX64
+ * `timestampsIncreaseWhateverTheWallClockDoes` takes 40 s on an idle machine, so a few parallel
+ * builds push it past the minute, and it fails although nothing is wrong. Five minutes leaves it a
+ * slowdown of more than seven times. The timeout is no guard against a hang here anyway: it cannot
+ * interrupt the blocking calls these tests consist of.
+ */
+internal fun runDatabaseTest(testBody: suspend TestScope.() -> Unit): TestResult =
+    runTest(timeout = 5.minutes, testBody = testBody)
 
 /**
  * Threads for tests that use the store from several threads at once. Blocking calls on it are

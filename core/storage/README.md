@@ -25,14 +25,17 @@ of its API) and `core:sqlite`. No sync, merge or backend code: that is M3.
 
 | Type | What it is |
 |---|---|
+| `linuxDatabasePath`, `DATABASE_ENVVAR` | Where the Linux apps keep the database, so the CLI and the desktop app agree. Plain strings, as this module has no file API |
 | `NoteStore` | Opens or creates the database file and this device's id. The composition root owns it and closes it |
-| `NoteService` | `create`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows |
+| `NoteService` | `create`, `importNote`, `get`, `list`, `edit`, `addTag`, `removeTag`, `setPinned`, `setState`, `deleteForever`, `history`, `tags`, `search`, and the `observe*` flows |
+| `ImportedNote`, `ImportResult` | What `importNote` takes, and whether it imported the note or skipped it |
+| `isStorableText` | Whether a title or body will be stored unchanged, or get characters replaced with U+FFFD |
 | `NoteFilter` | A state (active, archived or trash) and optionally a tag |
 | `TagCount` | A tag with the number of notes outside the trash that have it |
 | `SearchHit`, `Highlighted` | A search result: the note and a snippet with its match ranges |
 | `NoSuchNoteException` | The note does not exist, or was deleted forever |
 | `StaleEditException` | An edit based on a revision that is no longer the current one |
-| `StorageBusyException` | A write found the database locked by another process for the whole busy timeout |
+| `StorageBusyException` | A write, or `NoteStore.open`, found the database locked by another process for the whole busy timeout |
 
 ## Schema (version 1)
 
@@ -97,16 +100,32 @@ Encoding:
   clock's new timestamp, all in one `BEGIN IMMEDIATE` transaction. So the
   desktop app and the CLI serialise their writes, and timestamps increase
   strictly across restarts and processes even if the wall clock goes back.
-  Reads use no transaction (see `core:sqlite`).
+  `importNote` is the one exception, below. Reads use no transaction (see
+  `core:sqlite`).
 - **A locked database.** A write waits for another process's write up to the
   5 s busy timeout, then fails with `StorageBusyException`, keeping the driver's
-  error as its cause. Only this case is translated. androidx `SQLiteException`
+  error as its cause. `NoteStore.open` does the same, for a file another process
+  is creating or holds exclusively. Only this case is translated. androidx
+  `SQLiteException`
   has no property for the result code, so `core:sqlite` reads the number from
   its message (the same format on the JVM, linuxX64 and Android, pinned by a
   test), not SQLite's text.
-- **Last-writer-wins stamps.** `create`, `setPinned` and `setState` stamp
-  the field they write with the new revision's stamp. Every other revision
-  carries the parent's stamp over unchanged (ADR-0003, refinements).
+- **Last-writer-wins stamps.** `create`, `importNote`'s root revision,
+  `setPinned` and `setState` stamp the field they write with the new revision's
+  stamp. Every other revision carries the parent's stamp over unchanged
+  (ADR-0003, refinements).
+- **Imports keep source times**
+  ([ADR-0009](../../docs/adr/0009-import-preserves-source-timestamps.md)).
+  `importNote` writes a root at the source's created time and, only if the
+  edited time is strictly later in whole milliseconds, a child at that time
+  with the same content, so `createdAt`, `updatedAt` and list order show the
+  source's times. Stamps have counter 0, this device's id and an ordinary
+  UUIDv7 revision id; only the `NoteId` comes from the source. The clock is not
+  moved, and later changes use `now(after = parent)` as always, so they go above
+  a source time even if it is in the future. A note with any history, including
+  a tombstone, is skipped: a repeated import writes nothing, and a note deleted
+  forever stays deleted on this device. Two devices importing one note give it
+  two roots, which M3 merges.
 - **No-op writes** (the same title and body, a tag the note has, the current
   pin or state) write no revision and return the note unchanged.
 - **Stale edits.** `edit` takes the revision the editor started from and

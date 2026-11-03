@@ -12,6 +12,14 @@ plugins {
 }
 
 kover {
+    // JaCoCo rather than Kover's default engine because it filters the branches that the Compose
+    // compiler generates (such as a composable's skip checks). No test can reach those, and with
+    // the default engine they alone put app/shared-ui's branch coverage at 73%.
+    useJacoco("0.8.14")
+    currentProject {
+        // Collects the variant of the same name from each module; see jotter.quality.
+        createVariant("coverage") {}
+    }
     reports {
         filters {
             excludes {
@@ -19,17 +27,30 @@ kover {
                 // SQLDelight to generate into a package matching this pattern
                 // (e.g. ...core.storage.db), and hand-written code must stay out of `db` packages.
                 classes("*.db.*")
+                // The serialization plugin adds a constructor and write$Self to @Serializable
+                // classes, with one branch per field and per default. Such classes go in a `dto`
+                // package of their module, named here, and stay plain data (CONTRIBUTING.md).
+                classes("*.keepimport.dto.*")
                 // Thin platform entry points (Activity, `main()`) are covered by manual and UI
                 // testing instead. Name them here as they are added, e.g. "*.MainKt".
+                classes("*.app.cli.MainKt")
+                // The lambdas of `main()` are classes of their own.
+                classes("*.desktop.MainKt", "*.desktop.MainKt$*")
             }
         }
-        verify {
-            rule {
-                minBound(95, CoverageUnit.LINE)
-                minBound(95, CoverageUnit.BRANCH)
+        variant("coverage") {
+            verify {
+                rule {
+                    minBound(95, CoverageUnit.LINE)
+                    minBound(95, CoverageUnit.BRANCH)
+                }
             }
         }
     }
+}
+
+tasks.named("check") {
+    dependsOn("koverVerifyCoverage")
 }
 
 // The root build.gradle.kts and settings.gradle.kts are linted by default. Add the convention

@@ -28,23 +28,26 @@ The reasons behind these are recorded in [docs/adr/](docs/adr/README.md).
 - **Disk space** for the Kotlin/Native toolchain (about 1.8 GB in `~/.konan`),
   which the first build downloads. Shared modules are also built and tested
   for `linuxX64`, so they must not use JVM-only APIs or libraries
-  ([ADR-0006](docs/adr/0006-native-compatible-shared-modules.md)).
+  ([ADR-0006](docs/adr/0006-native-compatible-shared-modules.md)). The Compose
+  UI in `app/shared-ui` is the one exception
+  ([ADR-0010](docs/adr/0010-compose-ui-outside-linuxx64-rule.md)).
 
 ## Everyday commands
 
-The exact task names are finalised by the build-skeleton task in milestone M0.
-The intended interface is:
-
 | Command | What it does |
 |---|---|
-| `./gradlew check` | Compiles, runs all tests (JVM, Android host and Kotlin/Native `linuxX64`), Android Lint, ktlint, detekt and the 95% Kover coverage gate |
+| `./gradlew check` | Compiles, runs all tests (JVM, Android host and Kotlin/Native `linuxX64`), Android Lint, ktlint, detekt and the 95% coverage gate |
 | `./gradlew ktlintFormat` | Reformats Kotlin sources to the project style |
+
+The coverage gate is the root project's `koverVerifyCoverage` task, which `check`
+runs. The plain `koverVerify` tasks have no rule and always pass, so do not use
+them.
 
 Run `./gradlew check` before every commit. CI
 ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same
 `./gradlew check` on every pull request to `main` and every push to `main`.
-Its `check` job is the required status check for merging. The APK and desktop
-builds join CI once those modules exist.
+Its `check` job is the required status check for merging. The desktop module
+exists, but CI does not build its distributable yet. The APK joins CI in M5.
 
 ## Code style
 
@@ -61,8 +64,10 @@ builds join CI once those modules exist.
 ## Testing
 
 - The coverage gate is 95% line and branch coverage. Generated code
-  (SQLDelight) and thin platform entry points (Activity, `main()`) are
-  excluded. Kover cannot measure Kotlin/Native, so the `linuxX64` tests must
+  (SQLDelight), serialization DTOs in a `dto` package and thin platform entry
+  points (Activity, `main()`) are excluded. A `dto` package holds plain data
+  only, because the serialization plugin's generated branches cannot all be
+  reached by tests and nothing in it is measured. Kover cannot measure Kotlin/Native, so the `linuxX64` tests must
   pass but do not count towards the gate.
 - Tests must be meaningful. They should check behaviour and edge cases, not
   just execute lines. Tests written only to raise coverage will be rejected in
@@ -97,8 +102,9 @@ Reviewers check: correctness and edge cases; readability; naming; fit with the
 module boundaries and ADRs; meaningful tests; present and accurate KDoc; no
 dead code and no premature abstraction.
 
-In addition, the maintainer reviews the project at milestone boundaries. Each
-milestone ends with a demo and a short summary of the decisions made.
+In addition, the maintainer reviews the project at the end, not at milestone
+boundaries. Each milestone still ends with a demo and a short summary of the
+decisions made, in [docs/milestones/](docs/milestones/).
 
 ## Proposing an architectural change
 

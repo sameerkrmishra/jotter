@@ -76,9 +76,11 @@ atomicfu. No other Jotter module.
   on eviction, on failure and on close.
 - **Close.** `PRAGMA wal_checkpoint(TRUNCATE)`, then close. When it is the last
   connection to the file, `-wal` and `-shm` disappear. If another process is
-  still reading, the checkpoint gives up after `busy_timeout` without an
-  error and the WAL stays. The file is only safe to copy on its own after the
-  last connection (app and CLI) has closed.
+  reading or writing, the checkpoint gives up at once, without an error, and
+  the WAL stays: `busy_timeout` is set to 0 first, so that the CLI does not
+  stall for 5 s on every command while the app is busy. Nothing is lost, as the
+  last connection to close still checkpoints. The file is only safe to copy on
+  its own after that last close (app and CLI).
 
 The fallback if one connection becomes a bottleneck (UI reads blocked behind
 sync writes) is in ADR-0002.

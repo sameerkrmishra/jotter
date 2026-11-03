@@ -354,8 +354,8 @@ codec. Documented as ADR-0007 in M6.
 - **Docs:** KDoc on every public class, interface, function and property
   (detekt `UndocumentedPublic*` rules). Module-level `README.md` per module.
 - **Coverage:** Kover gate at **95% line and branch coverage**. Generated code
-  (SQLDelight) and thin platform entry points (Activity, `main()`) are
-  excluded. Compose UI is covered with Compose UI tests. Kover cannot
+  (SQLDelight), serialization DTOs in a `dto` package (plain data only) and
+  thin platform entry points (Activity, `main()`) are excluded. Compose UI is covered with Compose UI tests. Kover cannot
   measure Kotlin/Native: native tests prove behaviour but do not count
   towards the gate.
 - **Architecture decisions:** recorded as ADRs in `docs/adr/`. Planned:
@@ -394,8 +394,9 @@ understand this in one pass?). Naming. Fits the module boundaries and ADRs.
 Tests are meaningful, not coverage padding. KDoc present and accurate. No dead
 code, no premature abstraction.
 
-**Maintainer involvement:** the maintainer reviews at milestone boundaries only.
-Each milestone ends with a demo note and a short summary of decisions made.
+**Maintainer involvement:** the maintainer reviews at the end of the project, not
+at milestone boundaries (decided 2026-11-01). Each milestone still ends with a
+demo note and a short summary of decisions made, in `docs/milestones/`.
 
 Tasks inside a milestone that touch different modules run in parallel.
 
@@ -425,7 +426,7 @@ Neovim/Emacs plugins, log compaction, home-screen widget.
 | Web app | Deferred to after v1 |
 | Checklists | Markdown task lists (`- [ ] item`) with tappable checkboxes |
 | Keep colors | Dropped on import |
-| Coverage scope | 95% gate excludes generated code and thin platform entry points |
+| Coverage scope | 95% gate excludes generated code, serialization DTOs in a `dto` package (plain data only) and thin platform entry points |
 | Name | Jotter |
 | Repository | `jotter` on GitHub, public |
 | License | Apache-2.0 |

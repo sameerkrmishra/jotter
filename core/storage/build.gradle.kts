@@ -43,6 +43,8 @@ kotlin {
             implementation(libs.sqldelight.coroutines.extensions)
         }
         commonTest.dependencies {
+            // To hold a lock on a test database from outside the store.
+            implementation(libs.androidx.sqlite.bundled)
             implementation(libs.kotest.property)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.okio)

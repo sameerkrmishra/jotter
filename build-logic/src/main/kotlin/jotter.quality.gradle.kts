@@ -44,12 +44,25 @@ tasks.withType<Detekt>().configureEach {
     exclude { element -> element.file.path.startsWith(generated) }
 }
 
+kover {
+    // See jotter.root for why JaCoCo. The merged report must use the same engine as the modules.
+    useJacoco("0.8.14")
+    currentProject {
+        // Only the JVM classes, which are what the tests run. The Android build of a shared class
+        // has the same name and, where it inlines Android variants of libraries, other bytecode.
+        // JaCoCo matches classes by their bytes, so it would count those as untested.
+        createVariant("coverage") {
+            add("jvm")
+        }
+    }
+}
+
 // `check` runs only the plain `detekt` task by default, which has no type resolution. The
-// type-resolved tasks depend on the module's targets: jotter.kmp-library wires its own, and a
-// plain Kotlin/JVM module (such as a JVM CLI) gets its two here. Any other module (a pure Android
-// app, or one applying kotlin.multiplatform directly, such as app/desktop) falls back to the plain
-// task, so whoever adds one must add its type-resolved tasks to `check`. Spelled out so that a
-// rename in a detekt release fails the build instead of silently dropping detekt from `check`.
+// type-resolved tasks depend on the module's targets: jotter.kmp-base wires its own, and a plain
+// Kotlin/JVM module (app/cli, app/desktop) gets its two here. Any other module (a pure Android app,
+// or one applying kotlin.multiplatform directly) falls back to the plain task, so whoever adds one
+// must add its type-resolved tasks to `check`. Spelled out so that a rename in a detekt release
+// fails the build instead of silently dropping detekt from `check`.
 pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
     tasks.named("check") {
         dependsOn("detektMain", "detektTest")

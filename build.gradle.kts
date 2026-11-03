@@ -4,7 +4,12 @@ plugins {
 
 dependencies {
     // Every module whose coverage counts towards the gate.
+    kover(projects.app.cli)
+    kover(projects.app.desktop)
+    kover(projects.app.sharedUi)
     kover(projects.core.model)
     kover(projects.core.sqlite)
     kover(projects.core.storage)
+    kover(projects.interop.keepImport)
+    kover(projects.interop.markdownExport)
 }

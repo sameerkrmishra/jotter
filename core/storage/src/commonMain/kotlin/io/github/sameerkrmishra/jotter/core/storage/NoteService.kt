@@ -16,7 +16,6 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.model.Stamp
 import io.github.sameerkrmishra.jotter.core.model.Stamped
 import io.github.sameerkrmishra.jotter.core.model.TagName
-import io.github.sameerkrmishra.jotter.core.sqlite.isSqliteBusy
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -29,6 +28,7 @@ import kotlin.time.Instant
  *
  * Every change creates a user [Revision] on top of the note's current one and materialises it, in
  * one write transaction (`BEGIN IMMEDIATE`), so the desktop app and the CLI never interleave.
+ * [importNote] is the one write that keeps source times instead of reading the clock (ADR-0009).
  * The transaction also reads and advances the device's hybrid logical clock, which is stored in
  * the database, so timestamps stay strictly increasing across restarts and processes. A change
  * that would change nothing, such as pinning a pinned note, creates no revision and returns the
@@ -82,6 +82,51 @@ public class NoteService internal constructor(
             val revision = userRevision(stamp, NoteId.generate(), parent = null, content)
             store(revision)
             noteOf(revision, content, Instant.fromEpochMilliseconds(stamp.timestamp.physicalMillis))
+        }
+
+    /**
+     * Stores [note], taken from another app, with the source's times as its revisions' timestamps
+     * (ADR-0009), in one write transaction.
+     *
+     * If the note [ImportedNote.id] has any history, even one that ends in deletion forever,
+     * nothing is written and the result is [ImportResult.SKIPPED]: a repeated import duplicates
+     * nothing, changes nothing and brings nothing back.
+     *
+     * Otherwise this writes a root revision at [ImportedNote.createdAt], and a second revision
+     * with the same content at [ImportedNote.editedAt] if that is strictly later in whole
+     * milliseconds, so a child is always above its parent. Both have counter 0 and this device's
+     * id. The pin and state keep the root's stamp, so any real later change beats them. The
+     * device's clock is not moved; [edit] and the other changes go above the imported revisions
+     * with `now(after = parent)`, even if a source time is in the future.
+     *
+     * Text is made storable as by [create].
+     *
+     * @throws IllegalArgumentException if [ImportedNote.createdAt] is before the Unix epoch.
+     * @throws StorageBusyException if another process kept the database locked.
+     */
+    public fun importNote(note: ImportedNote): ImportResult =
+        write { _ ->
+            if (revisions.forNote(note.id).isNotEmpty()) {
+                ImportResult.SKIPPED
+            } else {
+                val createdMillis = note.createdAt.toEpochMilliseconds()
+                val editedMillis = note.editedAt.toEpochMilliseconds()
+                val rootStamp = importStamp(createdMillis)
+                val content =
+                    RevisionContent.Snapshot(
+                        title = note.title.toStorableText(),
+                        body = note.body.toStorableText(),
+                        tags = note.tags,
+                        pinned = Stamped(note.pinned, rootStamp),
+                        state = Stamped(note.state, rootStamp),
+                    )
+                store(userRevision(rootStamp, note.id, parent = null, content))
+                if (editedMillis > createdMillis) {
+                    val parent = rootStamp.revisionId
+                    store(userRevision(importStamp(editedMillis), note.id, parent, content))
+                }
+                ImportResult.IMPORTED
+            }
         }
 
     /** Returns the note with [id], or null if there is none (any more). */
@@ -346,9 +391,8 @@ public class NoteService internal constructor(
      * Runs [block] in a write transaction with the device's hybrid logical clock, and stores the
      * clock's new [HybridLogicalClock.last] before committing.
      */
-    @Suppress("TooGenericExceptionCaught") // Everything but a busy error is rethrown as it is.
     private fun <T> write(block: (HybridLogicalClock) -> T): T =
-        try {
+        reportingBusy {
             database.transactionWithResult {
                 val stored = database.deviceQueries.selectDevice().executeAsOne()
                 val last = hybridTimestamp(stored.hlc_physical, stored.hlc_counter)
@@ -362,8 +406,6 @@ public class NoteService internal constructor(
                 }
                 result
             }
-        } catch (e: RuntimeException) {
-            throw if (isSqliteBusy(e)) StorageBusyException(e) else e
         }
 
     /** Whether [basedOn] is a revision of the note [id] with the title and body of [current]. */
@@ -396,6 +438,10 @@ public class NoteService internal constructor(
         hlc: HybridLogicalClock,
         after: HybridTimestamp?,
     ): Stamp = Stamp(hlc.now(after), deviceId, RevisionId.generate())
+
+    /** The stamp of an imported revision, at a source time instead of a clock reading. */
+    private fun importStamp(physicalMillis: Long): Stamp =
+        Stamp(HybridTimestamp(physicalMillis, counter = 0), deviceId, RevisionId.generate())
 
     private fun userRevision(
         stamp: Stamp,
