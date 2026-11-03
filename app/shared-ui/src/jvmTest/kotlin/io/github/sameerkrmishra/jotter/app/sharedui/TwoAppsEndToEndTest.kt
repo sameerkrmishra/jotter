@@ -24,13 +24,11 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.Dispatchers
-import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
-import kotlin.io.path.name
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -107,12 +105,10 @@ class TwoAppsEndToEndTest {
             .lastAttempt
 
     /** The segment files on the stick, of every device. */
+    // Not Files.walk: a sync renames temporary files meanwhile, and that walk fails on one that
+    // went between listing and looking at it.
     private fun segments(): Int =
-        Files
-            .walk(stick)
-            .use { paths ->
-                paths.filter { it.name.endsWith(".json.gz") }.count()
-            }.toInt()
+        stick.toFile().walkTopDown().count { it.name.endsWith(".json.gz") }
 
     /** Waits until [device] has synced, after edits and after what it brought in, and is idle. */
     private fun ComposeUiTest.settle(device: SyncedDevice) {
