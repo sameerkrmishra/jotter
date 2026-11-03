@@ -368,6 +368,36 @@ class SyncEngineTest {
             assertEquals("body", pc.notes.get(note.id)?.body)
         }
 
+    /** A sound segment, but not the one the name says: only the hash tells. */
+    @Test
+    fun anotherSoundSegmentAtAPendingPathIsNotPublished(): TestResult =
+        runTest {
+            val phone = device("phone")
+            val pc = device("pc")
+            val memory = InMemoryBlobStore()
+            val stranger = Segment(phone.deviceId, 1, listOf(textRevision(9, 10, "not ours")))
+            val swapping =
+                object : BlobStore by memory {
+                    override suspend fun writeNew(
+                        path: String,
+                        bytes: ByteArray,
+                    ) {
+                        val isFree = memory.list(BackendLayout.DEVICES).none { it.path == path }
+                        if (path.endsWith(".json.gz") && isFree) {
+                            memory.writeNew(path, JsonGzipCodec().encode(stranger))
+                            throw BlobAlreadyExistsException(path)
+                        }
+                        memory.writeNew(path, bytes)
+                    }
+                }
+            val note = phone.notes.create("t", "body")
+            assertEquals(0, phone.sync(swapping).pushedSegments)
+            assertTrue(phone.sync.published("b").isEmpty())
+            phone.sync(memory)
+            pc.sync(memory)
+            assertEquals("body", pc.notes.get(note.id)?.body)
+        }
+
     /** The same number would give the same name again, for good. */
     @Test
     fun aDamagedFileTheListingDoesNotShowIsNotWrittenToAgain(): TestResult =

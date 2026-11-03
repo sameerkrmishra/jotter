@@ -200,8 +200,11 @@ class LostHistoryTest {
             val note = writer.notes.create("t", "body")
             writer.sync(blobs)
             reader.sync(blobs)
-            blobs.lose(blobs.pathOfNumber(writer.deviceId, 1))
+            val lost = blobs.pathOfNumber(writer.deviceId, 1)
+            assertTrue(reader.sync.readFiles("b").any { lost.endsWith(it.second) })
+            blobs.lose(lost)
             assertEquals(1, reader.sync(blobs).pushedSegments)
+            assertTrue(reader.sync.readFiles("b").none { lost.endsWith(it.second) })
             late.sync(blobs)
             assertEquals("body", late.notes.get(note.id)?.body)
         }
