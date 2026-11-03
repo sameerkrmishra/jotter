@@ -12,8 +12,20 @@ ANDROID_HOME=~/Android/Sdk app/android/scripts/hub-e2e.sh emulator-5554
 ```
 
 Set `ANDROID_SERIAL`, or Gradle installs and runs the device tests on every device and
-emulator `adb devices` lists. F-Droid metadata, a reproducible release build and the CI
-emulator job are separate M5 tasks.
+emulator `adb devices` lists.
+
+## Release build
+
+`./gradlew :app:android:assembleRelease` gives an unsigned, unshrunk APK,
+`build/outputs/apk/release/android-release-unsigned.apk`, which is reproducible: two builds of one
+commit are byte-identical ([ADR-0019](../../docs/adr/0019-release-builds.md)).
+`scripts/reproducible-build.sh [REV]` builds it twice in fresh copies and compares; CI's
+`reproducible` workflow runs that on `main`, on tags and on pull requests that change the build.
+The version is `jotter.versionName` and `jotter.versionCode` in the root `gradle.properties`.
+Only with `JOTTER_KEYSTORE` (and its password in `JOTTER_KEYSTORE_PASSWORD`) is the APK signed:
+[docs/releasing.md](../../docs/releasing.md) has the maintainer's steps, and
+[docs/fdroid](../../docs/fdroid/README.md) the F-Droid recipe, store listing and dependency
+audit.
 
 **Dependency rule:** `app:shared-ui` and `app:sync`, AndroidX Activity and WorkManager.
 Nothing depends on it. It is an application, not a library, so ADR-0006's `linuxX64` rule
