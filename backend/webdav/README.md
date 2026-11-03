@@ -99,6 +99,9 @@ again.
 - **CIO on every target**, as it needs no native library (libcurl) on linuxX64.
   The internal constructor takes any `HttpClientEngine`, which is how the tests
   use Ktor's `MockEngine`.
+- **`close()` closes the engine too**, which a Ktor client does not do for an
+  engine it was given. On linuxX64 each open CIO engine keeps a thread of
+  `Dispatchers.IO` polling, and with 64 of them left open the tests hung.
 
 ## Tests
 

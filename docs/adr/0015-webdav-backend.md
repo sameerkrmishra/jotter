@@ -131,10 +131,12 @@ on every target, and the CIO engine against misbehaving TCP servers.
 
 `scripts/live-test.sh` runs the contract suite on lighttpd and Apache, the refusal
 on rclone, and `LiveFaultTest` on lighttpd, on the JVM and linuxX64, over `http` on
-127.0.0.1. The images are pinned by digest in the script. The race measurements
+127.0.0.1. The images are pinned by digest in the script. On 2026-11-03 every one
+of these tests passed on both targets, 57 per target (Apache without its race
+test). The race measurements
 above came from a throwaway Python script with eight threads; the contract's own
-race test, eight coroutines on 4 KB files for 30 rounds, fails on Apache in most
-runs too.
+race test, eight coroutines on 4 KB files for 30 rounds, failed on Apache in each
+of the three JVM runs that included it.
 
 ## Not verified
 
