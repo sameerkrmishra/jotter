@@ -267,17 +267,20 @@ public class SyncScheduler(
 
     /** What the loop is asked to do. Of two rounds asked for, the one with the higher [reach]. */
     private sealed class Request(
-        val reach: Int,
+        val reach: Reach,
     ) {
         class Mark(
             val mark: Long,
-        ) : Request(0)
+        ) : Request(Reach.NONE)
 
         /** A retry of the failed backends that are due, and no other. */
-        data object Retry : Request(1)
+        data object Retry : Request(Reach.FAILED)
 
-        data object Scheduled : Request(2)
+        data object Scheduled : Request(Reach.DUE)
 
-        data object Now : Request(3)
+        data object Now : Request(Reach.ALL)
     }
+
+    /** Which backends a round syncs, from none to all. */
+    private enum class Reach { NONE, FAILED, DUE, ALL }
 }
