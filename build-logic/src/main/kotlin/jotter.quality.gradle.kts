@@ -44,6 +44,10 @@ tasks.withType<Detekt>().configureEach {
     exclude { element -> element.file.path.startsWith(generated) }
 }
 
+// An Android application has no JVM target: its host tests run the debug build. It must apply its
+// Android plugin before this one, as jotter.android-app says.
+val androidApp = pluginManager.hasPlugin("com.android.application")
+
 kover {
     // See jotter.root for why JaCoCo. The merged report must use the same engine as the modules.
     useJacoco("0.8.14")
@@ -52,7 +56,7 @@ kover {
         // has the same name and, where it inlines Android variants of libraries, other bytecode.
         // JaCoCo matches classes by their bytes, so it would count those as untested.
         createVariant("coverage") {
-            add("jvm")
+            add(if (androidApp) "debug" else "jvm")
         }
     }
 }

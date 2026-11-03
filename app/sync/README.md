@@ -32,10 +32,11 @@ each backend implementation it can open: `backend:localfolder`, `backend:webdav`
 | `Backend`, `Attempt`, `Outcome`, `BackendSync`, `BackendStatus` | A configured backend, how its last sync went, what one sync did, and its reachability now |
 | `BackendFactory`, `StandardBackendFactory`, `MissingSecretException` | Opens the `BlobStore` of a backend, reading its password |
 | `BackendManager`, `AddResult`, `PasswordChange` | Adds a local folder or a WebDAV server, replaces a password, removes a backend, syncs one or all, and reports status |
-| `SyncScheduler`, `SyncTiming` | When the desktop app syncs |
+| `SyncScheduler`, `SyncTiming` | When the desktop and Android apps sync |
 | `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `SecretPlace`, `SecretStores`, `NoSecretStore`, `SecretStoreException`, `SecretStoreUnavailableException` | Where backend secrets live ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)) |
 | `SecretServiceStore`, `SecretFileStore`, `linuxSecretStores` | JVM only: the keyring through `secret-tool`, and the 0600 file the user may choose |
 | `describe(Reachability)` | Reachability in plain words |
+| `TailnetCheck` | Whether a hub's token may leave the device now, beyond the address rule (Android: only while Tailscale runs) |
 
 ## Adding a kind of backend
 
@@ -94,6 +95,13 @@ syncs it.
   and this device never sets the hub up. The token is a `PAIRING_SECRET` in the
   `SecretStore`. A refused token later reads as "unpaired on the PC"; `changePassword`
   takes the new token after pairing again.
+- **A `TailnetCheck`**, given to `BackendManager` and `StandardBackendFactory`, can keep
+  a token in even where the address rule allows it: Android refuses while Tailscale's
+  VPN does not carry the app, as mobile carriers use `100.64.0.0/10` too
+  ([ADR-0018](../../docs/adr/0018-android-app.md)). The hub is then `OffTailnet`:
+  unreachable with the reason, at adding, syncing and status, and sent nothing. Its
+  `engine` may give the hub client an HTTP engine of the app's: Android's binds its sockets
+  to Tailscale's network. The desktop and the CLI pass `TailnetCheck.NONE`, the default.
 
 ## Design
 
@@ -147,12 +155,20 @@ syncs it.
   `SyncEngine` allows. Nothing else stops the scheduler: a round that throws, or a
   revision mark flow that fails (it is collected again after 30 s), shows in
   `SyncScheduler.problem` in plain words until it works again.
+- **Background jobs.** `syncAndWait` asks for a scheduled round and returns once a
+  round that started after the call has ended, so that a job such as Android's
+  WorkManager worker (`app:android`) does not end before its sync. It goes through the
+  same queue, so it never runs beside another round and honours the backoff above. A
+  round already running does not count, and stopping the scheduler cancels the wait.
 - **Coroutines.** Database calls run on the `io` context given; `SyncEngine` and each
   backend use their own dispatchers. Nothing blocks the caller's thread.
 
 ## Tests
 
-`PeerBackendTest` (JVM) syncs two devices through a real hub on 127.0.0.1, unpairs one,
+`TailnetCheckTest` (JVM) shows that a refusing check sends a hub nothing, at adding and
+syncing. `HubForAndroidTest`, in the package `e2e`, is the PC's half of the Android app's
+end-to-end test and runs only when `app/android/scripts/hub-e2e.sh` sets
+`JOTTER_HUB_E2E_DIR`. `PeerBackendTest` (JVM) syncs two devices through a real hub on 127.0.0.1, unpairs one,
 pairs it again, and checks the refusals. `WebDavBackendTest` adds, changes and removes WebDAV backends against a stand-in
 server. `SecretServiceStoreTest` uses a stand-in `secret-tool` that logs its arguments
 and bus, to show that the secret is never in either, and runs the real `secret-tool`

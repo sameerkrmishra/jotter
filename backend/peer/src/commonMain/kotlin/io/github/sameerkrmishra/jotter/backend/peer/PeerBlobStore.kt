@@ -10,6 +10,8 @@ import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPath
 import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPrefix
 import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.HttpRequestBuilder
@@ -59,6 +61,7 @@ public class PeerBlobStore internal constructor(
     token: String,
     private val timeouts: PeerTimeouts,
     private val dispatcher: CoroutineDispatcher,
+    private val engine: HttpClientEngine?,
 ) : BlobStore,
     AutoCloseable {
     /**
@@ -68,7 +71,17 @@ public class PeerBlobStore internal constructor(
      * @throws IllegalArgumentException if [token] has characters no token has.
      */
     public constructor(address: PeerAddress, token: String) :
-        this(address, token, PeerTimeouts(), Dispatchers.Default)
+        this(address, token, PeerTimeouts(), Dispatchers.Default, null)
+
+    /**
+     * The same, with its connections made by [engine] instead of Ktor's CIO engine, such as one
+     * whose sockets an Android app binds to Tailscale's network (ADR-0018). The engine must not
+     * retry or follow redirects itself. The store owns it and closes it with itself.
+     *
+     * @throws IllegalArgumentException if [token] has characters no token has.
+     */
+    public constructor(address: PeerAddress, token: String, engine: HttpClientEngine) :
+        this(address, token, PeerTimeouts(), Dispatchers.Default, engine)
 
     init {
         require(token.isNotEmpty() && token.all(::isTokenCharacter)) { "This is not a hub token" }
@@ -81,13 +94,8 @@ public class PeerBlobStore internal constructor(
     private var closed = false
 
     private val client =
-        HttpClient(CIO) {
-            expectSuccess = false
-            followRedirects = false
-            install(HttpTimeout) {
-                connectTimeoutMillis = timeouts.connect.inWholeMilliseconds
-                socketTimeoutMillis = timeouts.idle.inWholeMilliseconds
-            }
+        engine?.let { HttpClient(it) { configure() } } ?: HttpClient(CIO) {
+            configure()
             engine {
                 // A phone needs few connections, and the hub serves several devices.
                 maxConnectionsCount = MAX_CONNECTIONS
@@ -95,6 +103,15 @@ public class PeerBlobStore internal constructor(
                 endpoint.connectAttempts = 1
             }
         }
+
+    private fun HttpClientConfig<*>.configure() {
+        expectSuccess = false
+        followRedirects = false
+        install(HttpTimeout) {
+            connectTimeoutMillis = timeouts.connect.inWholeMilliseconds
+            socketTimeoutMillis = timeouts.idle.inWholeMilliseconds
+        }
+    }
 
     override suspend fun list(prefix: String): List<BlobInfo> {
         requireValidBlobPrefix(prefix)
@@ -159,6 +176,8 @@ public class PeerBlobStore internal constructor(
     override fun close() {
         closed = true
         client.close()
+        // A client made on a given engine leaves it open.
+        engine?.close()
     }
 
     /**

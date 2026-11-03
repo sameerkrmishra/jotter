@@ -98,6 +98,9 @@ public sealed interface PasswordChange {
  *   delete them with it.
  * @param io Where blocking database calls run.
  * @param clock The time of a sync and of adding a backend.
+ * @param tailnet Whether a hub's token may go to its host now, beyond the address rule: on
+ *   Android, only while Tailscale runs (ADR-0018). If not, the hub is unreachable and sent
+ *   nothing.
  */
 @Suppress(
     "TooManyFunctions", // One function per operation, and the steps of adding a backend.
@@ -111,6 +114,7 @@ public class BackendManager internal constructor(
     private val io: CoroutineContext,
     private val clock: Clock,
     private val webDav: WebDavOpener,
+    private val tailnet: TailnetCheck = TailnetCheck.NONE,
 ) {
     public constructor(
         store: NoteStore,
@@ -119,7 +123,8 @@ public class BackendManager internal constructor(
         secrets: SecretStores,
         io: CoroutineContext,
         clock: Clock = Clock.System,
-    ) : this(store, engine, factory, secrets, io, clock, ::openWebDav)
+        tailnet: TailnetCheck = TailnetCheck.NONE,
+    ) : this(store, engine, factory, secrets, io, clock, ::openWebDav, tailnet)
 
     private val operations = Mutex()
 
@@ -459,7 +464,7 @@ public class BackendManager internal constructor(
         secret: Secret,
     ): BlobStore =
         when (config) {
-            is PeerConfig -> openPeer(config, secret)
+            is PeerConfig -> openPeer(config, secret, tailnet)
             is WebDavConfig -> webDav.open(config, secret)
             else -> throw IllegalArgumentException("${config.location} needs no secret")
         }
@@ -495,7 +500,7 @@ public class BackendManager internal constructor(
                 ?.let { return@withLock AddResult.AlreadyAdded(it) }
             val blobs =
                 try {
-                    openPeer(config, token)
+                    openPeer(config, token, tailnet)
                 } catch (e: IllegalArgumentException) {
                     return@withLock AddResult.Refused(
                         "Cannot use this pairing token: ${e.message}.",

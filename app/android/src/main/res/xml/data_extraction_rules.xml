@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12 and later (ADR-0018). Only the notes database is copied: to a cloud backup only if
+    it is encrypted with the screen lock, and to a new phone in a device transfer. Settings, other
+    files and WorkManager's own database are left out. Backend secrets are in noBackupFilesDir,
+    which neither ever copies, and their Keystore key cannot leave the phone, so a restored device
+    asks for its passwords again (ADR-0016).
+-->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="database" path="jotter.db" />
+        <include domain="database" path="jotter.db-wal" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="database" path="jotter.db" />
+        <include domain="database" path="jotter.db-wal" />
+    </device-transfer>
+</data-extraction-rules>

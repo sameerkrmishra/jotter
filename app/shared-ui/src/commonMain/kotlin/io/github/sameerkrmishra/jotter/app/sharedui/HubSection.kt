@@ -22,24 +22,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 @Composable
 internal fun AddHub(backends: BackendsViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(spacing),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Form { field ->
             OutlinedTextField(
                 value = backends.hubAddress,
                 onValueChange = { backends.editHub(address = it) },
-                modifier = Modifier.weight(1f).testTag(HUB_ADDRESS_FIELD),
+                modifier = field(1f).testTag(HUB_ADDRESS_FIELD),
                 label = { Text("PC hub address, such as 100.101.102.103") },
                 singleLine = true,
             )
             OutlinedTextField(
                 value = backends.hubToken,
                 onValueChange = { backends.editHub(token = it) },
-                modifier = Modifier.weight(1f).testTag(HUB_TOKEN_FIELD),
+                modifier = field(1f).testTag(HUB_TOKEN_FIELD),
                 label = { Text("Pairing token") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = SECRET_KEYBOARD,
             )
             Button(
                 onClick = backends::addHub,

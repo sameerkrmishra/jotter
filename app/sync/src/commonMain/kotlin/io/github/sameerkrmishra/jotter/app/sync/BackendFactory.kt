@@ -31,13 +31,17 @@ public class MissingSecretException(
 /**
  * The backends of this version: local folders, WebDAV servers and the PC hub. A WebDAV server's
  * app password and a hub's pairing token are read from [secrets] each time it is opened
- * (ADR-0016).
+ * (ADR-0016). A hub that [tailnet] refuses now is unreachable, and its token is not sent.
  */
 public class StandardBackendFactory internal constructor(
     private val secrets: SecretStores,
     private val webDav: WebDavOpener,
+    private val tailnet: TailnetCheck = TailnetCheck.NONE,
 ) : BackendFactory {
-    public constructor(secrets: SecretStores) : this(secrets, ::openWebDav)
+    public constructor(
+        secrets: SecretStores,
+        tailnet: TailnetCheck = TailnetCheck.NONE,
+    ) : this(secrets, ::openWebDav, tailnet)
 
     override suspend fun open(backend: Backend): BlobStore =
         when (val config = backend.config) {
@@ -54,21 +58,37 @@ public class StandardBackendFactory internal constructor(
                 val token =
                     secrets.of(config.secretPlace).read(key)
                         ?: throw MissingSecretException(NO_TOKEN)
-                openPeer(config, token)
+                openPeer(config, token, tailnet)
             }
             is UnknownConfig -> throw IllegalArgumentException("Cannot open ${config.location}")
         }
 }
 
 /**
- * The hub client for [config] with [token].
+ * The hub client for [config] with [token], or a hub that cannot be reached and is sent nothing
+ * while [tailnet] refuses its host. Its connections are made by [tailnet]'s engine, if it has one.
  *
  * @throws IllegalArgumentException if the address or the token cannot be used.
  */
 internal fun openPeer(
     config: PeerConfig,
     token: Secret,
-): PeerBlobStore = PeerBlobStore(PeerAddress(config.host, config.port), token.reveal())
+    tailnet: TailnetCheck,
+): BlobStore {
+    tailnet.refuse(config.host)?.let { return OffTailnet(it) }
+    val address = PeerAddress(config.host, config.port)
+    val engine = tailnet.engine(config.host)
+    return when {
+        engine == null -> PeerBlobStore(address, token.reveal())
+        else ->
+            try {
+                PeerBlobStore(address, token.reveal(), engine)
+            } catch (e: IllegalArgumentException) {
+                engine.close()
+                throw e
+            }
+    }
+}
 
 /** What a hub backend without its token says. */
 internal const val NO_TOKEN: String =

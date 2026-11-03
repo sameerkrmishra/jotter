@@ -80,6 +80,8 @@ internal fun removeExplanation(backend: Backend): String =
  * @param parent Where it runs, on the UI thread. Cancel it, or call [close], to stop it.
  *   Blocking work runs in [manager], on its own dispatchers.
  * @param clock The time that "synced 5 minutes ago" counts from.
+ * @property foldersUnavailable Why this device cannot add a local folder, shown instead of the
+ *   folder's form, or null where it can.
  */
 @Stable
 @Suppress("TooManyFunctions") // One small function per thing the user can do on the screen.
@@ -89,6 +91,7 @@ internal class BackendsViewModel(
     parent: CoroutineScope,
     private val clock: Clock = Clock.System,
     hub: HubControls? = null,
+    val foldersUnavailable: String? = null,
 ) {
     // A child of the app's scope, so that close() stops this screen and nothing else.
     private val scope = CoroutineScope(parent.coroutineContext + Job(parent.coroutineContext[Job]))

@@ -12,6 +12,7 @@ import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -34,6 +35,7 @@ import kotlinx.coroutines.launch
  *   not sync, which then shows no backend screen.
  */
 @Stable
+@Suppress("TooManyFunctions") // One small function per way of moving between screens.
 public class AppViewModel(
     private val notes: NoteService,
     private val conflicts: ConflictResolver,
@@ -87,6 +89,32 @@ public class AppViewModel(
         }
     }
 
+    /**
+     * Goes back one screen, for a phone's Back: from the review, the backend screen or the editor
+     * towards the note list. The editor saves first, as its own Back does, and stays open with its
+     * message if that fails. Returns false on the note list, where Back leaves the app.
+     */
+    public fun back(): Boolean {
+        when {
+            review != null -> closeReview()
+            backends != null -> closeBackends()
+            editor != null -> leaveEditor()
+            else -> return false
+        }
+        return true
+    }
+
+    /**
+     * Stores what the user typed, and closes nothing: the editor's draft and the review's combined
+     * texts. For an app that the system may stop at any time once it is in the background, as
+     * Android does. A failure shows as the screen's message, as for any save.
+     */
+    public fun keep(): Job =
+        scope.launch {
+            review?.flush()
+            editor?.saveAll()
+        }
+
     /** Opens the editor on [note], or on a new note, which is created by its first save. */
     internal fun openEditor(note: Note?) {
         editor = EditorViewModel(notes, scope, io, refreshes, note)
@@ -133,7 +161,13 @@ public class AppViewModel(
         val controls = sync ?: return
         backends?.close()
         backends =
-            BackendsViewModel(controls.manager, controls.scheduler, scope, hub = controls.hub)
+            BackendsViewModel(
+                controls.manager,
+                controls.scheduler,
+                scope,
+                hub = controls.hub,
+                foldersUnavailable = controls.foldersUnavailable,
+            )
     }
 
     /** Closes the backend screen. */
@@ -167,9 +201,12 @@ public class AppViewModel(
  * @property manager The backends.
  * @property scheduler Syncs with them, and at once when the user asks.
  * @property hub The hub on this PC, or null where the app cannot run one.
+ * @property foldersUnavailable Why this device cannot add a local folder as a backend, in plain
+ *   words, shown instead of the folder's form; or null where it can, as on the desktop.
  */
 public class SyncControls(
     public val manager: BackendManager,
     public val scheduler: SyncScheduler,
     public val hub: HubControls? = null,
+    public val foldersUnavailable: String? = null,
 )

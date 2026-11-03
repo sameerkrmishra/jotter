@@ -329,10 +329,12 @@ files, which are both read
    database transaction. What goes wrong with one segment stays with that segment
    ([ADR-0014](adr/0014-sync-failure-handling.md)).
 
-Sync runs on app start, after edits (debounced), and periodically: on Android
-via WorkManager (15 min minimum, network-constrained), on desktop via a
+Sync runs on app start, after edits (debounced), and periodically: on desktop via a
 coroutine timer (`app:sync`'s `SyncScheduler`: 5 s after edits stop, every 5
-minutes, and when the user asks). Each backend syncs independently, and a
+minutes, and when the user asks). Android uses the same scheduler while its process
+runs, and WorkManager (every 15 minutes while a backend exists, and once after the
+app leaves the screen, both network-constrained) asks it for a round and waits
+([ADR-0018](adr/0018-android-app.md)). Each backend syncs independently, and a
 backend that fails is skipped and retried with backoff (30 s, doubling up to
 30 minutes), except when the user asks. A local folder that cannot be reached is
 tried every 30 s instead, and a backend that is back syncs at once. The CLI syncs
@@ -399,7 +401,10 @@ records the codec, and a backend with another version's format file is left alon
   (SQLDelight), serialization DTOs in a `dto` package (plain data only) and
   thin platform entry points (Activity, `main()`) are excluded. Compose UI is covered with Compose UI tests. Kover cannot
   measure Kotlin/Native: native tests prove behaviour but do not count
-  towards the gate.
+  towards the gate. Nor device tests: the Android app's glue that needs an
+  Android runtime (Activities, Application, composition root, WorkManager job,
+  Keystore, VPN check) is excluded by name in `jotter.root` and covered by its
+  device tests; its own logic counts through host tests.
 - **Architecture decisions:** recorded as ADRs in `docs/adr/`. Planned:
   0001 local-first, 0002 SQLite/SQLDelight, 0003 revision DAG + diff3,
   0004 immutable segment sync, 0005 manual DI (all in M0); 0006
@@ -414,14 +419,17 @@ records the codec, and a backend with another version's format file is left alon
   0014 [sync failure handling](adr/0014-sync-failure-handling.md) (M3); 0015
   [the PC as hub](adr/0015-pc-hub-peer-protocol.md), 0016
   [where backend secrets live](adr/0016-where-secrets-live.md) and 0017
-  [the WebDAV backend](adr/0017-webdav-backend.md) (M4).
+  [the WebDAV backend](adr/0017-webdav-backend.md) (M4); 0018
+  [the Android app](adr/0018-android-app.md) (M5).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge. Beside `check`, a `webdav` job
   runs `backend/webdav` against real WebDAV servers in containers, and an
   `android-device` job runs the shared modules' tests
-  (`connectedAndroidDeviceTest`) on API 26 and API 36 emulators, on every pull
-  request.
+  (`connectedAndroidDeviceTest`) and the Android app's
+  (`:app:android:connectedDebugAndroidTest`) on API 26 and API 36 emulators, on
+  every pull request. The Android app's end-to-end test with a hub on the host
+  (`app/android/scripts/hub-e2e.sh`) runs by hand.
 - **Reproducible F-Droid builds:** no Google Play Services, no proprietary
   dependencies.
 

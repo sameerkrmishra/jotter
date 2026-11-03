@@ -43,12 +43,13 @@ write a new ADR and mark the old one as amended or superseded.
 | [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
 | [0010](0010-compose-ui-outside-linuxx64-rule.md) | Compose UI stays outside the linuxX64 rule | Accepted |
 | [0011](0011-touching-changes-and-merge-format.md) | Touching changes merge, and the merge rules are part of the sync format | Accepted, amended by 0013 |
-| [0012](0012-local-folder-publishing.md) | Publishing files in a local folder, and telling a store from a mount point | Proposed |
+| [0012](0012-local-folder-publishing.md) | Publishing files in a local folder, and telling a store from a mount point | Proposed, amended by 0018 |
 | [0013](0013-merge-base-and-covered-heads.md) | The merge base, covered heads and the canonical form of a merge | Proposed |
 | [0014](0014-sync-failure-handling.md) | Failures in the sync cycle: validity, content names, repairs, restored backups and limits | Proposed |
-| [0015](0015-pc-hub-peer-protocol.md) | The PC as hub: protocol, security, how it runs and where it stores | Proposed |
-| [0016](0016-where-secrets-live.md) | Where backend secrets live on Linux | Proposed |
+| [0015](0015-pc-hub-peer-protocol.md) | The PC as hub: protocol, security, how it runs and where it stores | Proposed, amended by 0018 |
+| [0016](0016-where-secrets-live.md) | Where backend secrets live on Linux | Proposed, amended by 0018 |
 | [0017](0017-webdav-backend.md) | The WebDAV backend: what it asks of a server, and what no client can enforce | Proposed |
+| [0018](0018-android-app.md) | The Android app: no local folders, Keystore secrets, WorkManager sync and the tailnet | Proposed |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.
