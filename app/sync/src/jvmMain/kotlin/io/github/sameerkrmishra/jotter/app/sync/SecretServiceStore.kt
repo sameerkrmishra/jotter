@@ -63,39 +63,17 @@ public class SecretServiceStore(
 
     override suspend fun delete(key: SecretKey) {
         val result = run(listOf("clear") + attributes(key), input = null)
-        val problem =
-            when {
-                result.exit == 0 -> null
-                result.isNothingFound -> stillThere(key)
-                else -> failure("delete", result)
-            }
-        if (problem != null) throw problem
-    }
-
-    /**
-     * After `clear` ended with 1 without a word: null if [key] is confirmed gone, else why it may
-     * still be there, so that the caller does not go on as if it were deleted (ADR-0016).
-     *
-     * Verified in libsecret's source (`tool/secret-tool.c`, `libsecret/secret-methods.c`), not
-     * against a real keyring, as none is available to the tests:
-     * - `clear` deletes only unlocked items and ends with 1, silently, when it deleted none: so
-     *   a locked item, or a dismissed unlock prompt, looks like no item at all.
-     * - `search --all` without `--unlock` passes no unlock flag to `secret_service_search`, which
-     *   then returns locked items as well as unlocked ones and never prompts. It prints each item
-     *   (its id and label on stdout, its attributes on stderr) and ends with 0, also when nothing
-     *   matches, which prints nothing; a failed search prints why and ends with 1.
-     *
-     * Assumed: that every provider (GNOME Keyring, KWallet, KeePassXC) lists locked items to a
-     * search that does not unlock, as the Secret Service specification says, and that older
-     * `secret-tool` versions behave the same. Its manual page says locked items are skipped
-     * without `--unlock`, which libsecret's code does not do. So only exit 0 with nothing on
-     * either stream counts as gone; anything else, listed items, an error or output that is not
-     * understood, may be a locked secret.
-     */
-    private suspend fun stillThere(key: SecretKey): SecretStoreException? {
-        val check = run(listOf("search", "--all") + attributes(key), input = null)
-        val gone = check.exit == 0 && check.output.isEmpty() && check.error.isBlank()
-        return if (gone) null else SecretStoreException(mayBeLocked(key))
+        // Only exit 0 means deleted (ADR-0016). `clear` deletes only unlocked items, and ends with
+        // 1 without a word when it deleted none: no such item, a locked one, or a dismissed unlock
+        // prompt. No other call tells these apart for every provider: libsecret's search lists
+        // locked items, but KeePassXC, its database locked, answers a search with no items and no
+        // error. So the caller hears that the item may be locked, or already gone, and the user
+        // decides, by unlocking and trying again or by removing the backend anyway.
+        when {
+            result.exit == 0 -> Unit
+            result.isNothingFound -> throw SecretStoreException(mayBeLocked(key))
+            else -> throw failure("delete", result)
+        }
     }
 
     private fun attributes(key: SecretKey) =
@@ -216,7 +194,8 @@ public class SecretServiceStore(
         /** What a delete that the keyring did not confirm says, naming the item by its label. */
         fun mayBeLocked(key: SecretKey) =
             "The keyring did not confirm that the item \"${label(key)}\" was deleted: the " +
-                "keyring may be locked. Unlock your keyring and try again."
+                "keyring may be locked, or the item already gone. Unlock your keyring and try " +
+                "again."
 
         fun label(key: SecretKey) = "Jotter: ${describe(key.kind)} of backend ${key.backendId}"
 
