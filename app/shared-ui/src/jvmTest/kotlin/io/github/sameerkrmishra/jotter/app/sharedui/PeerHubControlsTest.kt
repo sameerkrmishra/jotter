@@ -9,6 +9,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
@@ -68,7 +69,30 @@ class PeerHubControlsTest {
             assertEquals(listOf(pairing.device), first.devices())
             // The folder is this PC's own backend too.
             assertEquals(1, device.manager.list().size)
+            // Settings and paired devices are this user's alone, from the moment they exist.
+            for (name in listOf("hub.properties", "hub-devices.json")) {
+                val mode = Files.getPosixFilePermissions(folders.resolve("config/$name"))
+                assertEquals("rw-------", PosixFilePermissions.toString(mode), name)
+            }
+            assertEquals(
+                "rwx------",
+                PosixFilePermissions.toString(
+                    Files.getPosixFilePermissions(folders.resolve("config")),
+                ),
+            )
+            assertEquals(
+                setOf("hub.properties", "hub-devices.json"),
+                Files.list(folders.resolve("config")).use { s ->
+                    s.map { it.fileName.toString() }.toList().toSet()
+                },
+            )
             first.turnOff()
+            assertEquals(
+                "rw-------",
+                PosixFilePermissions.toString(
+                    Files.getPosixFilePermissions(folders.resolve("config/hub.properties")),
+                ),
+            )
             waitFor { first.state.value == HubState.Off }
 
             assertTrue(first.settings.on.not())

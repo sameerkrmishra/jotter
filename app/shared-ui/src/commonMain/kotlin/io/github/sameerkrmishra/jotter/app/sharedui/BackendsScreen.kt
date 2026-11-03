@@ -102,6 +102,24 @@ internal fun BackendsScreen(
             dismissButton = { TextButton(onClick = backends::cancelRemove) { Text("Cancel") } },
         )
     }
+    backends.removingAnyway?.let { stuck ->
+        AlertDialog(
+            onDismissRequest = backends::cancelRemoveAnyway,
+            title = { Text(REMOVE_ANYWAY_TITLE) },
+            text = {
+                Text(
+                    "Jotter cannot delete the password of ${stuck.backend.name} now: " +
+                        "${stuck.reason} You can remove the backend anyway. ${stuck.leftBehind}",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = backends::confirmRemoveAnyway) { Text("Remove anyway") }
+            },
+            dismissButton = {
+                TextButton(onClick = backends::cancelRemoveAnyway) { Text("Keep it") }
+            },
+        )
+    }
 }
 
 @Composable

@@ -11,6 +11,7 @@ import io.github.sameerkrmishra.jotter.app.sync.Outcome
 import io.github.sameerkrmishra.jotter.app.sync.PasswordChange
 import io.github.sameerkrmishra.jotter.app.sync.Secret
 import io.github.sameerkrmishra.jotter.app.sync.SecretPlace
+import io.github.sameerkrmishra.jotter.app.sync.SecretStoreException
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.app.sync.describe
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
@@ -152,6 +153,10 @@ internal class BackendsViewModel(
 
     /** The backend the user asked to remove, while they confirm. */
     var removing by mutableStateOf<Backend?>(null)
+        private set
+
+    /** A backend whose secret could not be deleted, while the user decides to remove it anyway. */
+    var removingAnyway by mutableStateOf<StuckRemoval?>(null)
         private set
 
     /** Whether adding or removing runs, so that it is not started twice. */
@@ -444,13 +449,43 @@ internal class BackendsViewModel(
     fun confirmRemove() {
         val backend = removing ?: return
         removing = null
+        remove(backend, keepSecrets = false)
+    }
+
+    /** The user wants [removingAnyway] removed although its secret cannot be deleted now. */
+    fun confirmRemoveAnyway() {
+        val stuck = removingAnyway ?: return
+        removingAnyway = null
+        remove(stuck.backend, keepSecrets = true)
+    }
+
+    /** The user keeps the backend whose secret could not be deleted. */
+    fun cancelRemoveAnyway() {
+        removingAnyway = null
+    }
+
+    private fun remove(
+        backend: Backend,
+        keepSecrets: Boolean,
+    ) {
         busy = true
         scope.launch {
             try {
                 reporting {
-                    manager.remove(backend.id)
-                    message =
-                        "Removed ${backend.name}. Its files stay in ${backend.config.location}."
+                    try {
+                        manager.remove(backend.id, keepSecrets)
+                        val left = manager.secretsLeftBehind(backend)?.takeIf { keepSecrets }
+                        message =
+                            "Removed ${backend.name}. Its files stay in " +
+                            "${backend.config.location}." + (left?.let { " $it" } ?: "")
+                    } catch (e: SecretStoreException) {
+                        removingAnyway =
+                            StuckRemoval(
+                                backend,
+                                e.message.orEmpty(),
+                                manager.secretsLeftBehind(backend).orEmpty(),
+                            )
+                    }
                 }
             } finally {
                 busy = false
@@ -505,6 +540,21 @@ internal fun BackendsViewModel.statusOf(backend: Backend): BackendLines {
                 (reach as? Reachability.Unreachable)?.reason == UnreachableReason.UNAUTHORIZED,
     )
 }
+
+/**
+ * A removal that stopped because the backend's secret could not be deleted.
+ *
+ * @property backend The backend, still there.
+ * @property reason Why the secret could not be deleted.
+ * @property leftBehind Where the secret stays if the user removes the backend anyway.
+ */
+internal data class StuckRemoval(
+    val backend: Backend,
+    val reason: String,
+    val leftBehind: String,
+)
+
+internal const val REMOVE_ANYWAY_TITLE = "Remove it without deleting its password?"
 
 /**
  * What the screen says about one backend.

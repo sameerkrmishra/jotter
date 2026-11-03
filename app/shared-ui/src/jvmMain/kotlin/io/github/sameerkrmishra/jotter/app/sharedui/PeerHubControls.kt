@@ -20,8 +20,18 @@ import okio.Path.Companion.toOkioPath
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.FileAttribute
+import java.nio.file.attribute.PosixFilePermission
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.Properties
+import java.util.UUID
 import kotlin.coroutines.CoroutineContext
+
+private val PRIVATE_FILE: FileAttribute<Set<PosixFilePermission>> =
+    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))
+private val PRIVATE_DIRECTORY: FileAttribute<Set<PosixFilePermission>> =
+    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))
 
 /**
  * The desktop app's hub, a [PeerHub] of the `server` module. Its settings, which hold no secret,
@@ -180,8 +190,23 @@ public class PeerHubControls(
             properties["host"] = next.host
             properties["port"] = next.port.toString()
             properties["on"] = next.on.toString()
-            Files.createDirectories(settingsFile.parent)
-            Files.newOutputStream(settingsFile).use { properties.store(it, "Jotter's PC hub") }
+            val directory = settingsFile.toAbsolutePath().parent
+            if (!Files.isDirectory(directory)) Files.createDirectories(directory, PRIVATE_DIRECTORY)
+            // Created 0600 by the call that creates it, then renamed over the old one: never
+            // readable by others, and never half written.
+            val temporary = directory.resolve("${settingsFile.fileName}.${UUID.randomUUID()}.tmp")
+            try {
+                Files.createFile(temporary, PRIVATE_FILE)
+                Files.newOutputStream(temporary).use { properties.store(it, "Jotter's PC hub") }
+                Files.move(
+                    temporary,
+                    settingsFile,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } finally {
+                Files.deleteIfExists(temporary)
+            }
         }
     }
 }

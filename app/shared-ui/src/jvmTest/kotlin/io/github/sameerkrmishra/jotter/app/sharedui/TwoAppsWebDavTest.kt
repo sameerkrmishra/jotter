@@ -150,6 +150,50 @@ class TwoAppsWebDavTest {
     }
 
     @Test
+    fun withoutAKeyringItCanBeRemovedAnyway() {
+        val secrets = TestSecrets()
+        val noDelete =
+            object : SecretStore by secrets.keyring {
+                override suspend fun delete(key: SecretKey): Unit =
+                    throw SecretStoreUnavailableException("Jotter cannot reach a keyring.")
+            }
+        val stores = SecretStores(noDelete, secrets.file, "/config/jotter/secrets.json")
+        SyncedDevice("here", TestSecrets(secrets.keyring, secrets.file, stores)).use { device ->
+            screen(device) {
+                addServer()
+                clickInDialog("Set up and add")
+                awaitText("It syncs now.")
+                onNodeWithText("Remove").performClick()
+                clickInDialog("Remove")
+                awaitText(REMOVE_ANYWAY_TITLE)
+                awaitText("Jotter cannot reach a keyring. You can remove the backend anyway.")
+                awaitText("secret-tool clear application jotter backend")
+                clickInDialog("Keep it")
+                assertEquals(
+                    1,
+                    device.store.backends
+                        .list()
+                        .size,
+                )
+
+                onNodeWithText("Remove").performClick()
+                clickInDialog("Remove")
+                awaitText(REMOVE_ANYWAY_TITLE)
+                clickInDialog("Remove anyway")
+                awaitText("Removed 127.0.0.1. Its files stay in")
+                awaitText("may still be in your keyring")
+                assertEquals(
+                    0,
+                    device.store.backends
+                        .list()
+                        .size,
+                )
+                assertEquals(1, secrets.keyring.secrets.size)
+            }
+        }
+    }
+
+    @Test
     fun plainHttpIsRefusedWithTheReason() =
         SyncedDevice("here").use { device ->
             screen(device) {
