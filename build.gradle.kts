@@ -4,6 +4,7 @@ plugins {
 
 dependencies {
     // Every module whose coverage counts towards the gate.
+    kover(projects.app.android)
     kover(projects.app.cli)
     kover(projects.app.desktop)
     kover(projects.app.sharedUi)

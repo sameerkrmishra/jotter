@@ -44,6 +44,7 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 rootProject.name = "jotter"
 
+include(":app:android")
 include(":app:cli")
 include(":app:desktop")
 include(":app:shared-ui")
