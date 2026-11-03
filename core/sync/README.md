@@ -43,6 +43,9 @@ The merge rules are in
 [ADR-0013](../../docs/adr/0013-merge-base-and-covered-heads.md), failure handling in
 [ADR-0014](../../docs/adr/0014-sync-failure-handling.md).
 
+- **One format file per format and codec**, `jotter/formats/1-json+gzip.json`, so that
+  its path has one content like every other file. A backend that holds another
+  version's file is `Incompatible` ([ADR-0017](../../docs/adr/0017-webdav-backend.md)).
 - **A note's state is a function of its set of revisions.** `foldHeads`,
   `openConflicts`, `liveHeads` and `shownHead` read nothing else: no arrival order, no
   device, no clock. That is the whole argument for convergence: devices with the same

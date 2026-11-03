@@ -296,7 +296,8 @@ implementation. A new backend is "done" when it passes.
 
 ```
 jotter/
-├── format.json                        # protocol version
+├── formats/
+│   └── 1-json+gzip.json               # protocol version and codec
 └── devices/
     ├── <deviceId-A>/
     │   ├── device.json                # name, platform, created
@@ -349,8 +350,9 @@ converge on the next successful sync.
 
 Segments pass through a `SegmentCodec` (v1: JSON + gzip). End-to-end encryption
 later becomes a codec (for example XChaCha20-Poly1305 with a passphrase-derived
-key) without changing backends or the merge logic. `format.json` records the
-codec. Documented as ADR-0007 in M6.
+key) without changing backends or the merge logic. The name of the format file
+records the codec, and a backend with another version's format file is left alone
+([ADR-0017](adr/0017-webdav-backend.md)). Documented as ADR-0007 in M6.
 
 ---
 

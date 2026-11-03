@@ -1,6 +1,6 @@
 # 0004. Immutable, per-device change segments on dumb blob stores
 
-- **Status:** Accepted, amended by [0014](0014-sync-failure-handling.md)
+- **Status:** Accepted, amended by [0014](0014-sync-failure-handling.md), [0017](0017-webdav-backend.md)
 - **Date:** 2026-10-21
 
 ## Context

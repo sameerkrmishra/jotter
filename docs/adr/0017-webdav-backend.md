@@ -41,8 +41,20 @@ there, as `BlobStore.writeNew`'s KDoc asks, and the caller compares. Exactly one
 winner among racing writers holds where the server makes `If-None-Match` atomic,
 and is not promised elsewhere. Sync does not need it, because since ADR-0014 a path
 has one possible content: two writers who both win wrote the same bytes, and a file
-that differs from its name's hash is reported, never applied. `format.json` is the
-same for all devices of one format, and `device.json` is only informative.
+that differs from its name's hash is reported, never applied. `device.json` is only
+informative.
+
+**The format file is named after its content (amends ADR-0004).** It was
+`jotter/format.json`, whose content differs between versions: exactly what it exists
+to catch, and on Apache two versions could both write it, the later replacing the
+earlier. Now each format and codec has its own file,
+`jotter/formats/<format>-<codec>.json`, holding `{"format":…,"codec":…}`. A device
+lists `jotter/formats`. If another version's file is there, the backend is
+`Incompatible`. If none is there, it writes its own and lists again, so of two
+versions that set a backend up at once, at least the later one finds the other. If
+its own is there, it reads it and treats any other content as damage. The earlier one
+may push one cycle of segments first, which the later version's readers leave unread
+as a future or past format (ADR-0014). Nothing had shipped, so nothing migrates.
 
 **`initialize()` refuses a server that ignores `If-None-Match`.** It writes a test
 file twice and needs 412 the second time. Such a server would let any retry
@@ -112,7 +124,7 @@ on every target, and the CIO engine against misbehaving TCP servers.
   A crashed writer would also block every write until the lock expired.
 - **A `MKCOL` claim per path, then the `PUT`.** Probably atomic on Apache, whose
   `MKCOL` is a `mkdir` (not measured under a race), but rclone answers `201` for an existing collection, and a crash between claim and
-  `PUT` would block the path, `format.json` included, for good. Breaking stale
+  `PUT` would block the path, a format file included, for good. Breaking stale
   claims by age is a race of its own.
 - **Upload to a temporary name, then `MOVE` with `Overwrite: F`.** Apache's `MOVE`
   checks, then renames, so it races like its `PUT`; and a crash leaves temporary

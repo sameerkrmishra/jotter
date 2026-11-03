@@ -29,10 +29,10 @@ import okio.IOException
 import okio.buffer
 import okio.use
 
-/** The format this code reads and writes, in `format.json` and in every segment. */
+/** The format this code reads and writes, in its format file and in every segment. */
 internal const val SYNC_FORMAT = 1
 
-/** The codec this code uses, in `format.json` (PLAN.md §6.6). */
+/** The codec this code uses, in the name and content of its format file (PLAN.md §6.6). */
 internal const val SYNC_CODEC = "json+gzip"
 
 /**
