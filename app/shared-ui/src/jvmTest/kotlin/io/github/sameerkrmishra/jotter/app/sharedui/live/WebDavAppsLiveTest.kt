@@ -23,7 +23,7 @@ class WebDavAppsLiveTest {
 
     @Test
     fun twoAppsSyncThroughLighttpd() {
-        // A collection of its own, as the store must exist and the other live tests share the server.
+        // A collection of its own: the store must exist, and other live tests share the server.
         val url = "${server.trimEnd('/')}/apps-${Random.nextLong().toULong()}/"
         val request =
             HttpRequest
