@@ -44,6 +44,9 @@ class SyncSchedulerTest {
 
         suspend fun syncAll(due: (Backend) -> Boolean): List<BackendSync> {
             calls++
+            // A scheduler that spins on one virtual instant never lets runTest's timeout fire. An
+            // Error gets past its catch of Exception and ends it, so such a test fails at once.
+            if (calls > MAX_CALLS) throw AssertionError("scheduler spins")
             check(!throwAlways) { "database is locked" }
             blockNext?.let {
                 blockNext = null
@@ -339,6 +342,9 @@ class SyncSchedulerTest {
 
     private companion object {
         const val MILLIS_PER_SECOND = 1_000L
+
+        /** Far more rounds than any test makes, unless the scheduler spins. */
+        const val MAX_CALLS = 1_000
     }
 
     private fun backend(id: String) =
