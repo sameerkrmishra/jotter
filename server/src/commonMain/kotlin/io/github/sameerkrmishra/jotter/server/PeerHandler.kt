@@ -115,14 +115,23 @@ internal class PeerHandler(
         return Reply(HTTP_OK, json.encodeToString(entries).encodeToByteArray(), JSON)
     }
 
-    private suspend fun read(path: String): Reply =
-        transfers.withPermit {
+    /**
+     * Reads the file under a transfer permit, which the answer keeps until it is sent, so that a
+     * slow reader still counts towards the files in memory.
+     */
+    private suspend fun read(path: String): Reply {
+        transfers.acquire()
+        var answered = false
+        try {
             val bytes = store.read(path)
             if (bytes.size > PeerProtocol.MAX_FILE_BYTES) {
                 throw refusal(PeerError.FAILED, "\"$path\" is larger than a file may be")
             }
-            Reply(HTTP_OK, bytes, BYTES)
+            return Reply(HTTP_OK, bytes, BYTES, transfers::release).also { answered = true }
+        } finally {
+            if (!answered) transfers.release()
         }
+    }
 
     private suspend fun write(
         path: String,
@@ -144,7 +153,8 @@ internal class PeerHandler(
     /** A request the hub answers with [reply] instead of serving it. */
     private class Refusal(
         val reply: Reply,
-    ) : Exception(reply.status.toString())
+        cause: Throwable?,
+    ) : Exception(reply.status.toString(), cause)
 
     private companion object {
         val json = Json
@@ -164,7 +174,8 @@ internal class PeerHandler(
         fun refusal(
             code: PeerError,
             detail: String,
-        ) = Refusal(error(code, detail))
+            cause: Throwable? = null,
+        ) = Refusal(error(code, detail), cause)
 
         /** The query's parameters. Every name must appear once. */
         fun parametersOf(query: String): Parameters {
@@ -172,7 +183,11 @@ internal class PeerHandler(
                 try {
                     parseQueryString(query)
                 } catch (e: URLDecodeException) {
-                    throw refusal(PeerError.BAD_REQUEST, "The query does not parse: ${e.message}")
+                    throw refusal(
+                        PeerError.BAD_REQUEST,
+                        "The query does not parse: ${e.message}",
+                        e,
+                    )
                 }
             if (parameters.entries().any { it.value.size != 1 }) {
                 throw refusal(PeerError.BAD_REQUEST, "A parameter repeats")

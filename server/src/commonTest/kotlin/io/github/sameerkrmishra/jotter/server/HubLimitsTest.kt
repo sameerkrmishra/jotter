@@ -7,6 +7,7 @@ import io.github.sameerkrmishra.jotter.backend.api.BlobAlreadyExistsException
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreFailureException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
+import io.github.sameerkrmishra.jotter.backend.api.contract.InMemoryBlobStore
 import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
 import io.ktor.network.sockets.openReadChannel
 import io.ktor.network.sockets.openWriteChannel
@@ -16,6 +17,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -206,6 +208,38 @@ class HubLimitsTest {
                 val started = TimeSource.Monotonic.markNow()
                 assertContentEquals(byteArrayOf(1), client.read("a"))
                 assertTrue(started.elapsedNow() >= limits.idleTimeout - 200.milliseconds)
+            }
+        }
+
+    @Test
+    fun aReadKeepsItsTransferUntilTheAnswerIsSent(): TestResult =
+        test {
+            coroutineScope {
+                // The handler alone: a slow reader cannot be made reliably, as sockets buffer much.
+                val transfers = Semaphore(1)
+                val store = InMemoryBlobStore().apply { writeNew("a", byteArrayOf(1)) }
+                val handler = PeerHandler(store, { true }, transfers)
+                val head = RequestHead("GET", "${PeerProtocol.BLOB}?path=a", null, null, false)
+                val first = handler.handle(head) { error("no body") }
+                assertEquals(0, transfers.availablePermits)
+                val second = async { handler.handle(head) { error("no body") } }
+                delay(100.milliseconds)
+                assertTrue(second.isActive, "the second read waits while the first answer is held")
+                first.release()
+                assertContentEquals(byteArrayOf(1), second.await().body)
+                second.await().release()
+                assertEquals(1, transfers.availablePermits)
+                // A failed read gives its transfer back at once.
+                assertEquals(
+                    404,
+                    handler
+                        .handle(
+                            head.copy(target = "${PeerProtocol.BLOB}?path=b"),
+                        ) {
+                            error("no")
+                        }.status,
+                )
+                assertEquals(1, transfers.availablePermits)
             }
         }
 

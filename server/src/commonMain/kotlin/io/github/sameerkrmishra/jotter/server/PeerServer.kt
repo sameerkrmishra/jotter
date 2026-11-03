@@ -109,7 +109,11 @@ internal class PeerServer(
                         bodyRead = true
                         readBody(input, length, limits.idleTimeout)
                     }
-                writeReply(output, reply)
+                try {
+                    writeReply(output, reply)
+                } finally {
+                    reply.release()
+                }
                 if (!bodyRead) drain(input)
             }
         } catch (_: TimeoutCancellationException) {

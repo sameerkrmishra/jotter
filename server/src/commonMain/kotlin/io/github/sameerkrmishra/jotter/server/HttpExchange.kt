@@ -134,6 +134,8 @@ internal class Reply(
     val status: Int,
     val body: ByteArray,
     val contentType: String,
+    /** Called once the answer is sent or has failed: frees what holding [body] took. */
+    val release: () -> Unit = {},
 )
 
 /** Writes [reply] to [output], with the protocol header that marks the hub. */
