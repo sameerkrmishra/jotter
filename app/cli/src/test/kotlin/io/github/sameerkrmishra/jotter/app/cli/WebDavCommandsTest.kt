@@ -221,12 +221,33 @@ class WebDavCommandsTest {
             )
         assertEquals(
             "jotter: cannot delete the password of $id, so nothing was removed: Jotter cannot " +
-                "reach a keyring: no bus.\n",
+                "reach a keyring: no bus. To remove it anyway and delete the password later " +
+                "yourself, run: jotter backends remove --keep-secret $id\n",
             stuck.stderr,
         )
         assertTrue(ok(here, "backends").startsWith(id))
         assertTrue(ok(here, "backends", "remove", id).startsWith("Removed 127.0.0.1"))
         assertTrue(secretsHere.keyring.secrets.isEmpty())
+
+        // With no keyring at all, --keep-secret removes it and says where the password stays.
+        val other = add(here, "--name", "Other")
+        val kept =
+            jotter(
+                here,
+                "backends",
+                "remove",
+                "--keep-secret",
+                other,
+                secrets = SecretStores(noDelete, secretsHere.file),
+            )
+        assertEquals(0, kept.statusCode, kept.stderr)
+        assertTrue(kept.stdout.startsWith("Removed Other ($other)."), kept.stdout)
+        assertTrue(
+            kept.stdout.contains("secret-tool clear application jotter backend $other"),
+            kept.stdout,
+        )
+        assertEquals("", ok(here, "backends"))
+        assertEquals(1, secretsHere.keyring.secrets.size)
     }
 
     @Test

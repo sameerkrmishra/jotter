@@ -293,31 +293,39 @@ private class RemoveBackendCommand(
     private val setup: SyncSetup,
 ) : CoreCliktCommand(name = "remove") {
     private val id by argument(name = "ID", help = "A backend id, or a unique start of one.")
+    private val keepSecret by option(
+        "--keep-secret",
+        help =
+            "Remove it without deleting its password or token, as when no keyring answers. " +
+                "It says where that stays.",
+    ).flag()
 
     override fun help(context: Context): String =
         "Stop syncing with a backend and forget it here, with its password. Its files stay " +
             "where they are."
 
     override fun run() {
-        val removed =
+        val (removed, leftBehind) =
             setup.withBackends { manager ->
                 val backend = manager.list().resolve(id)
                 try {
-                    manager.remove(backend.id)
+                    manager.remove(backend.id, keepSecrets = keepSecret)
                 } catch (e: SecretStoreException) {
                     throw CliktError(
                         "jotter: cannot delete the password of ${backend.id}, so nothing was " +
-                            "removed: ${e.message}",
+                            "removed: ${e.message} To remove it anyway and delete the password " +
+                            "later yourself, run: jotter backends remove --keep-secret ${backend.id}",
                         e,
                     )
                 }
-                backend
+                backend to manager.secretsLeftBehind(backend)?.takeIf { keepSecret }
             }
         echo(
             "Removed ${oneLine(removed.name)} (${removed.id}). Its files stay in " +
                 "${oneLine(removed.config.location)}: other devices can go on syncing there, and " +
                 "Jotter never deletes them. Adding it again copies all your notes there again.",
         )
+        leftBehind?.let { echo(it) }
     }
 }
 
