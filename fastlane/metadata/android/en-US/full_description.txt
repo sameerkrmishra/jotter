@@ -20,7 +20,8 @@ Jotter is a notes app that keeps your notes on your phone and lets you choose wh
 <b>Privacy</b>
 <ul>
 <li>Passwords and tokens are encrypted with a key kept in the Android Keystore, and are never in a backup</li>
-<li>Android's backup copies the notes only where the backup is end-to-end encrypted</li>
+<li>Android's backups and device transfers copy the notes, never passwords or tokens</li>
+<li>A cloud backup holds the notes only if it is end-to-end encrypted; on Android 8, nothing is backed up</li>
 <li>Jotter contacts no server except the ones you add</li>
 </ul>
 
