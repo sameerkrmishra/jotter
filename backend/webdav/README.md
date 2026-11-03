@@ -74,8 +74,12 @@ again.
   broken connection, and after 429, 502, 503 or 504, waiting 0.5 s and then 1 s,
   or the `Retry-After` the server asks for, up to 30 s. A longer wait fails at
   once. After that a connection failure or 503 is `BackendUnavailableException`.
-- **Timeouts.** 20 s to connect, 60 s without a byte, 10 minutes for a whole
-  request (a 32 MiB file at 1 Mbit/s takes 4.5 minutes).
+- **Timeouts.** 20 s to connect, 60 s without a byte sent or received, 10 minutes
+  for a whole request (a 32 MiB file at 1 Mbit/s takes 4.5 minutes). CIO ignores
+  its own socket timeout on linuxX64, where a stalled server waited out the whole
+  request timeout, so `IdleWatch` enforces the 60 s on every target: the body is
+  written in chunks and the answer read in chunks, and a watchdog on real time
+  cancels the request when neither moves.
 - **Redirects** are followed, at most 5, keeping the method and body, but only
   within the store's scheme, host and port, so the password never goes elsewhere.
 - **401** is `BackendUnavailableException` with `UNAUTHORIZED` from every method:

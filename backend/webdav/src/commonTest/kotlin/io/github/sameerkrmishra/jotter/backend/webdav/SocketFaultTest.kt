@@ -21,7 +21,8 @@ class SocketFaultTest {
         DavSettings(
             connectTimeout = 2.seconds,
             socketTimeout = 500.milliseconds,
-            requestTimeout = 2.seconds,
+            // Far above the socket timeout, so that only the socket timeout can end a stall.
+            requestTimeout = 5.minutes,
             attempts = 2,
             retryDelay = 10.milliseconds,
         )
@@ -78,6 +79,31 @@ class SocketFaultTest {
         }
 
     @Test
+    fun aServerThatStopsInTheMiddleOfAnAnswerTimesOut() =
+        runTest(timeout = 1.minutes) {
+            val head = "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nstart"
+            withServer(ConnectionPlan.Respond(head, hangAfter = 1.minutes)) { store, server ->
+                val start = TimeSource.Monotonic.markNow()
+                assertFailsWith<BackendUnavailableException> { store.read("file") }
+                assertTrue(start.elapsedNow() < 20.seconds, "took ${start.elapsedNow()}")
+                assertEquals(2, server.connectionCount)
+            }
+        }
+
+    @Test
+    fun aServerThatStopsTakingAnUploadTimesOut() =
+        runTest(timeout = 1.minutes) {
+            withServer(ConnectionPlan.Stall(1.minutes)) { store, _ ->
+                val start = TimeSource.Monotonic.markNow()
+                // Larger than the socket buffers, so that the upload itself stops.
+                assertFailsWith<BackendUnavailableException> {
+                    store.writeNew("big", ByteArray(UPLOAD))
+                }
+                assertTrue(start.elapsedNow() < 20.seconds, "took ${start.elapsedNow()}")
+            }
+        }
+
+    @Test
     fun anAnswerCutShortIsAFailedConnection() =
         runTest {
             withServer(
@@ -112,4 +138,8 @@ class SocketFaultTest {
                 )
             }
         }
+
+    private companion object {
+        const val UPLOAD = 30 * 1024 * 1024
+    }
 }

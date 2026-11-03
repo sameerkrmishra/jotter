@@ -158,7 +158,7 @@ class LiveFaultTest {
             val settings =
                 DavSettings(
                     socketTimeout = 1.seconds,
-                    requestTimeout = 3.seconds,
+                    requestTimeout = 5.minutes,
                     attempts = 2,
                     retryDelay = 10.milliseconds,
                 )

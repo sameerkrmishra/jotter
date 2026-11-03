@@ -18,8 +18,8 @@ internal const val MAX_LISTING_BYTES: Long = 32L * 1024 * 1024
  * How the store talks to its server. The defaults are for real use; tests shorten them.
  *
  * @property connectTimeout How long to wait for a connection.
- * @property socketTimeout How long to wait for the next bytes once connected. This is what stops
- *   a server that hangs.
+ * @property socketTimeout How long a request may send and receive nothing. This is what stops
+ *   a server that hangs, on every target: [IdleWatch] enforces it, as CIO ignores it on linuxX64.
  * @property requestTimeout How long one request may take in all, so that a server that sends a
  *   byte now and then cannot hold a sync for ever. A 32 MiB file at 1 Mbit/s takes 4.5 minutes.
  * @property attempts How often a request is sent before its failure counts: the first time and

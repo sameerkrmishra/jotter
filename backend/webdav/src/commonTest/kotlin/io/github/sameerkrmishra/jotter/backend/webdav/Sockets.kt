@@ -40,9 +40,10 @@ internal sealed interface ConnectionPlan {
         val bytes: Long,
     ) : ConnectionPlan
 
-    /** Reads the request head, then sends [raw] as the whole answer and closes. */
+    /** Reads the request head, then sends [raw] and closes, after waiting [hangAfter]. */
     data class Respond(
         val raw: String,
+        val hangAfter: Duration = Duration.ZERO,
     ) : ConnectionPlan
 
     /** Waits [delay] before doing [then]. */
@@ -112,6 +113,8 @@ internal class FaultProxy private constructor(
                     val line = input.readLine()
                 } while (!line.isNullOrEmpty())
                 output.writeFully(plan.raw.encodeToByteArray())
+                output.flush()
+                delay(plan.hangAfter)
                 output.flushAndClose()
             }
             is ConnectionPlan.DropRequestAfter -> {

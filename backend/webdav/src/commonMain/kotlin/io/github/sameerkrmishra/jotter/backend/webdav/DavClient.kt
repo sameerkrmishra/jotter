@@ -12,7 +12,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.content.ByteArrayContent
 import io.ktor.utils.io.readAvailable
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -182,48 +181,57 @@ internal class DavClient(
     private suspend fun once(
         request: Request,
         url: String,
-    ): Pair<DavResponse, String?> =
-        try {
-            client
-                .prepareRequest(url) {
-                    method = request.method
-                    header(HttpHeaders.Authorization, authorization)
-                    request.headers.forEach { (name, value) -> header(name, value) }
-                    request.body?.let { setBody(it) }
-                }.execute { response ->
-                    val status = response.status.value
-                    val body =
-                        if (request.limit != null && Status.isSuccess(status)) {
-                            readLimited(response, request.limit, url)
-                        } else {
-                            ByteArray(0)
-                        }
-                    val retryAfter =
-                        response.headers[HttpHeaders.RetryAfter]
-                            ?.trim()
-                            ?.toLongOrNull()
-                            ?.seconds
-                    DavResponse(status, url, body, retryAfter) to
-                        response.headers[HttpHeaders.Location]
-                }
+    ): Pair<DavResponse, String?> {
+        val watch = IdleWatch(settings.socketTimeout)
+        return try {
+            watch.run { exchange(request, url, watch) }
         } catch (e: DavProtocolException) {
             throw e
-        } catch (e: CancellationException) {
-            // A timeout inside the client cancels; a cancelled caller must stay cancelled.
-            currentCoroutineContext().ensureActive()
-            throw DavTransportException(describe(request.method, url, e), e)
         } catch (
             // Engines throw platform types for a refused connection, a reset or a TLS error.
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
+            // A timeout cancels the request; a cancelled caller must stay cancelled.
+            currentCoroutineContext().ensureActive()
             throw DavTransportException(describe(request.method, url, e), e)
         }
+    }
+
+    private suspend fun exchange(
+        request: Request,
+        url: String,
+        watch: IdleWatch,
+    ): Pair<DavResponse, String?> =
+        client
+            .prepareRequest(url) {
+                method = request.method
+                header(HttpHeaders.Authorization, authorization)
+                request.headers.forEach { (name, value) -> header(name, value) }
+                request.body?.let { setBody(watch.body(it.bytes(), it.contentType)) }
+            }.execute { response ->
+                watch.touch()
+                val status = response.status.value
+                val body =
+                    if (request.limit != null && Status.isSuccess(status)) {
+                        readLimited(response, request.limit, url, watch)
+                    } else {
+                        ByteArray(0)
+                    }
+                val retryAfter =
+                    response.headers[HttpHeaders.RetryAfter]
+                        ?.trim()
+                        ?.toLongOrNull()
+                        ?.seconds
+                DavResponse(status, url, body, retryAfter) to
+                    response.headers[HttpHeaders.Location]
+            }
 
     /** Reads the body into memory, never holding more than [limit] bytes and one chunk. */
     private suspend fun readLimited(
         response: HttpResponse,
         limit: Long,
         url: String,
+        watch: IdleWatch,
     ): ByteArray {
         val declared = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
         requireWithin(declared ?: 0, limit, url)
@@ -233,6 +241,7 @@ internal class DavClient(
         var size = 0
         while (true) {
             val read = channel.readAvailable(chunk)
+            watch.touch()
             if (read < 0) break
             requireWithin(size.toLong() + read, limit, url)
             if (size + read > buffer.size) {

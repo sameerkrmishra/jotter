@@ -81,8 +81,9 @@ member, a duplicate, a collection that disappears mid-walk or an answer over 32 
 every request; app passwords are recommended. `https` only, except `http` to a
 loopback address. Same-origin redirects only, at most 5, keeping method and body.
 Three attempts for a failed connection or 429/502/503/504, with backoff or the
-server's `Retry-After` up to 30 s. Timeouts of 20 s to connect, 60 s between bytes
-and 10 minutes per request. Bodies are read in chunks up to 32 MiB, and a
+server's `Retry-After` up to 30 s. Timeouts of 20 s to connect, 60 s without a byte
+either way, and 10 minutes per request. The 60 s is enforced by the client itself,
+as CIO ignores its socket timeout on linuxX64. Bodies are read in chunks up to 32 MiB, and a
 `Content-Length` that is not met is a failed connection.
 
 **Tests against real servers run in a CI job of their own,** `webdav`, through
