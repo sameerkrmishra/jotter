@@ -1,0 +1,1 @@
+Local-first Markdown notes that sync through WebDAV or your own PC

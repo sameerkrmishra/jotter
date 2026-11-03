@@ -1,0 +1,6 @@
+First release.
+
+* Markdown notes with tags, pinning, archive, trash and full-text search
+* Share to Jotter saves shared text as a note
+* Sync through WebDAV or with the Jotter desktop app over Tailscale, in the background
+* Conflicting edits are merged or shown side by side for you to choose
