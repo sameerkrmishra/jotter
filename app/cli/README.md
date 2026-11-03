@@ -195,7 +195,7 @@ the same file: steps 2 to 4 are `linuxDatabasePath` in `core:storage`.
 - **Sync.** `SyncCommands.kt` builds an `app:sync` `BackendManager` for the one
   command that needs it, with `NoSecretStore`, as folders need no secrets
   ([ADR-0015](../../docs/adr/0015-where-secrets-live.md)), and runs it on the
-  command's own thread with `runBlocking`. `jotter add` loads none of it.
+  command's own thread with `runBlocking`. `jotter add` runs none of it.
 - **`clikt-core`, not `clikt`.** The usual `CliktCommand` prints through the Mordant
   terminal library, which expands tabs and so would break the columns above, and
   brings JNA onto the classpath. `CoreCliktCommand` prints plain text. But by
@@ -286,7 +286,7 @@ its last row is 155 to 162 ms:
 Measured again on 2026-11-03 after M4 added `jotter sync` and `jotter backends`, with
 the same method and machine, under 0.25 of 12 cores busy: **138 and 151 ms on JDK 21**
 (Temurin 21.0.12.1) and 154, 151 and 153 ms on JDK 27 (OpenJDK 27.0.1), in rounds of 10.
-`jotter add` loads none of the sync code.
+`jotter add` builds the new commands but runs none of the sync code.
 
 The JVM is therefore fast enough, and ADR-0006's native CLI is not needed for now.
 Under load the numbers are far worse: one run with sibling builds on the machine
