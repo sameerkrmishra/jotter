@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.sync
 
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
+import io.github.sameerkrmishra.jotter.backend.api.BackendUnavailableException
 import io.github.sameerkrmishra.jotter.backend.api.BlobInfo
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreFailureException
@@ -458,11 +459,40 @@ class BackendManagerTest {
         }
 
     @Test
+    fun aRefusedPasswordAsksForANewOneBeforeOrDuringASync() =
+        test {
+            val refused =
+                BackendUnavailableException(
+                    Reachability.Unreachable(UnreachableReason.UNAUTHORIZED, "401"),
+                )
+            val atPing =
+                object : BlobStore by InMemoryBlobStore() {
+                    override suspend fun ping() = refused.reachability
+                }
+            val midway =
+                object : BlobStore by InMemoryBlobStore() {
+                    override suspend fun list(prefix: String) = throw refused
+                }
+            val factory = NamedStores(mapOf("ping" to atPing, "midway" to midway))
+            Device(this, "a", factory = factory).use { device ->
+                device.store.backends.add(record("ping"))
+                device.store.backends.add(record("midway"))
+                val syncs = device.manager.syncAll()
+                syncs.forEach { sync ->
+                    assertEquals(Outcome.UNAUTHORIZED, sync.attempt.outcome)
+                    assertTrue(sync.attempt.detail.startsWith(WRONG_PASSWORD), sync.attempt.detail)
+                }
+                val status = device.manager.status().first { it.backend.name == "ping" }
+                assertEquals(WRONG_PASSWORD, status.reachabilityText)
+            }
+        }
+
+    @Test
     fun aBackendInANewerFormatIsIncompatible() =
         test {
             val blobs = InMemoryBlobStore()
             blobs.writeNew(
-                "jotter/format.json",
+                "jotter/formats/99-json+gzip.json",
                 """{"format":99,"codec":"json+gzip"}""".encodeToByteArray(),
             )
             Device(this, "a", factory = NamedStores(mapOf("mem" to blobs))).use { device ->

@@ -194,6 +194,24 @@ class SyncSchedulerTest {
             )
         }
 
+    @Test
+    fun aRefusedPasswordStopsQuickRetriesButNotSyncNow() =
+        runTest {
+            val backends = Backends(listOf(usb, dav))
+            backends.failing["dav"] = Outcome.UNAUTHORIZED
+            val (scheduler, _) = start(backends)
+            testScheduler.advanceTimeBy(100.seconds)
+            // No 30 s retry: only the longest wait, as only a new password helps.
+            assertEquals(listOf(0L to listOf("usb", "dav")), backends.times)
+            testScheduler.advanceTimeBy(30.seconds)
+            assertEquals(120L to listOf("dav"), backends.times.last())
+            // The user entered a new password and asks: it syncs at once.
+            backends.failing.remove("dav")
+            scheduler.syncNow()
+            testScheduler.runCurrent()
+            assertEquals(130L to listOf("usb", "dav"), backends.times.last())
+        }
+
     // Before the fix these two spun on virtual time and hung the test run.
     @Test
     fun aFailedBackendThatIsRemovedIsNotRetried() =

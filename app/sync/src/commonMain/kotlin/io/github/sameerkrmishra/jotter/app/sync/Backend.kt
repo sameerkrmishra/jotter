@@ -53,6 +53,12 @@ public enum class Outcome {
     /** The backend could not be reached, so nothing was read or written. */
     UNREACHABLE,
 
+    /**
+     * The server refused the user name or password, before or during the sync. Retrying cannot
+     * help until the user enters a new password, so it is retried only rarely.
+     */
+    UNAUTHORIZED,
+
     /** The backend failed part way. What was done is kept. */
     INTERRUPTED,
 

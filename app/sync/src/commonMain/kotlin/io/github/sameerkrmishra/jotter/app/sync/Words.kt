@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
+import io.github.sameerkrmishra.jotter.backend.api.BackendUnavailableException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.core.sync.SegmentProblem
@@ -25,9 +26,19 @@ public fun describe(reachability: Reachability): String =
                     "The location is there, but it is not marked as a Jotter store " +
                         "(${reachability.detail}). If a drive is mounted there, it may be " +
                         "unplugged. If the marker was deleted, remove this backend and add it again."
+                UnreachableReason.UNAUTHORIZED -> WRONG_PASSWORD
                 UnreachableReason.FAILED -> "Cannot be reached: ${reachability.detail}."
             }
     }
+
+/**
+ * What a server that refuses the password means, and what to do. Retrying cannot help, so the app
+ * tries again only rarely until the user enters a new one.
+ */
+internal const val WRONG_PASSWORD: String =
+    "The server refused the user name or app password. It may have been revoked or mistyped. " +
+        "Make a new app password for Jotter in your account's settings and enter it for this " +
+        "backend. Until then Jotter tries again only every 30 minutes."
 
 /** How a sync ended, and what it did, in plain words. */
 internal fun describe(result: SyncResult): Pair<Outcome, String> =
@@ -44,10 +55,17 @@ internal fun describe(result: SyncResult): Pair<Outcome, String> =
                     "soon. ${describe(result.report)}"
             }
         }
-        is SyncResult.Unreachable -> Outcome.UNREACHABLE to describe(result.reachability)
+        is SyncResult.Unreachable ->
+            if (result.reachability.reason == UnreachableReason.UNAUTHORIZED) {
+                Outcome.UNAUTHORIZED to WRONG_PASSWORD
+            } else {
+                Outcome.UNREACHABLE to describe(result.reachability)
+            }
         is SyncResult.Incompatible ->
             Outcome.INCOMPATIBLE to
                 "Not synced: ${result.detail}. A newer version of Jotter may be able to use it."
+        is SyncResult.Interrupted if isUnauthorized(result.cause) ->
+            Outcome.UNAUTHORIZED to "$WRONG_PASSWORD ${describe(result.report)}"
         is SyncResult.Interrupted ->
             Outcome.INTERRUPTED to
                 "Stopped part way: ${result.cause.message}. What was done is kept, and the " +
@@ -62,6 +80,10 @@ private fun describe(report: SyncReport): String {
         else -> "Received ${changes(received)}, sent ${files(sent)}."
     }
 }
+
+private fun isUnauthorized(cause: Throwable) =
+    cause is BackendUnavailableException &&
+        cause.reachability.reason == UnreachableReason.UNAUTHORIZED
 
 /** A file the backend listed and could not give, which a later try may well read. */
 private fun isUnreadable(issue: SyncIssue): Boolean =
