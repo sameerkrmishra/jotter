@@ -94,8 +94,14 @@ syncs it.
   that queue up during a round are served by one more round. Revisions that a round
   brought in raise the mark, which causes one more round: that sends on merges, and
   relays to the other backends. A backend whose sync failed is left out for 30 s,
-  doubling up to 30 minutes, except on demand. Cancelling the scheduler's job stops a
-  sync where it is, which `SyncEngine` allows.
+  doubling up to 30 minutes, except on demand; a local folder that cannot be reached
+  is tried every 30 s instead, as that is only a look at the disk. When its wait is
+  over, a failed backend is tried on its own at once, so a USB stick syncs within
+  30 s of being plugged in, and a backend that is back syncs without waiting for the
+  next round. Cancelling the scheduler's job stops a sync where it is, which
+  `SyncEngine` allows. Nothing else stops the scheduler: a round that throws, or a
+  revision mark flow that fails (it is collected again after 30 s), shows in
+  `SyncScheduler.problem` in plain words until it works again.
 - **Coroutines.** Database calls run on the `io` context given; `SyncEngine` and each
   backend use their own dispatchers. Nothing blocks the caller's thread.
 

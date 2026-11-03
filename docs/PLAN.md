@@ -329,7 +329,9 @@ via WorkManager (15 min minimum, network-constrained), on desktop via a
 coroutine timer (`app:sync`'s `SyncScheduler`: 5 s after edits stop, every 5
 minutes, and when the user asks). Each backend syncs independently, and a
 backend that fails is skipped and retried with backoff (30 s, doubling up to
-30 minutes), except when the user asks. The CLI syncs once with `jotter sync`.
+30 minutes), except when the user asks. A local folder that cannot be reached is
+tried every 30 s instead, and a backend that is back syncs at once. The CLI syncs
+once with `jotter sync`.
 
 ### 6.4 The PC as hub
 

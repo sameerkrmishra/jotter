@@ -3,11 +3,14 @@ package io.github.sameerkrmishra.jotter.app.sync
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -31,7 +34,9 @@ class SyncSchedulerTest {
         val all: List<Backend>,
     ) {
         val rounds = mutableListOf<List<String>>()
-        val failing = mutableSetOf<String>()
+        val times = mutableListOf<Pair<Long, List<String>>>()
+        val failing = mutableMapOf<String, Outcome>()
+        var now: () -> Long = { 0 }
         var blockNext: CompletableDeferred<Unit>? = null
         var throwNext: Exception? = null
 
@@ -46,8 +51,9 @@ class SyncSchedulerTest {
             }
             val synced = all.filter(due)
             rounds += synced.map { it.id }
+            times += now() to synced.map { it.id }
             return synced.map {
-                val outcome = if (it.id in failing) Outcome.UNREACHABLE else Outcome.SYNCED
+                val outcome = failing[it.id] ?: Outcome.SYNCED
                 BackendSync(
                     it,
                     Attempt(Instant.fromEpochMilliseconds(0), outcome, "", listOf()),
@@ -59,6 +65,7 @@ class SyncSchedulerTest {
 
     private fun TestScope.start(backends: Backends): Pair<SyncScheduler, MutableStateFlow<Long>> {
         val scheduler = SyncScheduler(backends::syncAll, timing, testScheduler.timeSource)
+        backends.now = { testScheduler.currentTime / MILLIS_PER_SECOND }
         val marks = MutableStateFlow(10L)
         scheduler.start(backgroundScope, marks)
         testScheduler.runCurrent()
@@ -130,50 +137,53 @@ class SyncSchedulerTest {
         }
 
     @Test
-    fun aFailedBackendWaitsLongerAfterEachFailure() =
+    fun aFailedBackendIsTriedAgainOnItsOwnLaterAfterEachFailure() =
         runTest {
             val backends = Backends(listOf(usb, dav))
-            backends.failing += "usb"
+            backends.failing["usb"] = Outcome.INTERRUPTED
+            start(backends)
+            testScheduler.advanceTimeBy(460.seconds)
+            // 30 s, 60 s, then the most, 2 minutes. The period's round at 300 s leaves it out.
+            assertEquals(
+                listOf(
+                    0L to listOf("usb", "dav"),
+                    30L to listOf("usb"),
+                    90L to listOf("usb"),
+                    210L to listOf("usb"),
+                    300L to listOf("dav"),
+                    330L to listOf("usb"),
+                    450L to listOf("usb"),
+                ),
+                backends.times,
+            )
+        }
+
+    @Test
+    fun anUnpluggedFolderIsTriedEvery30sAndSyncsSoonAfterItIsBack() =
+        runTest {
+            val backends = Backends(listOf(usb, dav))
+            backends.failing["usb"] = Outcome.UNREACHABLE
             val (_, marks) = start(backends)
-            assertEquals(listOf("usb", "dav"), backends.rounds.last())
+            testScheduler.advanceTimeBy(100.seconds)
+            assertEquals(listOf(0L, 30L, 60L, 90L), backends.times.map { it.first })
+            // An edit meanwhile syncs the others, not the folder that is not due.
+            marks.value += 1
+            testScheduler.advanceTimeBy(6.seconds)
+            assertEquals(105L to listOf("dav"), backends.times.last())
 
-            fun editAndSync() {
-                marks.value += 1
-                testScheduler.advanceTimeBy(6.seconds)
-            }
-
-            // Left out for 30 s after the first failure.
-            editAndSync()
-            assertEquals(listOf("dav"), backends.rounds.last())
-            testScheduler.advanceTimeBy(30.seconds)
-            editAndSync()
-            assertEquals(listOf("usb", "dav"), backends.rounds.last())
-            // Then 60 s.
-            testScheduler.advanceTimeBy(40.seconds)
-            editAndSync()
-            assertEquals(listOf("dav"), backends.rounds.last())
-            testScheduler.advanceTimeBy(20.seconds)
-            editAndSync()
-            assertEquals(listOf("usb", "dav"), backends.rounds.last())
-            // Then the most, 2 minutes, and no more however often it fails.
-            repeat(3) {
-                testScheduler.advanceTimeBy(2.minutes)
-                editAndSync()
-                assertEquals(listOf("usb", "dav"), backends.rounds.last())
-            }
-            // Once it works, it syncs every time again.
             backends.failing.clear()
-            testScheduler.advanceTimeBy(2.minutes)
-            editAndSync()
-            editAndSync()
-            assertEquals(listOf("usb", "dav"), backends.rounds.last())
+            testScheduler.advanceTimeBy(60.seconds)
+            assertEquals(120L to listOf("usb"), backends.times.last())
+            // Back to normal: nothing more until the period.
+            testScheduler.advanceTimeBy(100.seconds)
+            assertEquals(120L, backends.times.last().first)
         }
 
     @Test
     fun theUserCanSyncAFailedBackendAtOnce() =
         runTest {
             val backends = Backends(listOf(usb))
-            backends.failing += "usb"
+            backends.failing["usb"] = Outcome.UNREACHABLE
             val (scheduler, _) = start(backends)
             scheduler.syncNow()
             testScheduler.runCurrent()
@@ -205,9 +215,45 @@ class SyncSchedulerTest {
             val (scheduler, _) = start(backends)
             assertEquals(0, backends.rounds.size)
             assertFalse(scheduler.syncing.value)
+            assertEquals(
+                "Jotter could not sync: database gone. It tries again.",
+                scheduler.problem.value,
+            )
             scheduler.syncNow()
             testScheduler.runCurrent()
             assertEquals(1, backends.rounds.size)
+            assertNull(scheduler.problem.value)
+        }
+
+    @Test
+    fun aFailingMarkFlowIsWatchedAgainAndSyncGoesOn() =
+        runTest {
+            val backends = Backends(listOf(usb))
+            val marks = MutableStateFlow(10L)
+            var broken = true
+            val flaky =
+                flow {
+                    if (broken) {
+                        broken = false
+                        throw IllegalStateException("query failed")
+                    }
+                    emitAll(marks)
+                }
+            val scheduler = SyncScheduler(backends::syncAll, timing, testScheduler.timeSource)
+            scheduler.start(backgroundScope, flaky)
+            testScheduler.runCurrent()
+            // It syncs on start all the same, and says why edits are not seen.
+            assertEquals(1, backends.rounds.size)
+            assertTrue(
+                scheduler.problem.value
+                    .orEmpty()
+                    .contains("query failed"),
+            )
+            testScheduler.advanceTimeBy(31.seconds)
+            marks.value = 11
+            testScheduler.advanceTimeBy(6.seconds)
+            assertEquals(2, backends.rounds.size)
+            assertNull(scheduler.problem.value)
         }
 
     @Test
@@ -224,6 +270,10 @@ class SyncSchedulerTest {
             assertFalse(scheduler.syncing.value)
             assertEquals(0, backends.rounds.size)
         }
+
+    private companion object {
+        const val MILLIS_PER_SECOND = 1_000L
+    }
 
     private fun backend(id: String) =
         Backend(id, id, LocalFolderConfig("/$id"), Instant.fromEpochMilliseconds(0), null, null)

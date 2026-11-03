@@ -50,6 +50,7 @@ internal fun BackendsScreen(
                 Text(if (backends.syncing) "Syncing…" else "Sync now")
             }
         }
+        backends.problem?.let { Message(it) {} }
         backends.message?.let {
             Message(it) { TextButton(onClick = backends::dismissMessage) { Text("Dismiss") } }
         }

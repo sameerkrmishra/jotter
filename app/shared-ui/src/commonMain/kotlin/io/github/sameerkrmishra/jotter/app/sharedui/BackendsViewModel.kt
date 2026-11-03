@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.Backend
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.Outcome
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.app.sync.describe
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
@@ -95,6 +96,10 @@ internal class BackendsViewModel(
     var busy by mutableStateOf(false)
         private set
 
+    /** What keeps the scheduler from syncing, while it lasts, such as an unreadable database. */
+    var problem by mutableStateOf<String?>(null)
+        private set
+
     /** A notice for the user, until they dismiss it. */
     var message by mutableStateOf<String?>(null)
         private set
@@ -115,6 +120,7 @@ internal class BackendsViewModel(
                 syncing = running
             }
         }
+        scope.launch { scheduler.problem.collect { problem = it } }
         // Each round that ends may have found a backend come or go.
         scope.launch {
             scheduler.syncing
@@ -128,8 +134,18 @@ internal class BackendsViewModel(
     /** Asks every backend whether it can be reached now. */
     fun checkReachability() {
         scope.launch {
-            reachability = manager.status().associate { it.backend.id to it.reachability }
-            now = clock.now()
+            reporting {
+                val found = manager.status()
+                val back =
+                    found.any { status ->
+                        status.reachability == Reachability.Reachable &&
+                            status.backend.lastAttempt?.outcome == Outcome.UNREACHABLE
+                    }
+                reachability = found.associate { it.backend.id to it.reachability }
+                now = clock.now()
+                // A backend that is back syncs at once, without waiting for the next retry.
+                if (back && !syncing) scheduler.syncNow()
+            }
         }
     }
 

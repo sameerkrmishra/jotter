@@ -172,7 +172,9 @@ not worth it for six lines.
   did, and the issues of the last sync, such as a damaged file. A missing folder or an
   empty mount point reads as such, never as empty or synced, beside the time of the
   last success. "Sync now" syncs every backend, also one waiting after a failure.
-  Every failure, such as a locked database, shows as a message. The screen's
+  Every failure, such as a locked database, shows as a message, and so does what
+  keeps the scheduler from syncing (`SyncScheduler.problem`). A backend that the
+  screen finds reachable again after a failed try syncs at once. The screen's
   coroutines are a child of the app's scope, which closing it leaves running.
 - **Failures in the grid** show as a message: a locked database, a note deleted
   elsewhere, a failed read, and any other failed write. Each is kept until the next successful write
