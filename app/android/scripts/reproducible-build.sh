@@ -6,9 +6,11 @@
 #
 # REV defaults to HEAD; uncommitted changes are not built. Each build gets its own copy of the
 # sources from `git archive`, in its own directory, with its own Gradle project cache and no
-# build cache, so the second build cannot reuse anything from the first. The two builds also
-# differ in time zone, locale and umask, and run at different times. Both use the Gradle user
-# home and Android SDK of the caller (dependencies, not outputs).
+# build cache. The first build uses the caller's Gradle user home. The second gets a new, empty
+# one, so it cannot reuse the first's outputs there either (such as libraries already dexed):
+# it reads only downloaded dependencies from the caller's (GRADLE_RO_DEP_CACHE) and shares its
+# Gradle distributions and JDKs. The two builds also differ in time zone, locale and umask, and
+# run at different times. Both use the caller's Android SDK.
 #
 # Environment:
 #   ANDROID_HOME       the Android SDK (required, as for any build)
@@ -33,14 +35,24 @@ root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 rev=$(git -C "$root" rev-parse --verify "${1:-HEAD}^{commit}")
 out=${JOTTER_REPRO_DIR:-$root/build/reproducible}
 apk_path=app/android/build/outputs/apk/release/android-release-unsigned.apk
+caller_home=${GRADLE_USER_HOME:-$HOME/.gradle}
 
 rm -rf "$out"
 mkdir -p "$out"
 echo "Building $rev twice in $out"
 
-# build NAME TZ LOCALE UMASK JDK
+# A new Gradle user home in $1 that reads the caller's downloads and nothing it built.
+fresh_home() {
+    local home=$1 dir
+    mkdir -p "$home"
+    for dir in wrapper jdks; do
+        if [[ -d "$caller_home/$dir" ]]; then ln -s "$caller_home/$dir" "$home/$dir"; fi
+    done
+}
+
+# build NAME TZ LOCALE UMASK JDK [GRADLE_HOME]
 build() {
-    local name=$1 tz=$2 locale=$3 mask=$4 jdk=$5
+    local name=$1 tz=$2 locale=$3 mask=$4 jdk=$5 home=${6:-}
     local src=$out/$name/jotter
     mkdir -p "$src"
     git -C "$root" archive "$rev" | tar -x -C "$src"
@@ -53,12 +65,16 @@ build() {
             "-Porg.gradle.java.installations.paths=$jdk"
         )
     fi
-    echo "[$name] $(date -u +%FT%TZ) TZ=$tz LC_ALL=$locale umask $mask JDK ${jdk:-chosen by Gradle}"
+    echo "[$name] $(date -u +%FT%TZ) TZ=$tz LC_ALL=$locale umask $mask" \
+        "JDK ${jdk:-chosen by Gradle}, Gradle home ${home:-$caller_home}"
     if ! (
         cd "$src"
         umask "$mask"
         export TZ=$tz LC_ALL=$locale
         if [[ -n "$jdk" ]]; then export JAVA_HOME=$jdk; fi
+        if [[ -n "$home" ]]; then
+            export GRADLE_USER_HOME=$home GRADLE_RO_DEP_CACHE=$caller_home/caches
+        fi
         ./gradlew --no-daemon --no-build-cache --no-configuration-cache \
             -Pkotlin.compiler.execution.strategy=in-process \
             "${jdk_args[@]}" :app:android:assembleRelease
@@ -71,7 +87,8 @@ build() {
 }
 
 build a UTC C.UTF-8 022 "${JOTTER_JDK_A:-}"
-build b Pacific/Kiritimati POSIX 077 "${JOTTER_JDK_B:-}"
+fresh_home "$out/b/gradle-home"
+build b Pacific/Kiritimati POSIX 077 "${JOTTER_JDK_B:-}" "$out/b/gradle-home"
 
 if cmp -s "$out/a.apk" "$out/b.apk"; then
     echo "Identical: $(sha256sum "$out/a.apk" | cut -d' ' -f1) ($(stat -c %s "$out/a.apk") bytes)"

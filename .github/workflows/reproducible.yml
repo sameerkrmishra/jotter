@@ -57,7 +57,8 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      # Dependencies only: the script builds without the build cache, in fresh copies.
+      # Dependencies only: the script builds without the build cache, in fresh copies, and the
+      # second build in a Gradle user home of its own that reads only this one's downloads.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
