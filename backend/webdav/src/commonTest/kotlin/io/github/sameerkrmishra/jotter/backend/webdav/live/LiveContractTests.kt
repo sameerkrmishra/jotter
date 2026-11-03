@@ -3,6 +3,7 @@ package io.github.sameerkrmishra.jotter.backend.webdav.live
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.contract.BlobStoreContract
 import io.github.sameerkrmishra.jotter.backend.webdav.WebDavBlobStore
+import io.github.sameerkrmishra.jotter.backend.webdav.WebDavCredentials
 import kotlin.test.AfterTest
 
 /**
@@ -34,6 +35,10 @@ abstract class LiveContract(
         server.delete(collections.getValue(store))
     }
 
+    override suspend fun storeWithWrongCredentials(): BlobStore =
+        WebDavBlobStore(server.newCollection(), WebDavCredentials("jotter", "wrong"))
+            .also { stores += it }
+
     @AfterTest
     fun closeClients() {
         stores.forEach { it.close() }
@@ -41,7 +46,7 @@ abstract class LiveContract(
     }
 }
 
-/** lighttpd 1.4 with mod_webdav. */
+/** lighttpd 1.4.79 with mod_webdav, path info off. */
 class LighttpdContractTest : LiveContract("JOTTER_WEBDAV_LIGHTTPD_URL")
 
 /**

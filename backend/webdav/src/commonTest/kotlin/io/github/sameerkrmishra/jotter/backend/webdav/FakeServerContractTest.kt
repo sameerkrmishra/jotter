@@ -20,6 +20,13 @@ class FakeServerContractTest : BlobStoreContract() {
     override suspend fun unreachableStore(): BlobStore =
         fakeStore(FakeDavServer().apply { down = true }, "/dav/")
 
+    override suspend fun storeWithWrongCredentials(): BlobStore {
+        val server = FakeDavServer()
+        server.mkdirs("/store")
+        server.credentials = WebDavCredentials("me@example.org", "the new password")
+        return fakeStore(server)
+    }
+
     override suspend fun takeAway(store: BlobStore) {
         servers.getValue(store).down = true
     }

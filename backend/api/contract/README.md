@@ -9,8 +9,15 @@ class WebDavContractTest : BlobStoreContract() {
     override suspend fun newStore(): BlobStore = ... // new, empty, reachable
     override suspend fun unreachableStore(): BlobStore = ... // for example, nothing listening
     override suspend fun takeAway(store: BlobStore) { ... } // for example, stop the server
+    // Optional: a store that refuses the credentials. The default, null, skips that test.
+    override suspend fun storeWithWrongCredentials(): BlobStore? = ... // a wrong password
 }
 ```
+
+`aStoreThatRefusesTheCredentialsSaysSo` checks `UnreachableReason.UNAUTHORIZED`
+from `ping` and from every method, but only for a backend that has credentials.
+A local folder has none, so `backend:localfolder` and `InMemoryBlobStore` leave
+`storeWithWrongCredentials` at null and the test passes without checking anything.
 
 Add the module to the backend's test source set, and the test class to a test
 source set of each target it should run on (`commonTest` for all of them):
