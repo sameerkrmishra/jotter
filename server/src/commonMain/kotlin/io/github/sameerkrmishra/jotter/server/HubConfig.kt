@@ -51,7 +51,9 @@ public data class HubConfig(
  * Memory is bounded by [maxTransfers] times `PeerProtocol.MAX_FILE_BYTES`, and sockets by
  * [maxConnections]: further connections wait in the system's queue until one ends.
  *
- * @property maxConnections Connections served at once.
+ * @property maxConnections Connections open at once, counted until their sockets have closed.
+ * @property maxConnectionsPerClient Connections open at once from one address, with a token or
+ *   not, so that one machine on the tailnet cannot take every slot. Further ones are cut at once.
  * @property maxTransfers Reads and writes of a file at once; each may hold a whole file in memory.
  * @property headerTimeout How long a client may take to send the request line and headers.
  * @property idleTimeout How long a body may stall before the request is dropped.
@@ -61,13 +63,16 @@ public data class HubConfig(
  */
 public data class HubLimits(
     val maxConnections: Int = 16,
+    val maxConnectionsPerClient: Int = 8,
     val maxTransfers: Int = 4,
     val headerTimeout: Duration = 10.seconds,
     val idleTimeout: Duration = 30.seconds,
     val requestDeadline: Duration = 15.minutes,
 ) {
     init {
-        require(maxConnections > 0 && maxTransfers > 0) { "Limits must be positive" }
+        require(maxConnections > 0 && maxConnectionsPerClient > 0 && maxTransfers > 0) {
+            "Limits must be positive"
+        }
         require(headerTimeout.isPositive() && idleTimeout.isPositive()) {
             "Timeouts must be positive"
         }

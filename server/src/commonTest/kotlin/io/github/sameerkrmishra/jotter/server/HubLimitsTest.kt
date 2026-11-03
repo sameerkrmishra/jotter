@@ -246,7 +246,7 @@ class HubLimitsTest {
     @Test
     fun concurrentWritersThroughTheHubAndOnThePcHaveOneWinner(): TestResult =
         test {
-            val hub = hubs.start()
+            val hub = hubs.start(HubLimits(maxConnectionsPerClient = 16))
             val phone = hubs.client(hub)
             val laptop = hubs.client(hub, hub.hub.pair("laptop").token)
             val writers: List<BlobStore> = listOf(phone, laptop, hub.localStore, phone, laptop)

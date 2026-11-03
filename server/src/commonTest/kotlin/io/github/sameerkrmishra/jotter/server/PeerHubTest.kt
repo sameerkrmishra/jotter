@@ -205,6 +205,10 @@ class PeerHubTest {
             }
             assertFailsWith<IllegalArgumentException> { HubLimits(maxConnections = 0) }
             assertFailsWith<IllegalArgumentException> { HubLimits(maxTransfers = 0) }
+            assertFailsWith<IllegalArgumentException> { HubLimits(maxConnectionsPerClient = 0) }
+            val idle = PeerHub(config())
+            assertEquals(0, idle.openConnections)
+            idle.breakListener() // Nothing to break on a stopped hub.
             assertFailsWith<IllegalArgumentException> {
                 HubLimits(
                     headerTimeout = kotlin.time.Duration.ZERO,

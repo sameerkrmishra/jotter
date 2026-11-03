@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.IOException
+import kotlin.concurrent.Volatile
 
 /** What a [PeerHub] is doing. */
 public sealed interface HubStatus {
@@ -92,7 +93,18 @@ public class PeerHub internal constructor(
 
     private val tokens = DeviceTokens(config.tokenFile, fileSystem, dispatcher)
     private val mutex = Mutex()
+
+    @Volatile
     private var server: PeerServer? = null
+
+    /** The connections the hub has open now. For tests. */
+    internal val openConnections: Int get() = server?.openConnections ?: 0
+
+    /** Breaks the hub's listening socket, as a failing system would. For tests. */
+    internal fun breakListener() {
+        server?.breakListener()
+    }
+
     private val mutableStatus = MutableStateFlow<HubStatus>(HubStatus.Stopped)
 
     /** What the hub is doing now. */
@@ -126,13 +138,26 @@ public class PeerHub internal constructor(
     public suspend fun start(): HubStatus.Running =
         mutex.withLock {
             (mutableStatus.value as? HubStatus.Running)?.let { return@withLock it }
+            // A server whose accept loop died is still there, holding its connections.
+            server?.stop()
+            server = null
             val handler =
                 PeerHandler(
                     store,
                     { tokens.authenticate(it) != null },
                     Semaphore(config.limits.maxTransfers),
                 )
-            val next = PeerServer(handler, config.limits, dispatcher)
+            lateinit var next: PeerServer
+            next =
+                PeerServer(handler, config.limits, dispatcher) { reason ->
+                    // The status must not say Running when nothing is served.
+                    if (server ===
+                        next
+                    ) {
+                        mutableStatus.value =
+                            HubStatus.Failed("The hub on ${config.host}: $reason")
+                    }
+                }
             var started = false
             val running =
                 try {

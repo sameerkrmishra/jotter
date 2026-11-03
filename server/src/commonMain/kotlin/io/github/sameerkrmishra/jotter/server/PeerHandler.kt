@@ -12,9 +12,6 @@ import io.github.sameerkrmishra.jotter.backend.peer.PeerError
 import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
 import io.github.sameerkrmishra.jotter.backend.peer.dto.BlobEntryDto
 import io.github.sameerkrmishra.jotter.backend.peer.dto.ErrorDto
-import io.ktor.http.Parameters
-import io.ktor.http.URLDecodeException
-import io.ktor.http.parseQueryString
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -25,6 +22,10 @@ private const val BYTES = "application/octet-stream"
 
 // Enough digits for any length up to the limit and more; a longer one is not a number to us.
 private const val MAX_LENGTH_DIGITS = 12
+private const val MAX_UTF8_BYTES = 3
+private const val ESCAPE_LENGTH = 3
+private const val HEX = 16
+private const val HEX_DIGITS = "0123456789abcdefABCDEF"
 
 /**
  * Answers one request of the peer protocol (`backend.peer.PeerProtocol`) from [store], for a
@@ -178,26 +179,54 @@ internal class PeerHandler(
         ) = Refusal(error(code, detail), cause)
 
         /** The query's parameters. Every name must appear once. */
-        fun parametersOf(query: String): Parameters {
-            val parameters =
-                try {
-                    parseQueryString(query)
-                } catch (e: URLDecodeException) {
-                    throw refusal(
-                        PeerError.BAD_REQUEST,
-                        "The query does not parse: ${e.message}",
-                        e,
-                    )
+        fun parametersOf(query: String): Map<String, String> {
+            val pairs =
+                query.split('&').filter { it.isNotEmpty() }.map { part ->
+                    decode(part.substringBefore('=')) to decode(part.substringAfter('=', ""))
                 }
-            if (parameters.entries().any { it.value.size != 1 }) {
+            if (pairs.map { it.first }.toSet().size != pairs.size) {
                 throw refusal(PeerError.BAD_REQUEST, "A parameter repeats")
             }
-            return parameters
+            return pairs.toMap()
+        }
+
+        /**
+         * Decodes one part of a query as Ktor's client encodes it: `+` is a space and `%XX` a
+         * byte. The bytes must be UTF-8, strictly: a path with invalid UTF-8 is refused, never
+         * given replacement characters.
+         */
+        fun decode(text: String): String {
+            val bytes = ByteArray(text.length * MAX_UTF8_BYTES)
+            var size = 0
+            var index = 0
+            while (index < text.length) {
+                val char = text[index]
+                val escape = text.substring(index + 1, minOf(index + ESCAPE_LENGTH, text.length))
+                val escaped =
+                    char == '%' &&
+                        escape.length == ESCAPE_LENGTH - 1 &&
+                        escape.all { it in HEX_DIGITS }
+                when {
+                    escaped -> bytes[size++] = escape.toInt(HEX).toByte()
+                    char == '%' -> throw refusal(
+                        PeerError.BAD_REQUEST,
+                        "The query has a bad escape",
+                    )
+                    char == '+' -> bytes[size++] = ' '.code.toByte()
+                    else -> char.toString().encodeToByteArray().forEach { bytes[size++] = it }
+                }
+                index += if (escaped) ESCAPE_LENGTH else 1
+            }
+            return try {
+                bytes.decodeToString(0, size, throwOnInvalidSequence = true)
+            } catch (e: CharacterCodingException) {
+                throw refusal(PeerError.BAD_REQUEST, "The query is not UTF-8", e)
+            }
         }
 
         /** The value of [name], which must be the only parameter. */
-        fun Parameters.only(name: String): String =
-            this[name]?.takeIf { names().size == 1 }
+        fun Map<String, String>.only(name: String): String =
+            this[name]?.takeIf { size == 1 }
                 ?: throw refusal(
                     PeerError.BAD_REQUEST,
                     "The request takes \"$name\" and nothing else",
