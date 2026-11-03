@@ -60,6 +60,19 @@ class SecretFileStoreTest {
         }
 
     @Test
+    fun anOpenFolderOfItsOwnIsTightenedButNotItsParent() =
+        runTest {
+            val open = PosixFilePermissions.fromString("rwxr-xr-x")
+            Files.createDirectories(folder)
+            Files.setPosixFilePermissions(folder.parent, open)
+            Files.setPosixFilePermissions(folder, open)
+            store.write(password, Secret("one"))
+            assertEquals("rwx------", mode(folder))
+            // Like ~/.config, the parent is not the app's, and keeps its mode.
+            assertEquals("rwxr-xr-x", mode(folder.parent))
+        }
+
+    @Test
     fun aFileOthersMayReadIsRefused() =
         runTest {
             store.write(password, Secret("one"))

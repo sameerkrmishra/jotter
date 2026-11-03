@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.sharedui
 
 import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.privateOwnDirectory
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.server.HubConfig
 import io.github.sameerkrmishra.jotter.server.HubStartException
@@ -30,12 +31,12 @@ import kotlin.coroutines.CoroutineContext
 
 private val PRIVATE_FILE: FileAttribute<Set<PosixFilePermission>> =
     PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))
-private val PRIVATE_DIRECTORY: FileAttribute<Set<PosixFilePermission>> =
-    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))
 
 /**
  * The desktop app's hub, a [PeerHub] of the `server` module. Its settings, which hold no secret,
- * are kept in [settingsFile]; the paired devices, as hashes, in [tokenFile].
+ * are kept in [settingsFile]; the paired devices, as hashes, in [tokenFile]. Each must be in the
+ * app's own config directory, such as `~/.config/jotter`, which is made readable by this user
+ * alone, 0700, before either file is written there.
  *
  * @param manager Adds the hub's folder as a local folder backend, so that this PC syncs with it.
  * @param scope Where the hub's status is followed.
@@ -54,6 +55,10 @@ public class PeerHubControls(
     private val mutableState = MutableStateFlow<HubState>(HubState.Off)
     private var hub: PeerHub? = null
     private var following: Job? = null
+
+    // The app's own directory, such as ~/.config/jotter, never a shared parent like ~/.config:
+    // made 0700 before the hub writes the paired devices there.
+    private val tokenDirectory: Path = tokenFile.toAbsolutePath().parent
 
     override val state: StateFlow<HubState> = mutableState.asStateFlow()
 
@@ -108,6 +113,7 @@ public class PeerHubControls(
             val current = hub ?: hubFor(settings) ?: error("Turn the hub on first.")
             val pairing =
                 try {
+                    runInterruptible(io) { privateOwnDirectory(tokenDirectory) }
                     current.pair(deviceName.trim())
                 } catch (e: IllegalArgumentException) {
                     error("Cannot pair \"$deviceName\": ${e.message}.")
@@ -123,7 +129,11 @@ public class PeerHubControls(
         }
 
     override suspend fun unpair(id: String) {
-        lock.withLock { (hub ?: hubFor(settings))?.unpair(id) }
+        lock.withLock {
+            val current = hub ?: hubFor(settings) ?: return@withLock
+            runInterruptible(io) { privateOwnDirectory(tokenDirectory) }
+            current.unpair(id)
+        }
     }
 
     private fun newHub(settings: HubSettings) =
@@ -191,7 +201,9 @@ public class PeerHubControls(
             properties["port"] = next.port.toString()
             properties["on"] = next.on.toString()
             val directory = settingsFile.toAbsolutePath().parent
-            if (!Files.isDirectory(directory)) Files.createDirectories(directory, PRIVATE_DIRECTORY)
+            // The app's own directory, such as ~/.config/jotter, never a shared parent like
+            // ~/.config: only that one is created or tightened to 0700.
+            privateOwnDirectory(directory)
             // Created 0600 by the call that creates it, then renamed over the old one: never
             // readable by others, and never half written.
             val temporary = directory.resolve("${settingsFile.fileName}.${UUID.randomUUID()}.tmp")
