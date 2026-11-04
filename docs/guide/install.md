@@ -1,6 +1,9 @@
 # Install Jotter
 
-Every release is on the [Releases page](https://github.com/sameerkrmishra/jotter/releases).
+No release is published yet. Until then, build from source: see
+[Before a release](#before-a-release-build-from-source) below.
+
+Every release will be on the [Releases page](https://github.com/sameerkrmishra/jotter/releases).
 It has three files you might want, and a list of checksums:
 
 | File | What it is |
@@ -101,3 +104,26 @@ Jotter will also be on F-Droid later, which keeps it up to date for you.
 Not tested for this guide: installing from a phone's browser or file manager. The app
 itself was installed on an emulator with Android's developer tools, and no signed APK
 existed yet.
+
+## Before a release: build from source
+
+This needs a JDK to start Gradle (Gradle fetches JDK 21 by itself) and, for the phone app,
+the Android SDK. [CONTRIBUTING.md](../../CONTRIBUTING.md) lists these under
+"Prerequisites", but it is written for developers and does not show how to build the apps.
+From a copy of the repository, with `ANDROID_HOME` set to where your Android SDK is:
+
+```
+./gradlew :app:cli:installDist
+ln -s "$PWD/app/cli/build/install/jotter/bin/jotter" ~/.local/bin/jotter
+
+./gradlew :app:desktop:createDistributable
+app/desktop/build/compose/binaries/main/app/jotter/bin/jotter
+
+./gradlew :app:android:assembleDebug
+```
+
+The first makes the `jotter` command (it needs Java 21 or newer to run), the second the
+desktop app, and the third a test build of the Android app,
+`app/android/build/outputs/apk/debug/android-debug.apk`. The READMEs of
+[app/cli](../../app/cli/README.md), [app/desktop](../../app/desktop/README.md) and
+[app/android](../../app/android/README.md) say more.
