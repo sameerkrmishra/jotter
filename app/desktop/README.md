@@ -33,6 +33,20 @@ a new file they pick in the desktop's file dialog (`DebugLogFile`; an existing f
 never overwritten). The version it names is the jar's `Implementation-Version`, from
 `gradle.properties`.
 
+## Export database
+
+**File > Export database…** in the window's menu bar, and "Export database…" at the foot of
+the Sync screen, open a dialog that says what the copy holds and that passwords and pairing
+tokens are not in it. "Choose where…" shows the desktop's save dialog (`DatabaseFile`), and
+`app:sync`'s `DatabaseExport` writes a consistent copy of the whole database there with
+SQLite's `VACUUM INTO`, while the app and the CLI go on writing
+([ADR-0002](../../docs/adr/0002-sqlite-via-sqldelight.md)). The copy goes to a hidden file in
+the chosen folder and is renamed into place once it is whole and checked. A file that is there
+already is replaced only after "Replace" in Jotter's own dialog, as the save dialog may not ask.
+The editor's text is saved first. A full disk or a folder you may not write to is said in plain
+words, and the live database is only read. The copy is a restored device's database (ADR-0014):
+it can be the database of another computer, or of this one after a loss.
+
 ## Design
 
 - **One composition root** ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)):

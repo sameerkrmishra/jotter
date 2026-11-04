@@ -4,12 +4,11 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.OutlinedTextField
@@ -18,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -39,6 +39,8 @@ import kotlinx.coroutines.launch
 internal const val TITLE_FIELD = "title"
 internal const val BODY_FIELD = "body"
 internal const val TAG_FIELD = "tag"
+internal const val ADD_TAG_BUTTON = "add-tag"
+internal const val ADD_TAG = "Add tag"
 internal const val STALE_MESSAGE =
     "This note was changed elsewhere. Your text is kept here and has not been saved."
 internal const val DELETED_MESSAGE =
@@ -112,32 +114,56 @@ private fun BodyPreview(
     }
 }
 
+/**
+ * The tag field and its button on one line, the field taking what the button leaves, and the
+ * note's tags below, wrapping onto more lines: on a narrow phone none of them is squeezed or
+ * pushed off the screen.
+ */
 @Composable
 private fun TagEditor(editor: EditorViewModel) {
     val scope = rememberCoroutineScope()
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(spacing),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        OutlinedTextField(
-            value = editor.tagInput,
-            onValueChange = { editor.tagInput = it },
-            modifier = Modifier.testTag(TAG_FIELD),
-            label = { Text("New tag") },
-            singleLine = true,
-        )
-        TextButton(onClick = { scope.launch { editor.addTag() } }) { Text("Add tag") }
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-            items(editor.tags.toList(), key = { it.toString() }) { tag ->
-                InputChip(
-                    selected = false,
-                    onClick = { scope.launch { editor.removeTag(tag) } },
-                    label = { Text("$tag ×") },
-                )
+    Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(spacing),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = editor.tagInput,
+                onValueChange = { editor.tagInput = it },
+                modifier = Modifier.weight(1f).testTag(TAG_FIELD),
+                label = { Text("New tag") },
+                singleLine = true,
+            )
+            TextButton(
+                onClick = { scope.launch { editor.addTag() } },
+                modifier = Modifier.testTag(ADD_TAG_BUTTON),
+            ) {
+                Text(ADD_TAG, maxLines = 1, softWrap = false)
+            }
+        }
+        val tags = editor.tags.toList()
+        if (tags.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalArrangement = Arrangement.spacedBy(spacing),
+            ) {
+                tags.forEach { tag ->
+                    key(tag.toString()) {
+                        InputChip(
+                            selected = false,
+                            onClick = { scope.launch { editor.removeTag(tag) } },
+                            label = { Text("$tag ×") },
+                            modifier = Modifier.testTag(tagChip(tag.toString())),
+                        )
+                    }
+                }
             }
         }
     }
 }
+
+/** The test tag of the chip of the note's tag [tag]. */
+internal fun tagChip(tag: String) = "tag-chip-$tag"
 
 @Composable
 private fun EditorMessages(

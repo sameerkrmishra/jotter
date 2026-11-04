@@ -62,6 +62,7 @@ internal class JotterCommand(
             BackendsCommand(sync),
             ImportCommand(location),
             ExportCommand(location),
+            ExportDatabaseCommand(location),
             DebugLogCommand(sync),
         )
     }

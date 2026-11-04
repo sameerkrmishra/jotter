@@ -41,6 +41,13 @@ atomicfu. No other Jotter module.
   `foreign_keys = ON` again, also on failure. So a migration can rebuild a
   table that others reference without `DROP TABLE` cascading into them.
 
+## Checking a copy
+
+`checkDatabaseCopy(path, applicationId, schemaVersion)` opens a file read-only, such as
+a copy `VACUUM INTO` wrote (which is never in WAL mode), and throws
+`DamagedCopyException` unless `PRAGMA integrity_check` says `ok` and the application id
+and schema version are the caller's.
+
 ## Failures
 
 A file of another application is `ForeignDatabaseException`, one from a newer

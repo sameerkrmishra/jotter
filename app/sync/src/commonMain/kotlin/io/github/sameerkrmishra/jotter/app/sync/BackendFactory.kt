@@ -50,14 +50,14 @@ public class StandardBackendFactory internal constructor(
                 val key = SecretKey(backend.id, SecretKind.APP_PASSWORD)
                 val password =
                     secrets.of(config.secretPlace).read(key)
-                        ?: throw MissingSecretException(NO_PASSWORD)
+                        ?: throw MissingSecretException(noSecret(config, secrets.home))
                 webDav.open(config, password)
             }
             is PeerConfig -> {
                 val key = SecretKey(backend.id, SecretKind.PAIRING_SECRET)
                 val token =
                     secrets.of(config.secretPlace).read(key)
-                        ?: throw MissingSecretException(NO_TOKEN)
+                        ?: throw MissingSecretException(noSecret(config, secrets.home))
                 openPeer(config, token, tailnet)
             }
             is UnknownConfig -> throw IllegalArgumentException("Cannot open ${config.location}")
@@ -131,3 +131,53 @@ internal const val NO_PASSWORD: String =
     "Jotter could not read this backend's password: the keyring may be locked, or the password " +
         "is not stored on this device, as after restoring the notes on another computer. Unlock " +
         "your keyring, or enter the password again."
+
+/** [NO_PASSWORD] on Android, which has no keyring. */
+internal const val NO_PASSWORD_ANDROID: String =
+    "This backend's password is not stored on this phone, as after restoring your notes from a " +
+        "backup or another device, which never hold passwords. Enter the password again."
+
+/** [NO_TOKEN] on Android. */
+internal const val NO_TOKEN_ANDROID: String =
+    "This hub's pairing token is not stored on this phone, as after restoring your notes from a " +
+        "backup or another device, which never hold tokens. Pair this phone on the PC again and " +
+        "enter the new token."
+
+/** What a backend of [config] says when its secret is not where its settings say, on [home]. */
+internal fun noSecret(
+    config: BackendConfig,
+    home: SecretHome,
+): String =
+    when {
+        config is PeerConfig && home == SecretHome.ANDROID -> NO_TOKEN_ANDROID
+        config is PeerConfig -> NO_TOKEN
+        home == SecretHome.ANDROID -> NO_PASSWORD_ANDROID
+        else -> NO_PASSWORD
+    }
+
+/**
+ * What a backend of [config] says when its secret could not be read, for [reason], on [home]: the
+ * user enters it again, or on a desktop may first unlock the keyring. Never network advice: the
+ * backend was not even asked.
+ */
+internal fun unreadableSecret(
+    config: BackendConfig,
+    reason: String?,
+    home: SecretHome,
+): String {
+    val peer = config is PeerConfig
+    val what = if (peer) "this hub's pairing token" else "this backend's password"
+    val said = reason.orEmpty().trim().trimEnd('.')
+    val why = if (said.isEmpty()) "" else ": $said"
+    val again =
+        if (peer) {
+            "pair this device on the PC again and enter the new token"
+        } else {
+            "enter the password again"
+        }
+    return if (home == SecretHome.ANDROID) {
+        "Jotter could not read $what on this phone$why. ${again.replaceFirstChar(Char::titlecase)}."
+    } else {
+        "Jotter could not read $what$why. Unlock your keyring if it is locked, or $again."
+    }
+}

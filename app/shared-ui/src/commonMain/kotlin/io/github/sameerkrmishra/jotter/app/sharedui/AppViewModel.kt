@@ -34,9 +34,12 @@ import kotlinx.coroutines.launch
  * @param sync The backends and the scheduler that syncs with them, or null for an app that does
  *   not sync, which then shows no backend screen.
  * @param debugLog Builds and exports the debug log, or null for an app that has none.
+ * @param databaseExport Where "Export database" writes the copy, or null for an app without it.
  */
 @Stable
-@Suppress("TooManyFunctions") // One small function per way of moving between screens.
+// One small function per way of moving between screens; each optional part of an app is one
+// parameter, with a default.
+@Suppress("TooManyFunctions", "LongParameterList")
 public class AppViewModel(
     private val notes: NoteService,
     private val conflicts: ConflictResolver,
@@ -44,6 +47,7 @@ public class AppViewModel(
     private val io: CoroutineDispatcher,
     private val sync: SyncControls? = null,
     private val debugLog: DebugLogControls? = null,
+    private val databaseExport: DatabaseExportPlace? = null,
 ) {
     // Each new value makes the view models read the database again.
     private val refreshes = MutableStateFlow(0)
@@ -67,6 +71,13 @@ public class AppViewModel(
     /** The debug log screen, while it is open. */
     internal var debugLogView by mutableStateOf<DebugLogViewModel?>(null)
         private set
+
+    /** The "Export database" dialog, while it is open. */
+    internal var exportView by mutableStateOf<ExportDatabaseViewModel?>(null)
+        private set
+
+    /** Whether the app offers "Export database". */
+    public val exportsDatabase: Boolean get() = databaseExport != null
 
     /** Whether the app has a debug log to offer. */
     internal val hasDebugLog: Boolean get() = debugLog != null
@@ -198,6 +209,23 @@ public class AppViewModel(
     internal fun closeDebugLog() {
         debugLogView?.close()
         debugLogView = null
+    }
+
+    /**
+     * Opens the "Export database" dialog over any screen, as a desktop menu does. The editor's
+     * text is saved first, so that the copy holds it; if that fails, the editor shows why and the
+     * copy is made without it.
+     */
+    public fun openDatabaseExport() {
+        val place = databaseExport ?: return
+        if (exportView != null) return
+        lateinit var opened: ExportDatabaseViewModel
+        opened =
+            ExportDatabaseViewModel(place, scope) {
+                if (exportView === opened) exportView = null
+            }
+        exportView = opened
+        scope.launch { editor?.saveAll() }
     }
 
     /** Answers the question that [pendingExit] asks: the user stays with their text. */

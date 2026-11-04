@@ -305,7 +305,12 @@ class BackendManagerTest {
                 device.store.backends.add(record("dav"))
                 val sync = device.manager.syncAll().single()
                 assertEquals(Outcome.FAILED, sync.attempt.outcome)
-                assertTrue(sync.attempt.detail.contains("The keyring is locked"))
+                assertEquals(
+                    "Jotter could not read this backend's password: The keyring is locked. " +
+                        "Unlock your keyring if it is locked, or enter the password again. Until " +
+                        "then, it is tried again later.",
+                    sync.attempt.detail,
+                )
                 assertEquals(
                     Outcome.FAILED,
                     device.manager
@@ -315,9 +320,11 @@ class BackendManagerTest {
                         ?.outcome,
                 )
                 val status = device.manager.status().single()
+                assertEquals(UnreachableReason.UNAUTHORIZED, unreachable(status).reason)
                 assertEquals(
-                    Reachability.Unreachable(UnreachableReason.FAILED, "The keyring is locked"),
-                    status.reachability,
+                    "Jotter could not read this backend's password: The keyring is locked. " +
+                        "Unlock your keyring if it is locked, or enter the password again.",
+                    status.reachabilityText,
                 )
             }
         }
@@ -584,4 +591,7 @@ class BackendManagerTest {
         kind: String = "local-folder",
         settings: String = """{"path":"/nowhere/$name"}""",
     ) = BackendRecord(name, kind, name, settings, Instant.fromEpochMilliseconds(0))
+
+    private fun unreachable(status: BackendStatus) =
+        assertIs<Reachability.Unreachable>(status.reachability)
 }

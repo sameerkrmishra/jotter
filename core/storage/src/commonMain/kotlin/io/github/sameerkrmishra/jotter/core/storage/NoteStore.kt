@@ -4,6 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.RevisionId
+import io.github.sameerkrmishra.jotter.core.sqlite.checkDatabaseCopy
 import io.github.sameerkrmishra.jotter.core.sqlite.openSqliteDriver
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlin.coroutines.CoroutineContext
@@ -43,6 +44,27 @@ public class NoteStore private constructor(
      */
     override fun close() {
         driver.close()
+    }
+
+    /**
+     * Writes a consistent copy of the whole database to the new file [path], with SQLite's
+     * `VACUUM INTO` (ADR-0002), and checks it: it must open and pass `PRAGMA integrity_check`. The
+     * copy holds every table: notes, history, the device's id, backends and what sync has read,
+     * so opening it elsewhere is a restored device (ADR-0014). It is one file, with no `-wal`.
+     *
+     * It only reads this database, in one read transaction, so it sees no half-done write, and
+     * the CLI or another process may write meanwhile (WAL). Writes of this process wait until it
+     * is done. Blocking: call it off the UI thread.
+     *
+     * @param path A file that does not exist, or is empty, on a local or removable disk. If this
+     *   fails, a part of it may be left there: the caller removes it.
+     * @throws IllegalStateException if the copy failed its check.
+     * @throws RuntimeException the driver's exception if it cannot be written, such as a full
+     *   disk; [storageProblemOf] tells which.
+     */
+    public fun exportTo(path: String) {
+        driver.execute(null, "VACUUM INTO ?", 1) { bindString(0, path) }
+        checkDatabaseCopy(path, JOTTER_APPLICATION_ID, SCHEMA_VERSION)
     }
 
     /** Opens a [NoteStore]. */

@@ -44,6 +44,7 @@ path, not the fast one: ADR-0006's 200 ms target is for this distribution.
 | `jotter backends remove ID` | Stops syncing with a backend and forgets it on this device. Its files stay where they are. `--keep-secret` leaves its password or token where it is, for when no keyring answers, and says where |
 | `jotter backends status [ID]` | Asks each backend, or one, whether it can be reached now, and prints that with its last sync and issues |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
+| `jotter export-database FILE` | Writes a consistent copy of the whole database to the new file `FILE`, also while the desktop app runs and writes: one file to keep as a backup or to copy to another computer ([ADR-0002](../../docs/adr/0002-sqlite-via-sqldelight.md)). An existing `FILE` is replaced only with `--replace`. Passwords and pairing tokens are not in it, see below |
 | `jotter debug-log` | Prints the debug log to attach to an issue: versions, platform, each backend's kind and last sync with its issues, and the newest lines of the CLI's and the desktop app's logs. It holds no note, title, tag, password or token ([ADR-0021](../../docs/adr/0021-local-logging.md)). `--output FILE` (`-o`) writes the same text to a new file and never overwrites one. It works also when the notes cannot be opened, and says why. Nothing is sent anywhere |
 
 `jotter add` takes anything that is not one of its options as the note, so
@@ -122,6 +123,26 @@ stays out by default, unlike in that module, because everywhere else in the CLI
 it is a place to be asked for. Exporting again replaces a note's own file and
 never another file; a note that has to take another name for that is reported.
 
+### Export database
+
+`export-database` runs SQLite's `VACUUM INTO` on its own connection, in one read
+transaction, so it sees no half-done write while the app or another `jotter`
+writes, and it changes nothing in the live database. The copy goes to a hidden
+file in `FILE`'s folder, is checked (`PRAGMA integrity_check`, Jotter's id and
+schema version), synced to the disk, and only then renamed to `FILE`: a full disk
+or a removed drive leaves no half copy under that name, and the hidden file is
+removed. `FILE` may not be the database itself or one of its `-wal`, `-shm` or
+`-journal` files. A full disk, a folder you may not write to, or one that does
+not exist is said in plain words.
+
+The copy holds every table: notes, history, the trash, the device's id, the
+backends and what sync has read. Opened elsewhere, with `--db FILE` or as the
+desktop's database, it is a restored device (ADR-0014): it keeps the id, and
+syncing gets back what its backends hold that it does not. Passwords and pairing
+tokens live in the keyring or the secrets file, never in the database, so on
+another computer `jotter backends password ID` enters them again. With no
+database yet it fails rather than export an empty one.
+
 ## Output
 
 Output on stdout is meant for pipes and stays the same in every locale, time
@@ -137,6 +158,7 @@ and `search` print nothing when nothing matches.
 | `tags` | `TAG`, tab, count |
 | `import` | Five lines of `NAME`, tab, count: `imported`, `skipped`, `ignored`, `warnings`, `failures` |
 | `export` | `exported`, tab, count |
+| `export-database` | One sentence that names the file and says that secrets are not in it |
 | `conflicts` | `ID`, tab, `KIND`, tab, summary, one line per item. `KIND` is `conflict`, `waiting` (an earlier change has not arrived), `waiting-for-conflict` or `set-aside` |
 | `conflicts ID` | For each version, the headers `kind:`, `version:` (`shown`, `other`, `waiting`, or for set-aside text `bad-history`, `damaged`, `collision`), `title:`, a blank line and the body, with a blank line between versions. For people, not scripts: a body can hold anything |
 | `sync` | `ID`, tab, `NAME`, tab, `OUTCOME`, tab, a description for people. `OUTCOME` is `synced`, `incomplete` (some files could not be read), `unreachable`, `unauthorized` (the server refused the password), `interrupted`, `incompatible`, `unsupported` or `failed` |
@@ -266,6 +288,9 @@ the same file: steps 2 to 4 are `linuxDatabasePath` in `core:storage`.
   `InteropEndToEndTest` takes 1,000 synthetic notes through `import`, again `import`
   and `export` in real processes. `core:storage` has no limit on `list`, and that
   test would show one: the only page size is `search`'s 100.
+  `ExportDatabaseCommandTest` runs `export-database` again and again while another
+  JVM writes 2,000 notes, one transaction each: every copy opens, the counts only
+  grow, and some copies were taken half way.
 - **SQLite's exception.** `NoteStore.open` reports a lock as `StorageBusyException`
   but lets every other driver failure through, such as a file that is not a
   database, so this module still depends on `androidx.sqlite` for that one type.

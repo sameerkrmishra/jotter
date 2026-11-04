@@ -93,13 +93,15 @@ internal fun backendTag(id: String) = "backend-$id"
 
 /**
  * The backend screen: see [BackendsViewModel]. [onDebugLog] opens the debug log, if the app has
- * one: this is where the user looks when sync fails.
+ * one: this is where the user looks when sync fails. [onExport] opens "Export database", if the
+ * app has it: the screen is where a phone keeps what is not about notes.
  */
 @Composable
 internal fun BackendsScreen(
     backends: BackendsViewModel,
     onClose: () -> Unit,
     onDebugLog: (() -> Unit)? = null,
+    onExport: (() -> Unit)? = null,
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(spacing),
@@ -125,6 +127,7 @@ internal fun BackendsScreen(
         AddServer(backends)
         AddHub(backends)
         backends.hub?.let { HubSection(it) }
+        onExport?.let { ExportDatabaseSection(it) }
     }
     backends.settingUp?.let { path ->
         AlertDialog(

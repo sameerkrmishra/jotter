@@ -7,13 +7,13 @@ import androidx.compose.runtime.setValue
 import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.Backend
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.BackendStatus
 import io.github.sameerkrmishra.jotter.app.sync.Outcome
 import io.github.sameerkrmishra.jotter.app.sync.PasswordChange
 import io.github.sameerkrmishra.jotter.app.sync.Secret
 import io.github.sameerkrmishra.jotter.app.sync.SecretPlace
 import io.github.sameerkrmishra.jotter.app.sync.SecretStoreException
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
-import io.github.sameerkrmishra.jotter.app.sync.describe
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import kotlinx.coroutines.CancellationException
@@ -115,7 +115,7 @@ internal class BackendsViewModel(
         private set
 
     /** What each backend said when last asked whether it can be reached, by id. */
-    var reachability by mutableStateOf(emptyMap<String, Reachability>())
+    var reachability by mutableStateOf(emptyMap<String, BackendStatus>())
         private set
 
     /** Whether a sync runs now. */
@@ -211,7 +211,7 @@ internal class BackendsViewModel(
                         status.reachability == Reachability.Reachable &&
                             status.backend.lastAttempt?.outcome == Outcome.UNREACHABLE
                     }
-                reachability = found.associate { it.backend.id to it.reachability }
+                reachability = found.associateBy { it.backend.id }
                 now = clock.now()
                 // A backend that is back syncs at once, without waiting for the next retry.
                 if (back && !syncing) scheduler.syncNow()
@@ -526,13 +526,15 @@ internal class BackendsViewModel(
 
 /** The state of [backend] in plain words: whether it can be reached, and when it last synced. */
 internal fun BackendsViewModel.statusOf(backend: Backend): BackendLines {
-    val reach = reachability[backend.id]
+    val status = reachability[backend.id]
+    val reach = status?.reachability
     val attempt = backend.lastAttempt
     return BackendLines(
-        reachability = reach?.let(::describe) ?: NOT_CHECKED,
+        // A missing password is said in its own words, never as a network problem.
+        reachability = status?.reachabilityText ?: NOT_CHECKED,
         lastSuccess = backend.lastSuccessAt?.let { "Last synced ${ago(it, now)}." } ?: NEVER_SYNCED,
         lastProblem =
-            attempt?.takeIf { !it.outcome.succeeded }?.let {
+            attempt?.takeIf { !it.outcome.succeeded && it.detail != status?.secretProblem }?.let {
                 "The last try, ${ago(it.at, now)}, did not sync: ${it.detail}"
             },
         issues = attempt?.issues.orEmpty(),
