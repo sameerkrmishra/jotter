@@ -18,7 +18,7 @@ WebDAV, or the user's own PC over Tailscale).
 | Convergence | When the PC or a backend comes back online, all devices converge to the same state |
 | Storage | One SQLite database per device, in a single file. Copying it is safe when the app and CLI are not running (a clean close checkpoints the WAL and removes the `-wal`/`-shm` files). While the app runs, "Export database" writes a consistent single-file copy (`VACUUM INTO`) |
 | Export | Export all notes, or all notes with a given tag, as Markdown files |
-| Backends | Local folder and WebDAV (mailbox.org, NAS, Nextcloud). The user can add and remove backends at runtime |
+| Backends | Local folder and WebDAV (mailbox.org, NAS, Nextcloud). The user can add and remove backends at runtime. Android has no local folders in v1 ([ADR-0018](adr/0018-android-app.md)) |
 | Conflicts | Merge automatically where possible. Otherwise keep both versions and offer manual merge |
 | Notes | Markdown text only (checklists are Markdown task lists `- [ ]`). No attachments, no drawings |
 | Organisation | Pin, tags, archive, trash (no auto-purge; "delete forever" is explicit) |

@@ -68,12 +68,16 @@ byte-identical (diffoscope, or `zipinfo` and a file comparison, shows a differen
 `reproducible` workflow runs it with Temurin for one build and Zulu for the other on every push
 to `main`, on tags, and on pull requests that change the build. The first build uses the caller's
 Gradle user home, the second an empty one of its own that reads only downloaded dependencies
-from it, so no library dexed by the first is reused. On 2026-11-04 five builds of the same
-sources gave the same APK, SHA-256 `06981c62…fdab0061`: three local ones with Temurin
-21.0.12.1+1, in a worktree and in two exported trees, and two in CI (run 41722235749, whose log
-resolves Temurin `21.0.13+9` and Zulu `21.0.13`). With EmojiCompat's initializer removed from
-the manifest, the APK became `385c2961…df698a83`, again the same in two runs of the script with
-the second build's own Gradle home. The release build needs no Kotlin/Native toolchain.
+from it, so no library dexed by the first is reused. The release build needs no Kotlin/Native
+toolchain.
+
+The APK's hash belongs to a commit: any change to the app's code, its resources or a library
+changes it, so no hash is recorded here as the app's. To get the hash of a commit, run the
+script with that commit (it prints both builds' SHA-256 and `Identical: …`), or read the
+`reproducible` run of that commit in CI. While this was decided, on 2026-11-04, local builds
+with Temurin 21.0.12.1+1 and CI's builds with Temurin `21.0.13+9` and Zulu `21.0.13` gave the
+same APK for each commit they built; the milestone notes record the hash of the commit they
+were written at ([M5](../milestones/m5.md)).
 
 ## Consequences
 

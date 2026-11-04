@@ -52,10 +52,14 @@ Its `check` job is the required status check for merging. Beside it, the
 (see [core/sync/README.md](core/sync/README.md)), and the `webdav` job runs
 `backend/webdav` against real WebDAV servers in containers
 (see [backend/webdav/README.md](backend/webdav/README.md)), and the
-`android-device` job runs `connectedAndroidDeviceTest` on API 26 and API 36
-emulators. They are not required
+`android-device` job runs `connectedAndroidDeviceTest` and the Android app's
+`:app:android:connectedDebugAndroidTest` on API 26 and API 36 emulators. A separate
+`reproducible` workflow ([.github/workflows/reproducible.yml](.github/workflows/reproducible.yml))
+builds the release APK twice and fails unless the two are identical, on `main`, on tags and on
+pull requests that change the build
+([ADR-0019](docs/adr/0019-release-builds.md)). They are not required
 checks, so look at them before merging: a pull request needs them green too. The desktop module
-exists, but CI does not build its distributable yet. The APK joins CI in M5.
+exists, but CI does not build its distributable yet.
 
 ## Code style
 
