@@ -3,11 +3,6 @@ package io.github.sameerkrmishra.jotter.core.sqlite
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.driver.bundled.SQLITE_OPEN_READONLY
 
-/** A copy of a database, such as one `VACUUM INTO` wrote, failed [checkDatabaseCopy]. */
-public class DamagedCopyException(
-    message: String,
-) : IllegalStateException(message)
-
 /**
  * Checks that the database file at [path], such as a copy that `VACUUM INTO` just wrote, opens,
  * passes `PRAGMA integrity_check` and belongs to [applicationId] at [schemaVersion]. The file is
