@@ -20,7 +20,39 @@ class ShutdownTest {
         exit: (Int) -> Unit = { exits.put(it) },
         awtWaitMs: Long = 2_000,
         haltAfterMs: Long = 60_000,
-    ) = Shutdown(awtAlive, exit, { halts.put(it) }, awtWaitMs, haltAfterMs)
+    ) = Shutdown(awtAlive, exit, { halts.put(it) }, awtWaitMs, haltAfterMs, { disposals.put(Unit) })
+
+    private val disposals = LinkedBlockingQueue<Unit>()
+
+    @Test
+    fun afterASignalItRefusesToRunBeforeTheStoreIsClosed() {
+        val shutdown = shutdown(haltAfterMs = 50)
+
+        assertFailsWith<IllegalStateException> { shutdown.afterSignal() }
+
+        assertNull(halts.poll(300, TimeUnit.MILLISECONDS))
+        assertNull(disposals.poll())
+    }
+
+    @Test
+    fun afterASignalItDisposesTheWindowsWaitsForAwtAndHaltsAHungExit() {
+        val start = System.nanoTime()
+        val shutdown =
+            shutdown(
+                awtAlive = { System.nanoTime() - start < 200_000_000 },
+                haltAfterMs = 500,
+            )
+        shutdown.closed()
+
+        shutdown.afterSignal()
+
+        val waitedMs = (System.nanoTime() - start) / 1_000_000
+        assertEquals(Unit, disposals.poll())
+        assertTrue(waitedMs >= 200, "waited $waitedMs ms")
+        // The VM would end when the hook returns; here it does not, so the watchdog halts it.
+        assertEquals(1, halts.poll(5, TimeUnit.SECONDS))
+        assertNull(exits.poll())
+    }
 
     @Test
     fun exitingBeforeTheStoreIsClosedIsRefusedAndNeitherExitsNorHalts() {

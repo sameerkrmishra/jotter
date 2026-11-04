@@ -42,9 +42,12 @@ never overwritten). The version it names is the jar's `Implementation-Version`, 
   chooses to keep editing or to close without saving. Then `main()`, through `Closer`, finishes
   the view models' scope (sync and the scheduler), stops the hub (keeping the user's setting, so
   that it starts again with the app), closes the store, and ends the process through `Shutdown`.
-  SIGTERM (logout, system shutdown), SIGINT and SIGHUP run a shutdown hook that does the same
-  through `Closer`, saving the open editor and the review first; each step is bounded, about 7 s
-  in all. Both paths take one lock and close once (`CloserTest`). Closing checkpoints the WAL, unless another
+  SIGTERM (logout, system shutdown), SIGINT and SIGHUP run a shutdown hook (`SignalClose`,
+  registered before the store opens) that does the same through `Closer`, saving the open editor
+  and the review first, then disposes the window, waits for AWT and starts the same watchdog as
+  a normal exit. Each step is bounded, about 15 s in all. Both paths take one lock and close once
+  (`CloserTest`, `SignalCloseTest`). If sync does not stop in time, the store is left open rather
+  than closed under it, the log says so, and SQLite undoes the write that did not finish. Closing checkpoints the WAL, unless another
   process is reading or writing: then it gives up at once and the last connection
   to close does it (`core:sqlite`). So exit never waits for a lock. `Shutdown` waits
   up to 2 s for AWT to shut itself down before `exitProcess`: exiting at once

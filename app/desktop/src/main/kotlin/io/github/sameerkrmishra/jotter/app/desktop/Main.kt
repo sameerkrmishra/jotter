@@ -52,6 +52,13 @@ public fun main(args: Array<String>) {
     }
     val autoclose = AUTOCLOSE_ARG in args
     val shutdown = Shutdown()
+    // Before the store opens, so that a signal at any time finds a way to close it.
+    val signals =
+        SignalClose {
+            shutdown.closed()
+            shutdown.afterSignal()
+        }
+    signals.install()
     val logs = installLinuxLogging("desktop", System::getenv)
     logUncaughtFailures()
     log.info { "Jotter ${desktopVersion()} starts on ${desktopPlatform()}" }
@@ -65,11 +72,15 @@ public fun main(args: Array<String>) {
             shutdown.exit(1)
             return
         }
-    runApp(store, autoclose, logs)
+    signals.storeOpened(store::close)
+    if (!runApp(store, autoclose, logs, signals)) {
+        // SQLite undoes the write that did not finish when the process ends.
+        log.warn { "Jotter exits with the store open, as sync did not stop" }
+    }
     log.info { "Jotter exits" }
-    // The editor was saved before the window closed, and runApp finished the scope (sync and the
-    // scheduler), stopped the hub and closed the store; only now may the process end, if need be
-    // by a halt.
+    // The editor was saved before the window closed, and runApp stopped sync and the hub and
+    // closed the store, or left it to SQLite if sync would not stop; only now may the process
+    // end, if need be by a halt.
     shutdown.closed()
     shutdown.exit(0)
 }
@@ -120,16 +131,18 @@ private fun showFailure(
 /**
  * The store is closed after the scope is finished, as no query may still be running, and after the
  * hub is stopped, by [Closer]: when the window closes, or first, on SIGTERM, SIGINT or SIGHUP,
- * through a shutdown hook that also saves what the user typed. `application` must not exit the
- * process itself, or that would never happen; `main()` does, through [Shutdown], which also ends
- * it if exiting hangs, as spike 0002 saw once and Xvfb runs showed in one in five.
+ * through [signals]' shutdown hook, which also saves what the user typed. The [Closer] is attached
+ * before sync, the hub or the window start. `application` must not exit the process itself, or
+ * that would never happen; `main()` does, through [Shutdown], which also ends it if exiting hangs,
+ * as spike 0002 saw once and Xvfb runs showed in one in five. Returns whether the store is closed.
  */
 @Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
 private fun runApp(
     store: NoteStore,
     autoclose: Boolean,
     logs: okio.Path?,
-) {
+    signals: SignalClose,
+): Boolean {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val engine = SyncEngine(store, DeviceInfo(DEVICE_NAME, "linux"), Dispatchers.IO)
     // The keyring through the Secret Service, or the file the user chose (ADR-0016).
@@ -144,11 +157,21 @@ private fun runApp(
         )
     val scheduler = SyncScheduler(manager::syncAll)
     val hub = hubControls(manager, scope)
+    var app: AppViewModel? = null
+    val closer =
+        Closer(
+            keep = { app?.keep()?.join() },
+            finish = { scope.coroutineContext.job.cancelAndJoin() },
+            // Stops it, but keeps the user's setting, so that it starts again with the app.
+            stopHub = { hub.stop() },
+            closeStore = store::close,
+        )
+    signals.attach(closer)
     // A hub the user left on starts again with the app.
     scope.launch { hub.resume() }
     // In the app's scope, so that exit cancels a running sync before the store closes.
     scheduler.start(scope, store.notes.observeRevisionMark())
-    val app =
+    val viewModel =
         AppViewModel(
             store.notes,
             ConflictResolver(store),
@@ -157,27 +180,15 @@ private fun runApp(
             SyncControls(manager, scheduler, hub),
             desktopDebugLog(logs, manager, null, debugLogFile),
         )
-    val closer =
-        Closer(
-            keep = { app.keep().join() },
-            finish = { scope.coroutineContext.job.cancelAndJoin() },
-            // Stops it, but keeps the user's setting, so that it starts again with the app.
-            stopHub = { hub.stop() },
-            closeStore = store::close,
-        )
-    // A signal runs the shutdown hooks, but not the window's close: logout and system shutdown
-    // send SIGTERM. When the window's close got there first, this finds everything closed.
-    Runtime.getRuntime().addShutdownHook(
-        Thread({ runBlocking { closer.close(saveFirst = true) } }, "jotter-close-on-signal"),
-    )
+    app = viewModel
     application(exitProcessOnExit = false) {
-        val close = { app.requestExit(::exitApplication) }
+        val close = { viewModel.requestExit(::exitApplication) }
         Window(onCloseRequest = close, title = "Jotter") {
             AutoClose(autoclose, close)
-            JotterApp(app)
+            JotterApp(viewModel)
         }
     }
-    runBlocking { closer.close(saveFirst = false) }
+    return runBlocking { closer.close(saveFirst = false) }
 }
 
 /**
