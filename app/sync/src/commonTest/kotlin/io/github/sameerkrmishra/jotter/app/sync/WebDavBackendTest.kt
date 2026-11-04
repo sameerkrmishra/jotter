@@ -63,6 +63,20 @@ class WebDavBackendTest {
         }
     }
 
+    /** The keyring of a computer that has none: every call fails. */
+    private object NoKeyring : SecretStore {
+        override suspend fun read(key: SecretKey): Secret? =
+            throw SecretStoreUnavailableException("No keyring here.")
+
+        override suspend fun write(
+            key: SecretKey,
+            secret: Secret,
+        ): Unit = throw SecretStoreUnavailableException("No keyring here.")
+
+        override suspend fun delete(key: SecretKey): Unit =
+            throw SecretStoreUnavailableException("No keyring here.")
+    }
+
     private fun test(block: suspend TempDir.() -> Unit) = runTest { TempDir().use { it.block() } }
 
     @Test
@@ -249,8 +263,7 @@ class WebDavBackendTest {
                 assertEquals(SecretPlace.FILE, backend.config.secretPlace)
                 assertEquals(password, file.read(SecretKey(backend.id, SecretKind.APP_PASSWORD)))
                 assertEquals(
-                    "Its password is kept in plain text in /config/secrets.json, as chosen when " +
-                        "it was added.",
+                    "Its password is kept in plain text in /config/secrets.json, as you chose.",
                     device.manager.whereSecretsAre(backend),
                 )
                 assertTrue(device.manager.remove(backend.id))
@@ -471,6 +484,163 @@ class WebDavBackendTest {
                     PasswordChange.Refused("Cannot store the app password: The keyring is locked."),
                     device.manager.changePassword("dav", Secret("x")),
                 )
+            }
+        }
+
+    @Test
+    fun afterARestoreWithoutAKeyringThePasswordCanGoToTheFile() =
+        test {
+            val server = Server()
+            server.marked = true
+            val file = InMemorySecretStore()
+            Device(this, "a", secrets = NoKeyring, fileSecrets = file, webDav = server).use {
+                // A database restored from a computer that kept the password in its keyring.
+                it.store.backends.add(
+                    BackendRecord(
+                        "dav",
+                        "webdav",
+                        "dav",
+                        """{"url":"$url/","username":"me","secrets":"keyring"}""",
+                        Instant.fromEpochMilliseconds(0),
+                    ),
+                )
+                assertEquals(
+                    Outcome.FAILED,
+                    it.manager
+                        .syncAll()
+                        .single()
+                        .attempt.outcome,
+                )
+                assertEquals(
+                    PasswordChange.NoKeyring("No keyring here."),
+                    it.manager.changePassword("dav", password),
+                )
+                assertTrue(file.secrets.isEmpty())
+                assertEquals(
+                    SecretPlace.KEYRING,
+                    it.manager
+                        .list()
+                        .single()
+                        .config.secretPlace,
+                )
+
+                val moved = it.manager.changePassword("dav", password, SecretPlace.FILE)
+                val left = assertIs<PasswordChange.Moved>(moved).leftBehind!!
+                assertEquals(SecretPlace.FILE, moved.to)
+                assertTrue(left.startsWith("Jotter could not delete the old copy"), left)
+                assertTrue(left.contains("secret-tool clear application jotter backend dav"), left)
+                assertEquals(
+                    SecretPlace.FILE,
+                    it.manager
+                        .list()
+                        .single()
+                        .config.secretPlace,
+                )
+                assertEquals(password, file.read(SecretKey("dav", SecretKind.APP_PASSWORD)))
+                assertEquals(
+                    Outcome.SYNCED,
+                    it.manager
+                        .syncAll()
+                        .single()
+                        .attempt.outcome,
+                )
+                assertEquals(password.reveal(), server.passwords.last())
+
+                // Entered again, it stays in the file.
+                val next = Secret("app-password-2")
+                assertEquals(PasswordChange.Changed, it.manager.changePassword("dav", next))
+                assertEquals(next, file.read(SecretKey("dav", SecretKind.APP_PASSWORD)))
+            }
+        }
+
+    @Test
+    fun aPasswordMovesFromTheFileToTheKeyring() =
+        test {
+            val server = Server()
+            server.marked = true
+            val file = InMemorySecretStore()
+            Device(this, "a", fileSecrets = file, webDav = server).use { device ->
+                val added =
+                    device.manager.addWebDav(url, "me", password, secretPlace = SecretPlace.FILE)
+                val backend = assertIs<AddResult.Added>(added).backend
+                val key = SecretKey(backend.id, SecretKind.APP_PASSWORD)
+                val next = Secret("app-password-2")
+
+                assertEquals(
+                    PasswordChange.Moved(SecretPlace.KEYRING, null),
+                    device.manager.changePassword(backend.id, next, SecretPlace.KEYRING),
+                )
+                assertEquals(next, device.secrets.read(key))
+                assertTrue(file.secrets.isEmpty())
+                val now = device.manager.list().single()
+                assertEquals(SecretPlace.KEYRING, now.config.secretPlace)
+                assertEquals(
+                    "Its password is kept in the keyring.",
+                    device.manager.whereSecretsAre(now),
+                )
+                assertEquals(
+                    Outcome.SYNCED,
+                    device.manager
+                        .syncAll()
+                        .single()
+                        .attempt.outcome,
+                )
+                assertEquals(next.reveal(), server.passwords.last())
+            }
+        }
+
+    @Test
+    fun aMoveThatCannotWriteChangesNothing() =
+        test {
+            val server = Server()
+            server.marked = true
+            val full =
+                object : SecretStore by InMemorySecretStore() {
+                    override suspend fun write(
+                        key: SecretKey,
+                        secret: Secret,
+                    ): Unit = throw SecretStoreException("The disk is full.")
+                }
+            Device(this, "a", fileSecrets = full, webDav = server).use { device ->
+                val backend =
+                    assertIs<AddResult.Added>(device.manager.addWebDav(url, "me", password)).backend
+                val key = SecretKey(backend.id, SecretKind.APP_PASSWORD)
+                assertEquals(
+                    PasswordChange.Refused("Cannot store the app password: The disk is full."),
+                    device.manager.changePassword(backend.id, Secret("x"), SecretPlace.FILE),
+                )
+                assertEquals(password, device.secrets.read(key))
+                assertEquals(
+                    SecretPlace.KEYRING,
+                    device.manager
+                        .list()
+                        .single()
+                        .config.secretPlace,
+                )
+            }
+        }
+
+    @Test
+    fun whereBothPlacesAreOneStoreAMoveKeepsTheSecret() =
+        test {
+            val server = Server()
+            server.marked = true
+            val sealed = InMemorySecretStore()
+            Device(
+                this,
+                "a",
+                secrets = sealed,
+                fileSecrets = sealed,
+                webDav = server,
+                home = SecretHome.ANDROID,
+            ).use { device ->
+                val backend =
+                    assertIs<AddResult.Added>(device.manager.addWebDav(url, "me", password)).backend
+                assertEquals(
+                    PasswordChange.Moved(SecretPlace.FILE, null),
+                    device.manager.changePassword(backend.id, password, SecretPlace.FILE),
+                )
+                assertEquals(password, sealed.read(SecretKey(backend.id, SecretKind.APP_PASSWORD)))
             }
         }
 

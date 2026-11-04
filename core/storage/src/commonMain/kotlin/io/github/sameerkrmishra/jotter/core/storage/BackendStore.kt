@@ -102,6 +102,24 @@ public class BackendStore internal constructor(
     }
 
     /**
+     * Replaces the settings of the backend [id] with [settings], as when its secret moves to
+     * another store. Returns whether it was there.
+     *
+     * @throws StorageBusyException if another process kept the database locked.
+     */
+    public fun updateSettings(
+        id: String,
+        settings: String,
+    ): Boolean =
+        reportingBusy {
+            database.transactionWithResult {
+                val found = get(id) != null
+                queries.updateSettings(settings.toStorableText(), id)
+                found
+            }
+        }
+
+    /**
      * Removes the backend [id] from the list. Its sync tables stay; see the class. Returns whether
      * it was there.
      *
