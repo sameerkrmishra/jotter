@@ -14,7 +14,7 @@ private const val MAX_FRAMES = 12
  * query often hold the user name, as in Nextcloud's `/remote.php/dav/files/me/` (ADR-0021).
  */
 private val URL =
-    Regex("""\b([A-Za-z][A-Za-z0-9+.-]*)://(?:[^/\s?#@]*@)?([^/\s?#@"'<>()]+)[^\s"'<>()]*""")
+    Regex("""\b([A-Za-z][A-Za-z0-9+.-]*)://(?:[^/\s?#]*@)?([^/\s?#@"'<>()]+)[^\s"'<>()]*""")
 
 /** An `Authorization` header or field, to the end of its line. */
 private val AUTHORIZATION =

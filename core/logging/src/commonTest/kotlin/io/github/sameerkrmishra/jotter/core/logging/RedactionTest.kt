@@ -22,6 +22,17 @@ class RedactionTest {
     }
 
     @Test
+    fun userInfoGoesUpToItsLastAt() {
+        // A raw @ in the user name: everything up to the last @ before the host is user info.
+        assertEquals("https://dav.host", redact("https://me@x.org:SECRET@dav.host/"))
+        assertEquals("https://dav.host:8443", redact("https://me%40x.org:SECRET@dav.host:8443/a"))
+        assertEquals("https://dav.host", redact("https://me@dav.host/"))
+        // An @ in the path, after the host, is not user info, and the path goes anyway.
+        assertEquals("https://dav.host x", redact("https://dav.host/files/me@x.org/ x"))
+        assertEquals("https://dav.host", redact("https://u:p@dav.host/files/me@x.org/"))
+    }
+
+    @Test
     fun theHomeDirectoryBecomesATilde() {
         assertEquals("~/notes.db and ~", redact("/home/me/notes.db and /home/me", "/home/me/"))
         assertEquals("/home/meg/notes.db", redact("/home/meg/notes.db", "/home/me"))
