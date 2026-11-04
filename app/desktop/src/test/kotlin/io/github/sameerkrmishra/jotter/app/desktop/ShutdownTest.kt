@@ -7,6 +7,7 @@ import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -56,6 +57,27 @@ class ShutdownTest {
         val waitedMs = (System.nanoTime() - start) / 1_000_000
         assertEquals(3, exits.poll())
         assertTrue(waitedMs in 200..1_500, "waited $waitedMs ms")
+    }
+
+    @Test
+    fun awtCountsAsAliveWhileItsEventQueueOrShutdownThreadRuns() {
+        assertFalse(awtThreadsAlive(), "no AWT in this test")
+        for (name in listOf("AWT-EventQueue-0", "AWT-Shutdown")) {
+            val stop = CountDownLatch(1)
+            val awt = thread(name = name, isDaemon = true) { stop.await() }
+            try {
+                assertTrue(awtThreadsAlive(), name)
+            } finally {
+                stop.countDown()
+                awt.join(5_000)
+            }
+            assertFalse(awtThreadsAlive(), "$name ended")
+        }
+        val other = CountDownLatch(1)
+        val unrelated = thread(name = "AWT-XAWT", isDaemon = true) { other.await() }
+        assertFalse(awtThreadsAlive(), "the toolkit thread does not end by itself")
+        other.countDown()
+        unrelated.join(5_000)
     }
 
     @Test

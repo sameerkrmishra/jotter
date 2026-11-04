@@ -43,7 +43,9 @@ the desktop app, the CLI and one Java runtime; the CLI is also released alone as
   time, which also changed the jar's hashed name), it puts the JDK's own `bin/java` back into
   the runtime (Compose's jlink strips `bin/`), for the CLI, and it makes the runtime's base
   class data archive, `lib/server/classes.jsa`, which jlink does not, with `java -Xshare:dump`
-  in an empty environment (the locale is part of the archive).
+  in an empty environment (the locale is part of the archive) and with a fixed heap and
+  collector (`-Xmx128m -Xms128m -XX:+UseG1GC`: by default both follow the machine's memory and
+  processors, and so did the archive; with them it was the same with 1, 4 and 12 processors).
 - `opt/jotter-cli/`: `app:cli`'s jars and a start script of its own
   (`appimage-script.template`), which runs that `java` with the standalone script's flags and
   the base archive, but without the CLI's own (dynamic) class data archive, see below.
@@ -79,7 +81,8 @@ minute than the first ended. Its first version passed when it should not have: `
 found its root through git, so in a `git archive` copy under `build/` it packed the enclosing
 checkout, twice. With that fixed it found three differences, all now gone: the Skiko jar's
 entry times, the locale in `classes.jsa`, and the mode of the image's root directory (700 under
-umask 077).
+umask 077). A review then found `classes.jsa` depending on the machine's memory and processor
+count, which two builds on one machine cannot show.
 
 **No class data archive of the CLI's own.** A dynamic archive made at build time would start
 the CLI in the AppImage faster, and JDK 21 accepts it at another path (the mount point), but
@@ -91,9 +94,9 @@ checks that the CLI can use it (`-Xshare:on`). One made at run time is not possi
 the image is read-only, and every file in it has the same time, so an archive in the user's
 cache could not be told stale after an update.
 
-While this was decided, on 2026-11-04: `reproducible-build.sh` built `c3e61d4` four times, in
+While this was decided, on 2026-11-04: `reproducible-build.sh` built `532448f` four times, in
 two runs, locally (Temurin 21.0.12.1, squashfs-tools 4.7.5), and gave the same AppImage
-(`65fdc401…`, 74,263,032 bytes) and CLI zip (`59e3ba4f…`, 13,048,226 bytes) each time. The
+(`60f13244…`, 74,275,320 bytes) and CLI zip (`59e3ba4f…`, 13,048,226 bytes) each time. The
 release workflow's dry run on CI, of an earlier commit with Temurin 21.0.13 and squashfs-tools
 4.6.1, gave the same CLI zip and the same unsigned APK as M5's notes record (`a5d606ab…`).
 
