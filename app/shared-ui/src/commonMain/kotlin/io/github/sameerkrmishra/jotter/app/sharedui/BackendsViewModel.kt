@@ -10,6 +10,7 @@ import io.github.sameerkrmishra.jotter.app.sync.BackendManager
 import io.github.sameerkrmishra.jotter.app.sync.BackendStatus
 import io.github.sameerkrmishra.jotter.app.sync.Outcome
 import io.github.sameerkrmishra.jotter.app.sync.PasswordChange
+import io.github.sameerkrmishra.jotter.app.sync.PeerConfig
 import io.github.sameerkrmishra.jotter.app.sync.Secret
 import io.github.sameerkrmishra.jotter.app.sync.SecretPlace
 import io.github.sameerkrmishra.jotter.app.sync.SecretStoreException
@@ -262,7 +263,9 @@ internal class BackendsViewModel(
         noKeyring ?: return
         noKeyring = null
         val retry = retryWithFile
-        if (retry == null) {
+        if (changingPassword != null && passwordMetNoKeyring) {
+            confirmPassword(SecretPlace.FILE)
+        } else if (retry == null) {
             addServer(setUpNewStore = setUpAsked, SecretPlace.FILE)
         } else {
             addWith(retry)
@@ -306,10 +309,14 @@ internal class BackendsViewModel(
         }
     }
 
-    /** The user did not want the file. Nothing was added. */
+    /** The user did not want the file. Nothing was added or changed. */
     fun cancelPasswordFile() {
         noKeyring = null
+        passwordMetNoKeyring = false
     }
+
+    // Whether the no-keyring question is about the password being replaced, not an add.
+    private var passwordMetNoKeyring = false
 
     // Whether the add that met no keyring had the user's yes to set the collection up.
     private var setUpAsked = false
@@ -362,23 +369,48 @@ internal class BackendsViewModel(
     fun cancelPassword() {
         changingPassword = null
         davPassword = ""
+        passwordMetNoKeyring = false
     }
 
-    /** Checks the typed password with the server and stores it, then syncs. */
-    fun confirmPassword() {
+    /**
+     * Checks the typed password with the server and stores it, then syncs. It goes where the
+     * backend keeps it, or to [place]. If no keyring answers, as after restoring the database on
+     * another computer, the user is asked whether to keep it in the file instead.
+     */
+    fun confirmPassword(place: SecretPlace? = null) {
         val backend = changingPassword ?: return
+        if (busy) return
         val password = Secret(davPassword)
+        val what = if (backend.config is PeerConfig) "pairing token" else "app password"
+        passwordMetNoKeyring = false
         busy = true
         scope.launch {
             try {
                 reporting {
-                    when (val result = manager.changePassword(backend.id, password)) {
+                    when (val result = manager.changePassword(backend.id, password, place)) {
                         PasswordChange.Changed -> {
-                            changingPassword = null
-                            davPassword = ""
-                            message =
-                                "Stored the new app password of ${backend.name}. It syncs now."
+                            passwordStored()
+                            message = "Stored the new $what of ${backend.name}. It syncs now."
                             scheduler.syncNow()
+                        }
+                        is PasswordChange.Moved -> {
+                            passwordStored()
+                            val where =
+                                when (result.to) {
+                                    SecretPlace.KEYRING -> "the keyring"
+                                    SecretPlace.FILE -> "the file, in plain text"
+                                }
+                            message =
+                                listOfNotNull(
+                                    "Stored the new $what of ${backend.name} in $where. It " +
+                                        "syncs now.",
+                                    result.leftBehind,
+                                ).joinToString(" ")
+                            scheduler.syncNow()
+                        }
+                        is PasswordChange.NoKeyring -> {
+                            passwordMetNoKeyring = true
+                            noKeyring = result.reason
                         }
                         is PasswordChange.Refused -> message = result.reason
                     }
@@ -387,6 +419,11 @@ internal class BackendsViewModel(
                 busy = false
             }
         }
+    }
+
+    private fun passwordStored() {
+        changingPassword = null
+        davPassword = ""
     }
 
     /** Where the secrets of [backend] are kept, in plain words, or null if it needs none. */
