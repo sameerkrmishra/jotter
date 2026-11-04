@@ -111,14 +111,20 @@ public object Logging {
 public class Logger(
     public val tag: String,
 ) {
-    /** Logs [message] at [LogLevel.DEBUG]. */
-    public fun debug(message: () -> String) {
-        log(LogLevel.DEBUG, null, message)
+    /** Logs [message] at [LogLevel.DEBUG], with [failure] if there is one. */
+    public fun debug(
+        failure: Throwable? = null,
+        message: () -> String,
+    ) {
+        log(LogLevel.DEBUG, failure, message)
     }
 
-    /** Logs [message] at [LogLevel.INFO]. */
-    public fun info(message: () -> String) {
-        log(LogLevel.INFO, null, message)
+    /** Logs [message] at [LogLevel.INFO], with [failure] if there is one. */
+    public fun info(
+        failure: Throwable? = null,
+        message: () -> String,
+    ) {
+        log(LogLevel.INFO, failure, message)
     }
 
     /** Logs [message] at [LogLevel.WARN], with [failure] if there is one. */

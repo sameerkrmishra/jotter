@@ -12,6 +12,7 @@ import io.github.sameerkrmishra.jotter.backend.peer.PeerError
 import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
 import io.github.sameerkrmishra.jotter.backend.peer.dto.BlobEntryDto
 import io.github.sameerkrmishra.jotter.backend.peer.dto.ErrorDto
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -50,10 +51,8 @@ internal class PeerHandler(
         body: suspend (length: Int) -> ByteArray,
     ): Reply =
         try {
-            if (!authenticate(
-                    head.authorization,
-                )
-            ) {
+            if (!authenticate(head.authorization)) {
+                log.info { "Refused ${describe(head)}: no valid token" }
                 throw refusal(PeerError.UNAUTHORIZED, "A valid token is needed")
             }
             route(head, body)
@@ -74,9 +73,10 @@ internal class PeerHandler(
         } catch (e: CancellationException) {
             throw e
         } catch (
-            @Suppress("TooGenericExceptionCaught") _: Exception,
+            @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
-            // A bug in the store. Its message could say anything, so it stays here.
+            // A bug in the store. Its message could say anything, so it stays here and in the log.
+            log.error(e) { "The hub failed to answer ${describe(head)}" }
             error(PeerError.FAILED, "The hub failed")
         }
 
@@ -253,3 +253,8 @@ internal class PeerHandler(
         }
     }
 }
+
+private val log = Logger("hub")
+
+/** A request for the log: its method and endpoint, without the path it names. */
+private fun describe(head: RequestHead) = "${head.method} ${head.target.substringBefore('?')}"

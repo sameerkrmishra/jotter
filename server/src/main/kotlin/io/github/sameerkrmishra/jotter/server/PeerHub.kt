@@ -4,6 +4,7 @@ import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreFailureException
 import io.github.sameerkrmishra.jotter.backend.localfolder.LocalFolderBlobStore
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -160,9 +161,8 @@ public class PeerHub internal constructor(
             next =
                 PeerServer(handler, config.limits) { reason ->
                     // The status must not say Running when nothing is served.
-                    if (server ===
-                        next
-                    ) {
+                    if (server === next) {
+                        log.warn { "The hub on ${config.host}:${config.port} stopped: $reason" }
                         mutableStatus.value =
                             HubStatus.Failed("The hub on ${config.host}: $reason")
                     }
@@ -185,6 +185,7 @@ public class PeerHub internal constructor(
                 ) {
                     val where = "${config.host}:${config.port}"
                     val message = "The hub cannot start on $where: ${e.message}"
+                    log.error(e) { "The hub cannot start on $where" }
                     mutableStatus.value = HubStatus.Failed(message)
                     throw HubStartException(message, e)
                 } finally {
@@ -192,6 +193,7 @@ public class PeerHub internal constructor(
                 }
             server = next
             mutableStatus.value = running
+            log.info { "The hub listens on ${running.host}:${running.port}" }
             running
         }
 
@@ -200,6 +202,7 @@ public class PeerHub internal constructor(
         mutex.withLock {
             server?.let { withContext(dispatcher) { it.stop() } }
             server = null
+            if (mutableStatus.value != HubStatus.Stopped) log.info { "The hub stopped" }
             mutableStatus.value = HubStatus.Stopped
         }
     }
@@ -212,7 +215,8 @@ public class PeerHub internal constructor(
      *   a control character.
      * @throws IOException if the paired devices cannot be saved; nothing is paired then.
      */
-    public suspend fun pair(deviceName: String): Pairing = tokens.pair(deviceName)
+    public suspend fun pair(deviceName: String): Pairing =
+        tokens.pair(deviceName).also { log.info { "Paired device ${it.device.id}" } }
 
     /**
      * Every paired device.
@@ -227,5 +231,8 @@ public class PeerHub internal constructor(
      *
      * @throws IOException if the paired devices cannot be saved; nothing changes then.
      */
-    public suspend fun unpair(deviceId: String): Boolean = tokens.unpair(deviceId)
+    public suspend fun unpair(deviceId: String): Boolean =
+        tokens.unpair(deviceId).also { log.info { "Unpaired device $deviceId: $it" } }
 }
+
+private val log = Logger("hub")

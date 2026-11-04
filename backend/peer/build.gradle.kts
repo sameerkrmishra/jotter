@@ -9,6 +9,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.backend.api)
+            implementation(projects.core.logging)
             implementation(libs.ktor.client.core)
             // One engine on every target: the JVM, Android and linuxX64 (ADR-0006).
             implementation(libs.ktor.client.cio)
