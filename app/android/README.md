@@ -44,6 +44,7 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
 | `SealedFileSecretStore`, `AesGcmCipher`, `keystoreKey` | Backend secrets, sealed with an AES-256 key in the Android Keystore, in `noBackupFilesDir` |
 | `AndroidTailnet`, `tailnetRefusal` | A hub's token goes out only while Tailscale's VPN carries the app, or to loopback |
 | `ScreenExport`, `androidDebugLog`, `androidPlatform` | The debug log: `DebugReport` with the app's log, saved through the Activity on screen |
+| `ScreenDatabaseExport`, `exportThroughPicker`, `ChosenDocument` | "Export database": a checked copy made in the app's cache, then written to the document the user picks |
 
 ## Design
 
@@ -61,6 +62,16 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
   uncaught failures. "Debug log" on the Sync screen shows the whole debug log, and "Save…"
   hands it to Android's document picker (`ACTION_CREATE_DOCUMENT`): the user picks a folder or
   a cloud drive. Jotter itself sends it nowhere.
+- **Export database** ([ADR-0002](../../docs/adr/0002-sqlite-via-sqldelight.md)), at the foot
+  of the Sync screen: the shared dialog says what the copy holds and that passwords and
+  pairing tokens are not in it. "Choose where…" first makes the copy with `VACUUM INTO` in
+  `cacheDir/export`, where it is checked; a full phone is said there, before any document
+  exists. Then Android's document picker (`ACTION_CREATE_DOCUMENT`, suggested name
+  `jotter-notes.db`) asks for a place, and the copy is written to that document byte for
+  byte and synced. The picker gives a document, not a folder, so the copy cannot be renamed
+  into place: if writing it fails, the document is deleted instead of left half written. The
+  picker itself asks before it overwrites a document, or gives the new one another name. The
+  staged copy is always deleted. The live database is only read, also while a sync writes.
 - **Threads.** The screens run on the main thread and every database call on
   `Dispatchers.IO`, as on the desktop. The scheduler runs on `Dispatchers.Default`, the sync
   engine and the backends on their own dispatchers: no sync work runs on the main thread,
@@ -86,7 +97,12 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
 - **Backups** (`res/xml`, `res/xml-v28`): from Android 9, Auto Backup and device transfer copy
   `jotter.db` and its `-wal` only, and a cloud backup only if it is end-to-end encrypted. On
   Android 8, which cannot require that, nothing is backed up. Never the secrets, whose key
-  cannot leave the phone anyway.
+  cannot leave the phone anyway. The rules name `jotter.db` alone: Android adds a database's
+  `-journal` and `-wal` to such an include itself, so naming the `-wal` too put it in the
+  backup twice.
+- **Secrets on the Sync screen** are said as Android keeps them (`SecretHome.ANDROID`): on
+  this phone only, sealed with a key in the Android Keystore, in the app's own storage. A
+  missing one, as after a restore, says to enter it again, never to unlock a keyring.
 - **The tailnet.** Before a hub is opened, `AndroidTailnet` asks whether this app's network
   is a VPN holding a Tailscale address (`100.64.0.0/10` or `fd7a:115c:a1e0::/48`), as
   Tailscale's app is. If not, the hub is unreachable with a plain reason and nothing is sent,
@@ -126,7 +142,8 @@ Device tests (`src/androidTest`; CI's `android-device` job runs them on API 26 a
 
 | Test | What it shows |
 |---|---|
-| `MainActivityTest` | A note written in the app is stored; emoji, also one newer than API 26, are edited and shown without EmojiCompat; Back leaves the editor and then the app; turning the phone keeps the draft; leaving the screen stores it; the Sync screen offers WebDAV and the hub, and says why there is no folder; the password and token fields ask for a password keyboard without autocorrection (`EditorInfo.inputType`) |
+| `DatabaseExportTest` | Five copies made while another connection writes notes all open, with this device's id, and their counts only grow; a cancelled picker leaves nothing; a full place is said plainly and the half-written document deleted; the staged copy never stays |
+| `MainActivityTest` | A note written in the app is stored; emoji, also one newer than API 26, are edited and shown without EmojiCompat; Back leaves the editor and then the app; turning the phone keeps the draft; leaving the screen stores it; the Sync screen offers WebDAV and the hub, and says why there is no folder; the password and token fields ask for a password keyboard without autocorrection (`EditorInfo.inputType`); "Export database…" on the Sync screen opens the dialog that says secrets are not in the copy |
 | `ShareActivityTest` | Shared text becomes one note, also when the phone turns; 110,000 characters are stored whole; an image is refused; text beside a file is kept; an empty share saves nothing; an extra that cannot be unparcelled does not crash the window |
 | `SyncWorkerTest` | `SyncWorker` syncs both ways with another device through a folder and returns after its round, with no backend call on the main thread; the periodic job exists only while a backend does; a database that cannot open ends the job quietly |
 | `KeystoreSecretsTest` | The sealed store with a real Keystore key; a lost key means entering the secret again |
@@ -148,14 +165,19 @@ tests and the end-to-end script passed on API 36 and API 26.
 
 ## Not verified
 
-- Saving the debug log through the document picker: the Activity's export is not driven by a
-  device test, as the picker is another app's screen.
+- Saving the debug log or an exported database through the document picker: the Activity's
+  side is not driven by a device test, as the picker is another app's screen.
+  `DatabaseExportTest` writes to a file standing in for the picked document.
 - A real phone, a real tailnet, Tailscale's Android app, and MagicDNS names: the emulators
   have no VPN, so only the refusal side of the Tailscale check ran on a device, and socket
   binding ran against the emulator's own network, not a VPN that goes away mid-sync.
 - WebDAV from a device: the WebDAV client is the same code as on the desktop, and the device
   tests sync through a folder and the hub.
-- Auto Backup and device transfer: the rules are written, not exercised.
+- Auto Backup and device transfer: on 2026-11-04 `bmgr backupnow` to the local transport (with
+  `backup_local_transport_parameters` `fake_encryption_flag=true,is_encrypted=true`) gave a tar
+  with `jotter.db` and `jotter.db-wal` once each on API 36 (before the fix, the `-wal` twice),
+  and nothing of Jotter's on API 26. Android 9 to 11 (`xml-v28`) and a real restore or device
+  transfer were not run.
 - Doze, App Standby and a process frozen in the background; when Android actually runs the
   jobs.
 - The screens on a phone: the device tests drive them, but nobody has looked at them. The

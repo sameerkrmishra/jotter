@@ -27,7 +27,7 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 | Type | What it is |
 |---|---|
 | `linuxDatabasePath`, `DATABASE_ENVVAR` | Where the Linux apps keep the database, so the CLI and the desktop app agree. Plain strings, as this module has no file API |
-| `NoteStore` | Opens or creates the database file and this device's id. The composition root owns it and closes it |
+| `NoteStore` | Opens or creates the database file and this device's id. The composition root owns it and closes it. `exportTo` writes a consistent copy of the whole database to a new file with `VACUUM INTO` and checks it ("Export database", ADR-0002) |
 | `SyncStore`, `SyncStoreApi` | The tables behind sync. An opt-in at error level keeps it to `core:sync`, as Kotlin has no friend modules |
 | `OpenConflict`, `HiddenHead`, `HiddenReason`, `InvalidRevision`, `InvalidReason` | What the conflict screen lists |
 | `MAX_NOTE_CHARS`, `requireNoteSize`, `NoteTooLargeException` | The cap on a note's text, which keeps every note small enough to sync ([ADR-0014](../../docs/adr/0014-sync-failure-handling.md)) |
