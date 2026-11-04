@@ -17,6 +17,7 @@ import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.app.sync.installLinuxLogging
 import io.github.sameerkrmishra.jotter.app.sync.linuxSecretStores
+import io.github.sameerkrmishra.jotter.app.sync.sameFileOnDisk
 import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
 import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
@@ -151,7 +152,10 @@ private fun runApp(
             Dispatchers.IO,
             SyncControls(manager, scheduler, hub),
             desktopDebugLog(logs, manager, null, debugLogFile),
-            DatabaseFile(::chooseDatabaseFile, DatabaseExport(store, Dispatchers.IO)),
+            DatabaseFile(
+                ::chooseDatabaseFile,
+                DatabaseExport(store, Dispatchers.IO, sameFile = ::sameFileOnDisk),
+            ),
         )
     application(exitProcessOnExit = false) {
         val close = { app.requestExit(::exitApplication) }

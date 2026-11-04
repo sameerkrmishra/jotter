@@ -77,6 +77,11 @@ class ExportDatabaseCommandTest {
         val result = jotter("export-database", "--replace", database.toString())
         assertEquals(1, result.statusCode)
         assertContains(result.stderr, "That is the notes file Jotter is using")
+        // Another name for the same file, as JOTTER.db is on a case-insensitive stick.
+        val link = Files.createLink(out.resolve("JOTTER.db"), database)
+        val viaLink = jotter("export-database", "--replace", link.toString())
+        assertEquals(1, viaLink.statusCode)
+        assertContains(viaLink.stderr, "That is the notes file Jotter is using")
         assertContains(jotter("list").stdout, "milk")
     }
 

@@ -3,6 +3,7 @@ package io.github.sameerkrmishra.jotter.app.sync
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
+import okio.Path.Companion.toPath
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
@@ -10,6 +11,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -98,6 +100,39 @@ class DatabaseExportJvmTest {
                         folder,
                         PosixFilePermissions.fromString("rwx------"),
                     )
+                }
+            }
+        }
+
+    @Test
+    fun aLinkToTheLiveDatabaseIsNeverReplaced() =
+        runTest {
+            TempDir().use { dir ->
+                Device(dir, "a").use { device ->
+                    device.store.notes.create("", "milk")
+                    val live = device.file.toPath()
+                    val link = dir.folder("out") / "JOTTER.db"
+                    Files.createLink(link.toNioPath(), live.toNioPath())
+                    val export =
+                        DatabaseExport(
+                            device.store,
+                            EmptyCoroutineContext,
+                            sameFile = ::sameFileOnDisk,
+                        )
+                    assertEquals(
+                        ExportOutcome.Failed(LIVE_DATABASE),
+                        export.export(link, replace = true),
+                    )
+                    assertTrue(sameFileOnDisk(link, live))
+                    assertEquals(
+                        "milk",
+                        device.store.notes
+                            .list()
+                            .single()
+                            .body,
+                    )
+                    // Different files, or one that is not there, are not the same.
+                    assertFalse(sameFileOnDisk(link, dir.folder("out") / "missing.db"))
                 }
             }
         }

@@ -6,6 +6,7 @@ import io.github.sameerkrmishra.jotter.core.storage.StorageProblem
 import io.github.sameerkrmishra.jotter.core.storage.storageProblemOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import okio.FileMetadata
 import okio.FileSystem
 import okio.IOException
 import okio.Path
@@ -50,12 +51,18 @@ public sealed interface ExportOutcome {
  *
  * @param io Where the blocking work runs.
  * @param describeFolder A folder as the user knows it, for what is said when the copy fails.
+ * @param sameFile Whether two existing files are one file on the disk, such as `JOTTER.db` and
+ *   `jotter.db` on a case-insensitive USB stick, or a link: `Files.isSameFile` on the JVM
+ *   ([sameFileOnDisk]). The paths are compared too, so a target that does not exist yet is safe
+ *   without it. Only a caller whose target can never be the database, such as Android's copy into
+ *   its own cache, may leave the default, which knows no file identity.
  */
 public class DatabaseExport(
     private val store: NoteStore,
     private val io: CoroutineContext,
     private val fileSystem: FileSystem = FileSystem.SYSTEM,
     private val describeFolder: (Path) -> String = Path::toString,
+    private val sameFile: (Path, Path) -> Boolean = { _, _ -> false },
 ) {
     /**
      * Writes the copy to [file], an absolute path. If [file] exists and [replace] is false,
@@ -70,7 +77,7 @@ public class DatabaseExport(
             when {
                 !file.isAbsolute || folder == null -> ExportOutcome.Failed(notAbsolute(file))
                 isLiveDatabase(file) -> ExportOutcome.Failed(LIVE_DATABASE)
-                fileSystem.metadataOrNull(folder)?.isDirectory != true ->
+                metadata(folder)?.isDirectory != true ->
                     ExportOutcome.Failed(
                         "The folder ${describeFolder(folder)} does not exist. Choose another " +
                             "place for the copy.",
@@ -120,12 +127,32 @@ public class DatabaseExport(
         }
     }
 
-    /** Whether [file] is the database itself or one of its files beside it. */
+    /**
+     * Whether [file] is the database itself or one of its files beside it: by its path, or, if it
+     * exists, by its identity on the disk, as another spelling of a name can be the same file.
+     * Replacing it would put the copy in place of the live database.
+     */
     private fun isLiveDatabase(file: Path): Boolean {
         val live = canonical(store.path.toPath())
         val target = canonical(file)
-        return SIDE_FILES.any { suffix -> target.toString() == "$live$suffix" }
+        val exists = metadata(file) != null
+        return SIDE_FILES.any { suffix ->
+            val side = "$live$suffix".toPath()
+            target == side || (exists && metadata(side) != null && sameFile(file, side))
+        }
     }
+
+    /**
+     * The metadata of [path], or null if there is nothing there, also when a part of the path is a
+     * file, which okio reports as a failure on Linux Native but not on the JVM.
+     */
+    @Suppress("SwallowedException") // Not there, as far as an export is concerned.
+    private fun metadata(path: Path): FileMetadata? =
+        try {
+            fileSystem.metadataOrNull(path)
+        } catch (e: IOException) {
+            null
+        }
 
     @Suppress("SwallowedException") // A file that does not exist yet is compared as written.
     private fun canonical(path: Path): Path =

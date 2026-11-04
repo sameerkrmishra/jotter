@@ -9,6 +9,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import io.github.sameerkrmishra.jotter.app.sync.DatabaseExport
 import io.github.sameerkrmishra.jotter.app.sync.EXPORT_DATABASE_EXPLAINED
 import io.github.sameerkrmishra.jotter.app.sync.ExportOutcome
+import io.github.sameerkrmishra.jotter.app.sync.sameFileOnDisk
 import kotlinx.coroutines.runBlocking
 import okio.Path.Companion.toOkioPath
 import java.nio.file.Files
@@ -37,7 +38,10 @@ internal class ExportDatabaseCommand(
         val target = file.toAbsolutePath().toOkioPath()
         val outcome =
             withStore(location.path) { store ->
-                runBlocking { DatabaseExport(store, EmptyCoroutineContext).export(target, replace) }
+                runBlocking {
+                    DatabaseExport(store, EmptyCoroutineContext, sameFile = ::sameFileOnDisk)
+                        .export(target, replace)
+                }
             }
         val failure =
             when (outcome) {

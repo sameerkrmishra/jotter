@@ -167,7 +167,7 @@ class DatabaseExportTest {
             val full = Faulty(move = IOException("No space left on device"))
             Device(this, "a").use { device ->
                 val outcome =
-                    DatabaseExport(device.store, EmptyCoroutineContext, full) { "the stick" }
+                    DatabaseExport(device.store, EmptyCoroutineContext, full, { "the stick" })
                         .export(out / "jotter.db")
                 assertEquals(
                     "There is not enough free space in the stick for the copy. Free some space " +
@@ -207,6 +207,42 @@ class DatabaseExportTest {
                     DatabaseExport(device.store, EmptyCoroutineContext, stops).export(out / "x.db")
                 }
                 assertEquals(emptyList(), names(out))
+            }
+        }
+
+    @Test
+    fun anotherSpellingOfTheLiveDatabaseIsNeverReplaced() =
+        test {
+            // As on a FAT stick: A.DB is a.db, which the disk says and the paths do not.
+            val caseInsensitive = { a: Path, b: Path ->
+                a.toString().lowercase() == b.toString().lowercase()
+            }
+            Device(this, "a").use { device ->
+                device.store.notes.create("", "milk")
+                val live = device.file.toPath()
+                val before = files.read(live) { readByteString() }
+                val export =
+                    DatabaseExport(device.store, EmptyCoroutineContext, sameFile = caseInsensitive)
+                listOf("A.DB", "A.DB-WAL").forEach { name ->
+                    val other = live.parent!! / name
+                    files.write(other) { writeUtf8("the disk shows the live file here") }
+                    assertEquals(
+                        ExportOutcome.Failed(LIVE_DATABASE),
+                        export.export(other, replace = true),
+                    )
+                }
+                assertEquals(before, files.read(live) { readByteString() })
+                assertEquals(
+                    "milk",
+                    device.store.notes
+                        .list()
+                        .single()
+                        .body,
+                )
+                // A file the disk tells apart is a target as any other.
+                val elsewhere = folder("out") / "A.DB"
+                files.write(elsewhere) { writeUtf8("old") }
+                assertIs<ExportOutcome.Exported>(export.export(elsewhere, replace = true))
             }
         }
 
