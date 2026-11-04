@@ -23,6 +23,9 @@ public sealed interface BackendConfig {
 
     /** Where its [secrets] are kept. */
     public val secretPlace: SecretPlace get() = SecretPlace.KEYRING
+
+    /** The same backend with its [secrets] kept in [place]; itself if it has none. */
+    public fun withSecretPlace(place: SecretPlace): BackendConfig = this
 }
 
 /**
@@ -55,6 +58,8 @@ public data class WebDavConfig(
     override val location: String get() = url
 
     override val secrets: Set<SecretKind> get() = setOf(SecretKind.APP_PASSWORD)
+
+    override fun withSecretPlace(place: SecretPlace): BackendConfig = copy(secretPlace = place)
 }
 
 /**
@@ -73,6 +78,8 @@ public data class PeerConfig(
     override val location: String get() = "the PC hub at $host:$port"
 
     override val secrets: Set<SecretKind> get() = setOf(SecretKind.PAIRING_SECRET)
+
+    override fun withSecretPlace(place: SecretPlace): BackendConfig = copy(secretPlace = place)
 }
 
 /**

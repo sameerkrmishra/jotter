@@ -460,16 +460,14 @@ public class BackendManager internal constructor(
             try {
                 target.write(key, password)
             } catch (e: SecretStoreUnavailableException) {
-                return@withLock if (to == SecretPlace.KEYRING) {
-                    PasswordChange.NoKeyring(e.message.orEmpty())
-                } else {
-                    PasswordChange.Refused("Cannot store the $words: ${e.message}")
-                }
+                // Only the keyring is ever unavailable: the file is always there to write.
+                return@withLock PasswordChange.NoKeyring(e.message.orEmpty())
             } catch (e: SecretStoreException) {
                 return@withLock PasswordChange.Refused("Cannot store the $words: ${e.message}")
             }
             if (to == from) return@withLock PasswordChange.Changed
-            moveSecret(store, secrets, io, backend, key, to)
+            val placed = backend.copy(config = config.withSecretPlace(to))
+            moveSecret(store, secrets, io, backend, placed, key)
         }
 
     private fun openWithSecret(

@@ -212,7 +212,7 @@ class TwoAppsWebDavTest {
                 clickInDialog("Check and keep")
                 awaitText(NO_KEYRING_TITLE)
                 clickInDialog("Keep it in the file")
-                awaitText("in the file, in plain text. It syncs now.")
+                awaitText("in the secrets file, in plain text. It syncs now.")
                 awaitText("Jotter could not delete the old copy")
                 awaitText("Its password is kept in plain text in /config/jotter/secrets.json")
                 waitUntil(timeoutMillis = TIMEOUT_MS) {

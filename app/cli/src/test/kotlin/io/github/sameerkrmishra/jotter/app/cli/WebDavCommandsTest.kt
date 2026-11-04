@@ -301,6 +301,49 @@ class WebDavCommandsTest {
     }
 
     @Test
+    fun aPasswordInTheFileStaysThereWithoutAKeyring() {
+        val stores = SecretStores(NoKeyring, secretsHere.file, "/config/jotter/secrets.json")
+
+        fun run(vararg args: String) =
+            jotter(here, *args, input = "app-password\n", secrets = stores)
+
+        val added =
+            run(
+                "backends",
+                "add",
+                "--new",
+                "--password-in-file",
+                "webdav",
+                server.url,
+                "--user",
+                "me",
+            )
+        val id = added.stdout.trim()
+        val key = SecretKey(id, SecretKind.APP_PASSWORD)
+
+        val refused = run("backends", "password", "--store", "keyring", id)
+        assertEquals(1, refused.statusCode)
+        assertTrue(
+            refused.stderr.startsWith(
+                "jotter: Jotter cannot reach a keyring: no bus. Nothing was changed.",
+            ),
+            refused.stderr,
+        )
+        assertEquals(Secret("app-password"), secretsHere.file.secrets[key])
+
+        // Its own place, named or not, is a plain change.
+        for (args in listOf(arrayOf("--store", "file", id), arrayOf(id))) {
+            val same = run("backends", "password", *args)
+            assertEquals("Stored the new app password of 127.0.0.1.\n", same.stdout, same.stderr)
+        }
+        assertEquals(1, secretsHere.file.secrets.size)
+        assertEquals(
+            "jotter: no backend with id nope\n",
+            run("backends", "password", "--store", "file", "nope").stderr,
+        )
+    }
+
+    @Test
     fun removingAWebDavBackendDeletesItsPasswordOrNothing() {
         val id = add(here, "--new")
         val noDelete =

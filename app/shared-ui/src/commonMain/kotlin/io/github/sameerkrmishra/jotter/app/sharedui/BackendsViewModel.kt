@@ -15,6 +15,7 @@ import io.github.sameerkrmishra.jotter.app.sync.Secret
 import io.github.sameerkrmishra.jotter.app.sync.SecretPlace
 import io.github.sameerkrmishra.jotter.app.sync.SecretStoreException
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
+import io.github.sameerkrmishra.jotter.app.sync.describe
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import kotlinx.coroutines.CancellationException
@@ -263,7 +264,7 @@ internal class BackendsViewModel(
         noKeyring ?: return
         noKeyring = null
         val retry = retryWithFile
-        if (changingPassword != null && passwordMetNoKeyring) {
+        if (passwordMetNoKeyring) {
             confirmPassword(SecretPlace.FILE)
         } else if (retry == null) {
             addServer(setUpNewStore = setUpAsked, SecretPlace.FILE)
@@ -379,7 +380,6 @@ internal class BackendsViewModel(
      */
     fun confirmPassword(place: SecretPlace? = null) {
         val backend = changingPassword ?: return
-        if (busy) return
         val password = Secret(davPassword)
         val what = if (backend.config is PeerConfig) "pairing token" else "app password"
         passwordMetNoKeyring = false
@@ -395,15 +395,10 @@ internal class BackendsViewModel(
                         }
                         is PasswordChange.Moved -> {
                             passwordStored()
-                            val where =
-                                when (result.to) {
-                                    SecretPlace.KEYRING -> "the keyring"
-                                    SecretPlace.FILE -> "the file, in plain text"
-                                }
                             message =
                                 listOfNotNull(
-                                    "Stored the new $what of ${backend.name} in $where. It " +
-                                        "syncs now.",
+                                    "Stored the new $what of ${backend.name} in " +
+                                        "${describe(result.to)}. It syncs now.",
                                     result.leftBehind,
                                 ).joinToString(" ")
                             scheduler.syncNow()

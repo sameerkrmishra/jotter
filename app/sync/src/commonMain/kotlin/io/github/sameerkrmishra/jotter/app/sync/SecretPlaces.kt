@@ -12,12 +12,24 @@ import kotlin.coroutines.CoroutineContext
 
 private val log = Logger("backends")
 
+/** Where a secret now is, in plain words, after "Stored the new password of NAME in". */
+public fun describe(place: SecretPlace): String =
+    when (place) {
+        SecretPlace.KEYRING -> "the keyring"
+        SecretPlace.FILE -> "the secrets file, in plain text"
+    }
+
 /** See [BackendManager.secretsLeftBehind]. */
 internal fun leftBehindWords(
     backend: Backend,
     secrets: SecretStores,
-): String? {
-    if (backend.config.secrets.isEmpty()) return null
+): String? = if (backend.config.secrets.isEmpty()) null else leftBehindAt(backend, secrets)
+
+/** Where the secrets of [backend], which has some, may still be, and how to delete them. */
+private fun leftBehindAt(
+    backend: Backend,
+    secrets: SecretStores,
+): String {
     val what = if (backend.config is PeerConfig) "pairing token" else "password"
     val file = secrets.fileLocation
     return if (secrets.home == SecretHome.ANDROID) {
@@ -62,9 +74,9 @@ internal fun secretsWords(
 
 /**
  * Records in [store] that the secret [key] of [backend], already written to [to], is kept there,
- * and then deletes the old copy. If the record cannot be changed, the new copy is deleted again,
- * also when cancelled, as the record still names the old place; if that delete fails too, the
- * result says where the new copy may still be.
+ * as [placed] says, and then deletes the old copy. If the record cannot be changed, the new copy
+ * is deleted again, also when cancelled, as the record still names the old place; if that delete
+ * fails too, the result says where the new copy may still be.
  */
 @Suppress("LongParameterList") // What BackendManager holds, passed down.
 internal suspend fun moveSecret(
@@ -72,23 +84,11 @@ internal suspend fun moveSecret(
     secrets: SecretStores,
     io: CoroutineContext,
     backend: Backend,
+    placed: Backend,
     key: SecretKey,
-    to: SecretPlace,
 ): PasswordChange {
-    val config = backend.config
-    val placed =
-        backend.copy(
-            config =
-                when (config) {
-                    is WebDavConfig -> config.copy(secretPlace = to)
-                    is PeerConfig -> config.copy(secretPlace = to)
-                    else -> error("${backend.id} needs no secret")
-                },
-        )
-    val old = secrets.of(config.secretPlace)
-    val new = secrets.of(to)
-    // On Android both places are the one sealed store, which holds the new secret now.
-    val separate = new !== old
+    val old = secrets.of(backend.config.secretPlace)
+    val new = secrets.of(placed.config.secretPlace)
     val failure =
         try {
             val settings = BackendKinds.settingsOf(placed.config)
@@ -96,56 +96,61 @@ internal suspend fun moveSecret(
             // Not recorded: another process removed the backend meanwhile.
             if (recorded) null else "${backend.id} was removed meanwhile."
         } catch (e: CancellationException) {
-            if (separate) rollBack(new, key, placed, secrets)
+            rollBack(new, old, key, placed, secrets)
             throw e
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
             log.warn(e) { "Where the secret of backend ${backend.id} is cannot be recorded" }
-            "Cannot record where the secret is kept: ${e.message ?: e::class.simpleName}. " +
-                "It is still kept where it was."
+            "Cannot record where the secret is kept: ${e.message}. It is still kept where it was."
         }
     if (failure != null) {
-        val left = if (separate) rollBack(new, key, placed, secrets) else null
+        val left = rollBack(new, old, key, placed, secrets)
         return PasswordChange.Refused(listOfNotNull(failure, left).joinToString(" "))
     }
-    log.info { "Moved the secret of backend ${backend.id} to the ${to.name}" }
-    return PasswordChange.Moved(to, if (separate) deleteOld(old, key, backend, secrets) else null)
+    log.info { "Moved the secret of backend ${backend.id} to the ${placed.config.secretPlace}" }
+    val left =
+        deleteFrom(old, new, key, backend, secrets)?.let {
+            "Jotter could not delete the old copy, if there was one: $it"
+        }
+    return PasswordChange.Moved(placed.config.secretPlace, left)
 }
 
 /**
  * Deletes the new copy of a move that was not recorded, even when cancelled, or says where it may
- * still be, as [placed] would keep it.
+ * still be, as [placed] would keep it. Where both places are one store, as on Android, that store
+ * holds the one secret, which the old record names too, so it stays.
  */
 private suspend fun rollBack(
     new: SecretStore,
+    old: SecretStore,
     key: SecretKey,
     placed: Backend,
     secrets: SecretStores,
 ): String? =
     withContext(NonCancellable) {
-        try {
-            new.delete(key)
-            null
-        } catch (e: SecretStoreException) {
-            log.warn(e) { "The new secret of backend ${placed.id} cannot be deleted" }
-            "Jotter could not delete the new copy either: ${e.message} " +
-                leftBehindWords(placed, secrets).orEmpty()
+        deleteFrom(new, old, key, placed, secrets)?.let {
+            "Jotter could not delete the new copy either: $it"
         }
     }
 
-/** Deletes the old copy, or says where it may still be. */
-private suspend fun deleteOld(
-    old: SecretStore,
+/**
+ * Deletes the copy of [key] in [store], unless [other] is the same store, and says where it may
+ * still be if that fails: where [backend] keeps it.
+ */
+private suspend fun deleteFrom(
+    store: SecretStore,
+    other: SecretStore,
     key: SecretKey,
     backend: Backend,
     secrets: SecretStores,
-): String? =
-    try {
-        old.delete(key)
+): String? {
+    if (store === other) return null
+    return try {
+        store.delete(key)
         null
     } catch (e: SecretStoreException) {
-        log.warn(e) { "The old secret of backend ${backend.id} cannot be deleted" }
-        "Jotter could not delete the old copy, if there was one: ${e.message} " +
-            leftBehindWords(backend, secrets).orEmpty()
+        log.warn(e) { "A copy of the secret of backend ${backend.id} cannot be deleted" }
+        "${e.message} ${leftBehindAt(backend, secrets)}"
     }
+}

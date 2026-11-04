@@ -21,6 +21,7 @@ import io.github.sameerkrmishra.jotter.app.sync.SecretStoreException
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.WebDavConfig
+import io.github.sameerkrmishra.jotter.app.sync.describe
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
 import io.github.sameerkrmishra.jotter.core.sync.SyncEngine
@@ -286,44 +287,34 @@ private class PasswordCommand(
 
     override fun run() {
         val backend = setup.withBackends { it.list() }.resolve(id)
-        val (what, prompt) =
-            when (val config = backend.config) {
-                is WebDavConfig ->
-                    "app password" to "New app password for ${config.username} at ${config.url}: "
-                is PeerConfig -> "pairing token" to "New pairing token for ${config.location}: "
-                else -> throw CliktError("jotter: ${backend.id} needs no password")
-            }
+        val (what, prompt) = askingFor(backend)
         val password = setup.passwords.read(prompt)
         val name = oneLine(backend.name)
         when (val result = setup.withBackends { it.changePassword(backend.id, password, store) }) {
             PasswordChange.Changed -> echo("Stored the new $what of $name.")
             is PasswordChange.Moved -> {
-                val where =
-                    when (result.to) {
-                        SecretPlace.KEYRING -> "the keyring"
-                        SecretPlace.FILE -> "the secrets file, in plain text"
-                    }
-                echo("Stored the new $what of $name in $where.")
+                echo("Stored the new $what of $name in ${describe(result.to)}.")
                 result.leftBehind?.let { echo(it) }
             }
-            is PasswordChange.NoKeyring, is PasswordChange.Refused ->
-                throw CliktError(failure(result, what, backend.id))
+            is PasswordChange.NoKeyring ->
+                throw CliktError(
+                    "jotter: ${result.reason} Nothing was changed. To keep the $what in plain " +
+                        "text in a file only you can read instead, " +
+                        "\$XDG_CONFIG_HOME/jotter/secrets.json, run: jotter backends password " +
+                        "--store file ${backend.id}. Anyone who can read your files, or a backup " +
+                        "of them, can then read it.",
+                )
+            is PasswordChange.Refused -> throw CliktError("jotter: ${result.reason}")
         }
     }
 
-    private fun failure(
-        result: PasswordChange,
-        what: String,
-        id: String,
-    ): String =
-        when (result) {
-            is PasswordChange.NoKeyring ->
-                "jotter: ${result.reason} Nothing was changed. To keep the $what in plain text " +
-                    "in a file only you can read instead, \$XDG_CONFIG_HOME/jotter/secrets.json, " +
-                    "run: jotter backends password --store file $id. Anyone who can read your " +
-                    "files, or a backup of them, can then read it."
-            is PasswordChange.Refused -> "jotter: ${result.reason}"
-            else -> "jotter: $id's password did not change."
+    /** What the secret of [backend] is called, and the prompt for it. */
+    private fun askingFor(backend: Backend): Pair<String, String> =
+        when (val config = backend.config) {
+            is WebDavConfig ->
+                "app password" to "New app password for ${config.username} at ${config.url}: "
+            is PeerConfig -> "pairing token" to "New pairing token for ${config.location}: "
+            else -> throw CliktError("jotter: ${backend.id} needs no password")
         }
 }
 
