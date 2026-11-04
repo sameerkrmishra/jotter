@@ -589,6 +589,98 @@ class WebDavBackendTest {
             }
         }
 
+    /** A file store that does [onWrite] after each write, and whose delete may fail. */
+    private class HookedFile : SecretStore {
+        val file = InMemorySecretStore()
+        var onWrite: () -> Unit = {}
+        var deleteFails = false
+
+        override suspend fun read(key: SecretKey): Secret? = file.read(key)
+
+        override suspend fun write(
+            key: SecretKey,
+            secret: Secret,
+        ) {
+            file.write(key, secret)
+            onWrite()
+        }
+
+        override suspend fun delete(key: SecretKey) {
+            if (deleteFails) throw SecretStoreException("The disk is read-only.")
+            file.delete(key)
+        }
+    }
+
+    /** Adds a backend to the keyring of [device] and tries to move its password to the file. */
+    private suspend fun moveToFile(
+        device: Device,
+        server: Server,
+        file: HookedFile,
+        meanwhile: (Backend) -> Unit,
+    ): PasswordChange {
+        server.marked = true
+        val backend =
+            assertIs<AddResult.Added>(device.manager.addWebDav(url, "me", password)).backend
+        file.onWrite = { meanwhile(backend) }
+        val moved = device.manager.changePassword(backend.id, Secret("x"), SecretPlace.FILE)
+        assertEquals(password, device.secrets.read(SecretKey(backend.id, SecretKind.APP_PASSWORD)))
+        return moved
+    }
+
+    @Test
+    fun aMoveToABackendRemovedMeanwhileTakesTheNewCopyBack() =
+        test {
+            val file = HookedFile()
+            val server = Server()
+            Device(this, "a", fileSecrets = file, webDav = server).use { device ->
+                var id = ""
+                val result =
+                    moveToFile(device, server, file) {
+                        id = it.id
+                        device.store.backends.remove(it.id)
+                    }
+                assertEquals(PasswordChange.Refused("$id was removed meanwhile."), result)
+                assertTrue(file.file.secrets.isEmpty())
+            }
+        }
+
+    @Test
+    fun aMoveThatCannotBeRecordedTakesTheNewCopyBack() =
+        test {
+            val file = HookedFile()
+            val server = Server()
+            Device(this, "a", fileSecrets = file, webDav = server).use { device ->
+                // The database goes away between writing the new copy and recording it.
+                val result = moveToFile(device, server, file) { device.store.close() }
+                val reason = assertIs<PasswordChange.Refused>(result).reason
+                assertTrue(reason.startsWith("Cannot record where the secret is kept: "), reason)
+                assertTrue(reason.endsWith("It is still kept where it was."), reason)
+                assertTrue(file.file.secrets.isEmpty())
+            }
+        }
+
+    @Test
+    fun aRollBackThatCannotDeleteSaysWhereTheNewCopyIs() =
+        test {
+            val file = HookedFile()
+            file.deleteFails = true
+            val server = Server()
+            Device(this, "a", fileSecrets = file, webDav = server).use { device ->
+                val result = moveToFile(device, server, file) { device.store.close() }
+                val reason = assertIs<PasswordChange.Refused>(result).reason
+                assertTrue(reason.startsWith("Cannot record where the secret is kept: "), reason)
+                assertTrue(
+                    reason.contains(
+                        "It is still kept where it was. Jotter could not delete the new copy " +
+                            "either: The disk is read-only. Its password may still be in " +
+                            "/config/secrets.json, under ",
+                    ),
+                    reason,
+                )
+                assertEquals(1, file.file.secrets.size)
+            }
+        }
+
     @Test
     fun aMoveThatCannotWriteChangesNothing() =
         test {

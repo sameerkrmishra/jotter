@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.sync
 
 import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.CoroutineContext
@@ -62,7 +63,8 @@ internal fun secretsWords(
 /**
  * Records in [store] that the secret [key] of [backend], already written to [to], is kept there,
  * and then deletes the old copy. If the record cannot be changed, the new copy is deleted again,
- * also when cancelled, as the record still names the old place.
+ * also when cancelled, as the record still names the old place; if that delete fails too, the
+ * result says where the new copy may still be.
  */
 @Suppress("LongParameterList") // What BackendManager holds, passed down.
 internal suspend fun moveSecret(
@@ -75,34 +77,62 @@ internal suspend fun moveSecret(
 ): PasswordChange {
     val config = backend.config
     val placed =
-        when (config) {
-            is WebDavConfig -> config.copy(secretPlace = to)
-            is PeerConfig -> config.copy(secretPlace = to)
-            else -> error("${backend.id} needs no secret")
-        }
+        backend.copy(
+            config =
+                when (config) {
+                    is WebDavConfig -> config.copy(secretPlace = to)
+                    is PeerConfig -> config.copy(secretPlace = to)
+                    else -> error("${backend.id} needs no secret")
+                },
+        )
     val old = secrets.of(config.secretPlace)
     val new = secrets.of(to)
     // On Android both places are the one sealed store, which holds the new secret now.
     val separate = new !== old
-    val recorded =
+    val failure =
         try {
-            val settings = BackendKinds.settingsOf(placed)
-            withContext(io) { store.backends.updateSettings(backend.id, settings) }
+            val settings = BackendKinds.settingsOf(placed.config)
+            val recorded = withContext(io) { store.backends.updateSettings(backend.id, settings) }
+            // Not recorded: another process removed the backend meanwhile.
+            if (recorded) null else "${backend.id} was removed meanwhile."
+        } catch (e: CancellationException) {
+            if (separate) rollBack(new, key, placed, secrets)
+            throw e
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
-            if (separate) withContext(NonCancellable) { new.delete(key) }
-            throw e
+            log.warn(e) { "Where the secret of backend ${backend.id} is cannot be recorded" }
+            "Cannot record where the secret is kept: ${e.message ?: e::class.simpleName}. " +
+                "It is still kept where it was."
         }
-    // Not recorded: another process removed the backend meanwhile.
-    if (!recorded && separate) withContext(NonCancellable) { new.delete(key) }
-    if (recorded) log.info { "Moved the secret of backend ${backend.id} to the ${to.name}" }
-    return when {
-        !recorded -> PasswordChange.Refused("${backend.id} was removed meanwhile.")
-        !separate -> PasswordChange.Moved(to, null)
-        else -> PasswordChange.Moved(to, deleteOld(old, key, backend, secrets))
+    if (failure != null) {
+        val left = if (separate) rollBack(new, key, placed, secrets) else null
+        return PasswordChange.Refused(listOfNotNull(failure, left).joinToString(" "))
     }
+    log.info { "Moved the secret of backend ${backend.id} to the ${to.name}" }
+    return PasswordChange.Moved(to, if (separate) deleteOld(old, key, backend, secrets) else null)
 }
+
+/**
+ * Deletes the new copy of a move that was not recorded, even when cancelled, or says where it may
+ * still be, as [placed] would keep it.
+ */
+private suspend fun rollBack(
+    new: SecretStore,
+    key: SecretKey,
+    placed: Backend,
+    secrets: SecretStores,
+): String? =
+    withContext(NonCancellable) {
+        try {
+            new.delete(key)
+            null
+        } catch (e: SecretStoreException) {
+            log.warn(e) { "The new secret of backend ${placed.id} cannot be deleted" }
+            "Jotter could not delete the new copy either: ${e.message} " +
+                leftBehindWords(placed, secrets).orEmpty()
+        }
+    }
 
 /** Deletes the old copy, or says where it may still be. */
 private suspend fun deleteOld(
