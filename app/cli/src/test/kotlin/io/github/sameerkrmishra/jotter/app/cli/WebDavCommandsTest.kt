@@ -8,6 +8,7 @@ import io.github.sameerkrmishra.jotter.app.sync.SecretStoreUnavailableException
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import java.io.ByteArrayInputStream
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.io.path.ExperimentalPathApi
@@ -31,6 +32,21 @@ class WebDavCommandsTest {
     private val server = TinyDavServer()
     private val secretsHere = TestSecrets()
     private val secretsThere = TestSecrets()
+
+    /** The keyring of a computer that has none: every call fails as when no bus answers. */
+    private object NoKeyring : SecretStore {
+        override suspend fun read(key: SecretKey): Secret? = throw unavailable()
+
+        override suspend fun write(
+            key: SecretKey,
+            secret: Secret,
+        ): Unit = throw unavailable()
+
+        override suspend fun delete(key: SecretKey): Unit = throw unavailable()
+
+        private fun unavailable() =
+            SecretStoreUnavailableException("Jotter cannot reach a keyring: no bus.")
+    }
 
     @AfterTest
     fun cleanUp() {
@@ -201,6 +217,87 @@ class WebDavCommandsTest {
         )
         assertEquals(0, run("backends", "remove", id).statusCode)
         assertTrue(secretsHere.file.secrets.isEmpty())
+    }
+
+    @Test
+    fun aRestoredDatabaseWithoutAKeyringKeepsThePasswordInTheFileAndBack() {
+        val id = add(here, "--new", "--name", "Mailbox")
+        Files.createDirectories(there.parent)
+        ok(here, "export-database", there.toString())
+        // Made after the export, so the restored database gets it only by syncing.
+        val note = ok(here, "add", "buy milk").trim()
+        assertTrue(ok(here, "sync").contains("\tMailbox\tsynced\t"))
+
+        // The other computer has no keyring at all.
+        val elsewhere = SecretStores(NoKeyring, secretsThere.file, "/config/jotter/secrets.json")
+
+        fun run(vararg args: String) =
+            jotter(there, *args, input = "app-password\n", secrets = elsewhere)
+
+        assertEquals(1, run("sync").statusCode)
+        val refused = run("backends", "password", id)
+        assertEquals(1, refused.statusCode)
+        assertTrue(
+            refused.stderr.startsWith(
+                "jotter: Jotter cannot reach a keyring: no bus. Nothing was changed.",
+            ),
+            refused.stderr,
+        )
+        assertTrue(
+            refused.stderr.contains("jotter backends password --store file $id"),
+            refused.stderr,
+        )
+        assertTrue(secretsThere.file.secrets.isEmpty())
+
+        val moved = run("backends", "password", "--store", "file", id)
+        assertEquals(0, moved.statusCode, moved.stderr)
+        val lines = moved.stdout.lines()
+        assertEquals(
+            "Stored the new app password of Mailbox in the secrets file, in plain text.",
+            lines[0],
+        )
+        assertTrue(lines[1].startsWith("Jotter could not delete the old copy"), lines[1])
+        assertTrue(
+            lines[1].contains("secret-tool clear application jotter backend $id"),
+            lines[1],
+        )
+        assertEquals(
+            Secret("app-password"),
+            secretsThere.file.secrets[SecretKey(id, SecretKind.APP_PASSWORD)],
+        )
+        val synced = run("sync")
+        assertEquals(0, synced.statusCode, synced.stderr)
+        assertTrue(run("show", note).stdout.endsWith("\nbuy milk\n"))
+        assertTrue(
+            run("backends", "status", id).stdout.contains(
+                "secret: Its password is kept in plain text in /config/jotter/secrets.json",
+            ),
+        )
+        movesBackToTheKeyring(id)
+    }
+
+    /** Where a keyring answers again, the password of [id] moves back, out of the file. */
+    private fun movesBackToTheKeyring(id: String) {
+        val back =
+            jotter(
+                there,
+                "backends",
+                "password",
+                "--store",
+                "keyring",
+                id,
+                input = "app-password\n",
+            )
+        assertEquals(0, back.statusCode, back.stderr)
+        assertEquals("Stored the new app password of Mailbox in the keyring.\n", back.stdout)
+        assertTrue(secretsThere.file.secrets.isEmpty())
+        assertEquals(
+            Secret("app-password"),
+            secretsThere.keyring.secrets[SecretKey(id, SecretKind.APP_PASSWORD)],
+        )
+        assertTrue(ok(there, "sync").contains("\tMailbox\tsynced\t"))
+        val wrong = jotter(there, "backends", "password", "--store", "disk", id)
+        assertEquals(1, wrong.statusCode)
     }
 
     @Test
