@@ -85,21 +85,23 @@ the operating system's job.
 
 **The codec, `aead1`.** It wraps v1's bytes: the plaintext is exactly what `JsonGzipCodec`
 writes today, so compression, the JSON and its limits are unchanged. A file is a fixed
-header (magic `JOTE`, a version byte, the 16-byte key id, a 12-byte nonce), then the
-ciphertext and its tag. The header is the associated data.
+header (magic `JOTE`, a version byte, the 16-byte key id), then the ciphertext and its
+tag. The header is the associated data.
 
 - **The cipher is AES-256-GCM-SIV** ([RFC 8452](https://www.rfc-editor.org/rfc/rfc8452)),
-  under the content key, with the header as associated data.
-- **Deterministic.** The nonce is the first 12 bytes of HMAC-SHA-256 under the nonce key,
-  over the plaintext. The same segment gives the same file, so the codec keeps its KDoc's
-  promise, a repair writes the same bytes, and ADR-0017's two winners still wrote one thing.
-  What it reveals is equality of two files, which their names already reveal. GCM-SIV is
-  built for a repeated nonce: should two different plaintexts ever get one nonce, that too
-  reveals only whether they are equal, where plain GCM would give away its authentication
-  key.
-- **Three separate keys** come from the store key by HKDF-SHA-256, each with its own fixed
-  label: `jotter-aead1 content`, `jotter-aead1 nonce`, `jotter-aead1 name`. No key is used
-  for two purposes.
+  under the content key, with a fixed nonce of 12 zero bytes and the header as associated
+  data.
+- **Deterministic, by design of the cipher.** GCM-SIV is built for a repeated nonce: with a
+  fixed one it is a deterministic AEAD. The same segment gives the same file, so the codec
+  keeps its KDoc's promise, a repair writes the same bytes, and ADR-0017's two winners still
+  wrote one thing.
+- **What that reveals, plainly:** whether two files under the same key hold the same
+  plaintext, and nothing more. Two equal files are one segment, which their content-based
+  names already show, so this leaks nothing the names do not. RFC 8452 bounds how many
+  messages one key and nonce may seal; a person's segments stay far below it, and rotation
+  starts a new key.
+- **Two separate keys** come from the store key by HKDF-SHA-256, each with its own fixed
+  label: `jotter-aead1 content` and `jotter-aead1 name`. No key is used for two purposes.
 - **Where the primitives come from:** GCM-SIV and Argon2id are not in the JDK, so Bouncy
   Castle (pure Java) on the JVM and Android, and OpenSSL 3.2 or later on `linuxX64`, which
   has both. HMAC and HKDF are in all three. No native library is bundled
@@ -119,9 +121,10 @@ its own key file. A key file is plain JSON: the key id, the KDF and its paramete
 key from the passphrase, with the key id as associated data. Salt and nonce are new for each
 key file; a key file is written once, so a random nonce does no harm there. The KDF is
 Argon2id. Setup never goes below RFC 9106's second recommended setting, t = 3 passes,
-m = 64 MiB, p = 4 lanes, and raises t as far as a phone bears in about a second. A device
-refuses, as damaged, a key file that asks for less than that minimum or more than a cap
-(t ≤ 10, m ≤ 256 MiB, p ≤ 8), so a hostile key file cannot exhaust a phone or ask for a key
+m = 64 MiB, p = 4 lanes. Memory and lanes stay fixed there; setup raises only t, as far as a
+phone bears in about a second. A device refuses, as damaged, a key file that asks for less
+than that minimum or more than a cap (t ≤ 10, m = 64 MiB at most, as more can exhaust a
+phone's Java heap under Bouncy Castle, p ≤ 4), so a hostile key file cannot exhaust a phone or ask for a key
 that is cheap to guess. Key files are written once with `writeNew` and named by their
 content, like everything else. Several may exist for one key id.
 
@@ -258,17 +261,20 @@ and `RETIRED_KEY`; `SecretKey` names a key id, not only a backend. No backend, n
 - **Derive the encryption key from the passphrase directly**, as PLAN.md's example implied:
   no key file, but a passphrase change then means re-encrypting everything, which immutable
   files forbid, and there is nothing to show as a recovery code.
-- **AES-SIV ([RFC 5297](https://www.rfc-editor.org/rfc/rfc5297)):** deterministic by
-  itself, with no nonce key, and in Bouncy Castle and OpenSSL too. Not chosen because its
-  CMAC is a serial pass over the whole segment, up to 32 MiB, where GCM-SIV's POLYVAL uses
-  the carry-less multiply that phones and PCs accelerate, as for GCM. With the nonce derived
-  by HMAC, GCM-SIV is just as deterministic, and keeps its misuse resistance as a second
-  line.
-- **AES-256-GCM with the HMAC-derived nonce:** in the JDK, so no Bouncy Castle for the
-  cipher, but a home-made SIV, and a repeated nonce would be fatal rather than harmless.
+- **AES-SIV ([RFC 5297](https://www.rfc-editor.org/rfc/rfc5297)):** also a deterministic
+  AEAD with no nonce at all, in Bouncy Castle and OpenSSL too, and equally fit. GCM-SIV was
+  preferred because its POLYVAL uses the carry-less multiply that phones and PCs accelerate
+  for GCM, where AES-SIV's S2V is a CMAC, a serial chain of AES blocks over the whole
+  segment of up to 32 MiB. Either would do; the choice is speed, not safety.
+- **GCM-SIV with a nonce derived by HMAC from the plaintext:** an earlier draft. It adds a
+  key and a pass over the segment, and hides nothing more: equal plaintexts give equal
+  nonces anyway.
+- **AES-256-GCM with a nonce derived by HMAC:** in the JDK, so no Bouncy Castle for the
+  cipher, but a home-made SIV, and a repeated nonce would give away GCM's authentication key
+  rather than reveal only equality.
 - **A random nonce (XChaCha20-Poly1305 or AES-GCM):** standard, but the same segment would
   give different files, against the codec's contract and the reasoning of ADR-0014 and
-  ADR-0017. A synthetic nonce costs one HMAC.
+  ADR-0017.
 - **Keep the plain SHA-256 in names:** no change to §6.2, but a fingerprint of the plaintext
   on every file.
 - **Random file names:** hide even equality, but lose content naming, which ADR-0014's

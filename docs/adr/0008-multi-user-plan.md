@@ -104,7 +104,9 @@ with their key; names are not unique and are not identity.
   person. A removal is a record too, and names the removed person's revisions it still
   accepts, by their latest ids that the remover held. Their revisions that are not among
   those ancestors are invalid, and so are records they signed that the removal does not
-  have among its ancestors. That needs no clock, so every device judges it alike.
+  have among its ancestors, except removal records concurrent with it (neither one an
+  ancestor of the other), which stand. That needs no clock, so every device judges it
+  alike.
 - **What a removal takes with it.** Under ADR-0014 a revision built on an invalid one is
   invalid. So a removal also invalidates every honest member's edit built on a revision of the
   removed person that the remover had not seen. Nothing of it is lost: ADR-0014 already lists
@@ -115,8 +117,12 @@ with their key; names are not unique and are not identity.
   having seen different revisions of theirs: a revision of the removed person counts if any
   removal of them accepts it. Taking the union loses the fewest honest edits built on them,
   and costs nothing in safety, as each accepted revision was seen by a member who chose to
-  accept it. Two members who remove each other at the same time are both removed, as each
-  record is valid when it is judged against what its signer had seen.
+  accept it. **Two members who remove each other at the same time are both removed.**
+  Neither record is an ancestor of the other, so by the exception above each stands, and
+  each voids only what its target signed after it in the DAG. Whether two records are
+  concurrent is read from the DAG alone, so every device computes the same members. If
+  nobody is left, the space can no longer change; its notes stay readable, and anyone who
+  held its key can start a new space from them.
 - **Merges are derived again.** In a shared space a received automatic merge counts only if
   the receiver, from the merge's two parents and their ancestors, derives the same text,
   title, tags, last-writer-wins values and stamps, and the same losing parent, and so the
