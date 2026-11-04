@@ -94,6 +94,9 @@ class PhoneTest {
             onNodeWithText("New note").performClick()
             onNodeWithTag(BODY_FIELD).performTextInput("milk")
             assertTrue(back(app))
+            // Back saves first and closes the editor after: until then "milk" is the editor's
+            // own field, and the note list with its Sync button is not on the screen yet.
+            waitUntil(timeoutMillis = TIMEOUT_MS) { runOnUiThread { app.editor == null } }
             awaitText("milk")
             assertEquals(
                 "milk",
