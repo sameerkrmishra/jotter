@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.desktop
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import io.github.sameerkrmishra.jotter.app.sharedui.AppViewModel
@@ -11,10 +12,12 @@ import io.github.sameerkrmishra.jotter.app.sharedui.JotterApp
 import io.github.sameerkrmishra.jotter.app.sharedui.PeerHubControls
 import io.github.sameerkrmishra.jotter.app.sharedui.SyncControls
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.DatabaseExport
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.app.sync.installLinuxLogging
 import io.github.sameerkrmishra.jotter.app.sync.linuxSecretStores
+import io.github.sameerkrmishra.jotter.app.sync.sameFileOnDisk
 import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
 import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
@@ -72,9 +75,19 @@ private fun logUncaughtFailures() {
 
 /** Asks where to save the debug log, with the desktop's own file dialog. */
 private suspend fun chooseDebugLogFile(): Path? =
+    chooseFile("Save the debug log", DEBUG_LOG_FILE_NAME)
+
+/** Asks where to save an exported database. */
+private suspend fun chooseDatabaseFile(): Path? = chooseFile("Export database", DATABASE_FILE_NAME)
+
+/** Asks for a file to save to, with the desktop's own file dialog. Null if the user cancelled. */
+private suspend fun chooseFile(
+    title: String,
+    suggested: String,
+): Path? =
     withContext(Dispatchers.Main) {
-        val dialog = FileDialog(null as Frame?, "Save the debug log", FileDialog.SAVE)
-        dialog.file = DEBUG_LOG_FILE_NAME
+        val dialog = FileDialog(null as Frame?, title, FileDialog.SAVE)
+        dialog.file = suggested
         dialog.isVisible = true
         dialog.file?.let { Path.of(dialog.directory, it) }
     }
@@ -139,10 +152,21 @@ private fun runApp(
             Dispatchers.IO,
             SyncControls(manager, scheduler, hub),
             desktopDebugLog(logs, manager, null, debugLogFile),
+            DatabaseFile(
+                ::chooseDatabaseFile,
+                DatabaseExport(store, Dispatchers.IO, sameFile = ::sameFileOnDisk),
+            ),
         )
     application(exitProcessOnExit = false) {
         val close = { app.requestExit(::exitApplication) }
         Window(onCloseRequest = close, title = "Jotter") {
+            MenuBar {
+                Menu("File", mnemonic = 'F') {
+                    Item(EXPORT_DATABASE_ITEM, onClick = app::openDatabaseExport)
+                    Separator()
+                    Item("Quit", onClick = close)
+                }
+            }
             AutoClose(autoclose, close)
             JotterApp(app)
         }

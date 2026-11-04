@@ -28,8 +28,8 @@ public fun describe(reachability: Reachability): String =
                         "unplugged. If the marker was deleted, remove this backend and add it again."
                 UnreachableReason.UNAUTHORIZED -> WRONG_PASSWORD
                 UnreachableReason.FAILED ->
-                    "Cannot be reached: ${reachability.detail}. Check the network, or that the " +
-                        "drive or server is there; Jotter tries again by itself."
+                    "Cannot be reached: ${reachability.detail.trimEnd('.')}. Check the network, " +
+                        "or that the drive or server is there; Jotter tries again by itself."
             }
     }
 

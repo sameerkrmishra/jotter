@@ -90,17 +90,31 @@ public enum class SecretPlace {
     FILE,
 }
 
+/** What kind of device keeps the secrets, for the words that say where they are. */
+public enum class SecretHome {
+    /** A Linux desktop: the keyring, through the Secret Service, or a file the user chose. */
+    LINUX,
+
+    /**
+     * Android: a file in the app's own storage, sealed with a key in the Android Keystore. There
+     * is no keyring and no plain-text choice (ADR-0018).
+     */
+    ANDROID,
+}
+
 /**
  * The places secrets can be kept in: the [keyring] by default, and the [file] that the user may
  * choose instead (ADR-0016).
  *
  * @property fileLocation Where [file] keeps its secrets, for people, such as
  *   `~/.config/jotter/secrets.json`, or null if there is no such file.
+ * @property home The kind of device, for the words that say where secrets are.
  */
 public class SecretStores(
     public val keyring: SecretStore,
     public val file: SecretStore,
     public val fileLocation: String? = null,
+    public val home: SecretHome = SecretHome.LINUX,
 ) {
     /** The store of [place]. */
     public fun of(place: SecretPlace): SecretStore =
