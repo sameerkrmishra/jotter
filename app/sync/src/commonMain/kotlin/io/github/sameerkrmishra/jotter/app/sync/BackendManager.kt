@@ -73,8 +73,30 @@ public sealed interface AddResult {
 
 /** What [BackendManager.changePassword] did. */
 public sealed interface PasswordChange {
-    /** The new password works and is stored. */
+    /** The new password works and is stored, where the backend kept its old one. */
     public data object Changed : PasswordChange
+
+    /**
+     * The new password works, is stored in [to], and the backend now keeps it there. The old copy
+     * in the other place was deleted, or, if that failed, [leftBehind] says where it may still be
+     * and how to delete it.
+     */
+    public data class Moved(
+        /** Where it is kept now. */
+        val to: SecretPlace,
+        /** Why the old copy may still be there and how to delete it, or null if it was deleted. */
+        val leftBehind: String?,
+    ) : PasswordChange
+
+    /**
+     * No keyring answers, so nothing was stored or changed. The user may choose to keep it in a
+     * file instead, in plain text (ADR-0016): ask, and call again with [SecretPlace.FILE] if they
+     * say yes.
+     */
+    public data class NoKeyring(
+        /** Why no keyring answers, in plain words. */
+        val reason: String,
+    ) : PasswordChange
 
     /** Nothing was changed. [reason] says why, in plain words. */
     public data class Refused(
@@ -380,63 +402,34 @@ public class BackendManager internal constructor(
      * Where the secrets of [backend], removed with `keepSecrets`, may still be, and how to delete
      * them, in plain words; or null if it has none.
      */
-    public fun secretsLeftBehind(backend: Backend): String? {
-        if (backend.config.secrets.isEmpty()) return null
-        val what = if (backend.config is PeerConfig) "pairing token" else "password"
-        return if (secrets.home == SecretHome.ANDROID) {
-            "Its $what may still be in Jotter's own storage on this phone, sealed with a key in " +
-                "the Android Keystore, under ${backend.id}. No other app can read it, and " +
-                "clearing Jotter's storage or uninstalling Jotter deletes it."
-        } else if (backend.config.secretPlace == SecretPlace.KEYRING) {
-            "Its $what may still be in your keyring, as the item \"Jotter: ... of backend " +
-                "${backend.id}\". Delete it later in your keyring program, such as Seahorse or " +
-                "KWalletManager, or with: secret-tool clear application jotter backend ${backend.id}"
-        } else {
-            val file = secrets.fileLocation
-            if (file != null) {
-                "Its $what may still be in $file, under ${backend.id}. Delete that entry, or " +
-                    "the whole file if no other backend uses it."
-            } else {
-                "Its $what may still be in a secrets file, under ${backend.id}, though Jotter " +
-                    "cannot tell where on this device, as no home folder is set. Look for " +
-                    "jotter/secrets.json in your config folder, such as ~/.config, and delete " +
-                    "that entry."
-            }
-        }
-    }
+    public fun secretsLeftBehind(backend: Backend): String? = leftBehindWords(backend, secrets)
 
     /** The file a user may choose for passwords, for people, or null if there is none. */
     public val secretsFile: String? get() = secrets.fileLocation
 
     /** Where the secrets of [backend] are kept, in plain words, or null if it needs none. */
-    public fun whereSecretsAre(backend: Backend): String? {
-        val what = if (backend.config is PeerConfig) "pairing token" else "password"
-        return when {
-            backend.config.secrets.isEmpty() -> null
-            secrets.home == SecretHome.ANDROID ->
-                "Its $what is kept on this phone only, in Jotter's own storage, sealed with a " +
-                    "key in the Android Keystore. No backup copies it."
-            backend.config.secretPlace == SecretPlace.KEYRING ->
-                "Its $what is kept in the keyring."
-            secrets.fileLocation == null ->
-                "Its $what is kept in a plain-text secrets file, as chosen when it was added, " +
-                    "but Jotter cannot tell where on this device, as no home folder is set."
-            else ->
-                "Its $what is kept in plain text in ${secrets.fileLocation}, as chosen when " +
-                    "it was added."
-        }
-    }
+    public fun whereSecretsAre(backend: Backend): String? = secretsWords(backend, secrets)
 
     /**
-     * Replaces the app password of the WebDAV backend [id] with [password], after checking that the
-     * server takes it. Use it when the server refused the old one.
+     * Replaces the app password of the WebDAV backend [id], or the pairing token of the hub, with
+     * [password], after checking that the server takes it. Use it when the server refused the old
+     * one, or when the old one is not on this device, as after restoring a database elsewhere.
+     *
+     * It is stored in [secretPlace], or where the backend keeps it if null. If that is another
+     * place, the secret moves: the new one is written first, then the backend records the new
+     * place, and then the old copy is deleted. If that delete fails, as when no keyring answers,
+     * the result says where the old copy may still be. If no keyring answers when writing to it,
+     * nothing changes and the result is [PasswordChange.NoKeyring].
      */
+    @Suppress("ReturnCount", "LongMethod") // Each return is one way a change can end.
     public suspend fun changePassword(
         id: String,
         password: Secret,
+        secretPlace: SecretPlace? = null,
     ): PasswordChange =
         operations.withLock {
-            val config = list().firstOrNull { it.id == id }?.config
+            val backend = list().firstOrNull { it.id == id }
+            val config = backend?.config
             val (kind, words) =
                 when (config) {
                     is WebDavConfig -> SecretKind.APP_PASSWORD to "app password"
@@ -460,12 +453,25 @@ public class BackendManager internal constructor(
                         "too. Nothing was changed.",
                 )
             }
+            val key = SecretKey(id, kind)
+            val from = config.secretPlace
+            val to = secretPlace ?: from
+            val target = secrets.of(to)
             try {
-                secrets.of(config.secretPlace).write(SecretKey(id, kind), password)
+                target.write(key, password)
+            } catch (e: SecretStoreUnavailableException) {
+                return@withLock if (to == SecretPlace.KEYRING) {
+                    PasswordChange.NoKeyring(e.message.orEmpty())
+                } else {
+                    // Offering the file again would not help.
+                    PasswordChange.Refused("Cannot store the $words: ${e.message}")
+                }
             } catch (e: SecretStoreException) {
                 return@withLock PasswordChange.Refused("Cannot store the $words: ${e.message}")
             }
-            PasswordChange.Changed
+            if (to == from) return@withLock PasswordChange.Changed
+            val placed = backend.copy(config = config.withSecretPlace(to))
+            moveSecret(store, secrets, io, backend, placed, key)
         }
 
     private fun openWithSecret(

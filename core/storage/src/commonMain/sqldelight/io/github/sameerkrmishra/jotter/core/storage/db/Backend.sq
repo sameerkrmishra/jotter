@@ -28,6 +28,9 @@ insertBackend:
 INSERT INTO backend(id, kind, name, settings, added_at)
 VALUES (:id, :kind, :name, :settings, :addedAt);
 
+updateSettings:
+UPDATE backend SET settings = :settings WHERE id = :id;
+
 deleteBackend:
 DELETE FROM backend WHERE id = :id;
 

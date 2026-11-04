@@ -8,6 +8,7 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.choice
 import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.Backend
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
@@ -20,6 +21,7 @@ import io.github.sameerkrmishra.jotter.app.sync.SecretStoreException
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.WebDavConfig
+import io.github.sameerkrmishra.jotter.app.sync.describe
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
 import io.github.sameerkrmishra.jotter.core.sync.SyncEngine
@@ -67,6 +69,8 @@ internal class SyncSetup(
 private const val PLATFORM = "linux"
 private const val WEBDAV = "webdav"
 private const val PEER = "peer"
+private const val KEYRING = "keyring"
+private const val FILE = "file"
 
 /** `jotter sync`: one sync with every backend, one line each. */
 internal class SyncCommand(
@@ -260,11 +264,22 @@ private class AddBackendCommand(
             "them, can then read it."
 }
 
-/** `jotter backends password`: replaces a WebDAV backend's app password. */
+/**
+ * `jotter backends password`: replaces a WebDAV backend's app password or the hub's token, and may
+ * move it to the keyring or to the secrets file.
+ */
 private class PasswordCommand(
     private val setup: SyncSetup,
 ) : CoreCliktCommand(name = "password") {
     private val id by argument(name = "ID", help = "A backend id, or a unique start of one.")
+    private val store by option(
+        "--store",
+        help =
+            "Where to keep it: keyring, or file for plain text in a file readable by you alone, " +
+                "\$XDG_CONFIG_HOME/jotter/secrets.json, for where no keyring answers. Default: " +
+                "where the backend keeps it now. Moving it deletes the old copy, or says where " +
+                "it stays.",
+    ).choice(KEYRING to SecretPlace.KEYRING, FILE to SecretPlace.FILE)
 
     override fun help(context: Context): String =
         "Replace the app password of a WebDAV backend, or the pairing token of the PC hub, " +
@@ -272,20 +287,35 @@ private class PasswordCommand(
 
     override fun run() {
         val backend = setup.withBackends { it.list() }.resolve(id)
-        val (what, prompt) =
-            when (val config = backend.config) {
-                is WebDavConfig ->
-                    "app password" to "New app password for ${config.username} at ${config.url}: "
-                is PeerConfig -> "pairing token" to "New pairing token for ${config.location}: "
-                else -> throw CliktError("jotter: ${backend.id} needs no password")
-            }
+        val (what, prompt) = askingFor(backend)
         val password = setup.passwords.read(prompt)
-        when (val result = setup.withBackends { it.changePassword(backend.id, password) }) {
-            PasswordChange.Changed ->
-                echo("Stored the new $what of ${oneLine(backend.name)}.")
+        val name = oneLine(backend.name)
+        when (val result = setup.withBackends { it.changePassword(backend.id, password, store) }) {
+            PasswordChange.Changed -> echo("Stored the new $what of $name.")
+            is PasswordChange.Moved -> {
+                echo("Stored the new $what of $name in ${describe(result.to)}.")
+                result.leftBehind?.let { echo(it) }
+            }
+            is PasswordChange.NoKeyring ->
+                throw CliktError(
+                    "jotter: ${result.reason} Nothing was changed. To keep the $what in plain " +
+                        "text in a file only you can read instead, " +
+                        "\$XDG_CONFIG_HOME/jotter/secrets.json, run: jotter backends password " +
+                        "--store file ${backend.id}. Anyone who can read your files, or a backup " +
+                        "of them, can then read it.",
+                )
             is PasswordChange.Refused -> throw CliktError("jotter: ${result.reason}")
         }
     }
+
+    /** What the secret of [backend] is called, and the prompt for it. */
+    private fun askingFor(backend: Backend): Pair<String, String> =
+        when (val config = backend.config) {
+            is WebDavConfig ->
+                "app password" to "New app password for ${config.username} at ${config.url}: "
+            is PeerConfig -> "pairing token" to "New pairing token for ${config.location}: "
+            else -> throw CliktError("jotter: ${backend.id} needs no password")
+        }
 }
 
 /** `jotter backends remove`: stops syncing with a backend, whose files stay. */

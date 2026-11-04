@@ -79,7 +79,9 @@ it can be the database of another computer, or of this one after a loss.
   (`SyncEngine` is safe to stop anywhere), and waits for it before the store closes.
   Passwords and tokens come from `app:sync`'s `linuxSecretStores`: the keyring through
   `secret-tool`, or the file the user chose when no keyring answered
-  ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)).
+  ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)). Entering a new password
+  for a backend whose keyring does not answer, as after restoring the database on a
+  computer without one, offers the file too, as adding does, and moves it there.
 - **`--autoclose`** closes the app a few seconds after the window appears and prints
   `jotter: window shown, closing`, to prove that a build starts. It also closes the
   window for a database that cannot be opened.
