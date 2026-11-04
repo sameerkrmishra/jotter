@@ -19,14 +19,15 @@ public class LogRecord(
     public val failure: String?,
 ) {
     /**
-     * The record as text: one line such as `2026-11-04T10:00:00.123Z INFO sync: Synced`, then the
-     * failure's lines, each indented by two spaces. Ends with a line break.
+     * The record as text: one line such as `2026-11-04T10:00:00.123Z INFO sync: Synced`, with the
+     * [processId] after the time if given, then the failure's lines, each indented by two spaces.
+     * Ends with a line break.
      */
-    public fun format(): String =
+    public fun format(processId: Long? = null): String =
         buildString {
-            append(time)
-                .append(' ')
-                .append(level.name)
+            append(time).append(' ')
+            if (processId != null) append(processId).append(' ')
+            append(level.name)
                 .append(' ')
                 .append(tag)
                 .append(": ")

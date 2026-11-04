@@ -31,23 +31,28 @@ class LogFileTest {
     private fun sink(
         lines: Int,
         files: Int,
-    ) = RotatingFileSink(logs, "app", line(0).format().length.toLong() * lines, files, fs)
+    ) = RotatingFileSink(logs, "app", line(0).format(processId).length.toLong() * lines, files)
 
-    private fun fileNames() = fs.list(logs).map { it.name }.sorted()
+    private fun fileNames() =
+        fs
+            .list(logs)
+            .map { it.name }
+            .filter { it.endsWith(".log") }
+            .sorted()
 
     @Test
     fun theFirstLineCreatesTheDirectoryAndFile() {
-        RotatingFileSink(logs, "desktop", fileSystem = fs).use { it.write(record("hello")) }
+        RotatingFileSink(logs, "desktop").use { it.write(record("hello")) }
         assertEquals(
-            "2026-11-04T10:00:00Z INFO t: hello\n",
+            "2026-11-04T10:00:00Z $processId INFO t: hello\n",
             fs.read(logs / "desktop.log") { readUtf8() },
         )
     }
 
     @Test
     fun linesAreAppendedAcrossSinks() {
-        RotatingFileSink(logs, "cli", fileSystem = fs).use { it.write(record("one")) }
-        RotatingFileSink(logs, "cli", fileSystem = fs).use { it.write(record("two")) }
+        RotatingFileSink(logs, "cli").use { it.write(record("one")) }
+        RotatingFileSink(logs, "cli").use { it.write(record("two")) }
         assertEquals(2, fs.read(logs / "cli.log") { readUtf8() }.lines().count { it.isNotEmpty() })
     }
 
@@ -76,7 +81,7 @@ class LogFileTest {
 
     @Test
     fun oneFileKeptIsEmptiedWhenFull() {
-        RotatingFileSink(logs, "app", maxFileBytes = 1, files = 1, fileSystem = fs).use {
+        RotatingFileSink(logs, "app", maxFileBytes = 1, files = 1).use {
             it.write(line(1))
         }
         assertEquals(emptyList(), fileNames())
@@ -86,7 +91,7 @@ class LogFileTest {
     fun aDirectoryThatCannotBeMadeFailsTheWriteAndTheNextOneTriesAgain() {
         fs.createDirectories(root)
         fs.write(logs) { writeUtf8("a file, not a directory") }
-        RotatingFileSink(logs, "app", fileSystem = fs).use { sink ->
+        RotatingFileSink(logs, "app").use { sink ->
             assertFailsWith<IOException> { sink.write(record("lost")) }
             fs.delete(logs)
             sink.write(record("kept"))
@@ -118,10 +123,10 @@ class LogFileTest {
 
     @Test
     fun recentStartsAtAWholeLine() {
-        RotatingFileSink(logs, "app", fileSystem = fs).use { sink ->
+        RotatingFileSink(logs, "app").use { sink ->
             repeat(5) { sink.write(line(it)) }
         }
-        val size = line(0).format().length
+        val size = line(0).format(processId).length
         val recent = LogFiles(logs, fs).recent("app", maxBytes = size * 2 + 5)
         assertEquals(listOf("003", "004"), recent.messages())
         assertTrue(recent.startsWith("2026"))
