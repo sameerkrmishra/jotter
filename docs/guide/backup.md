@@ -105,12 +105,37 @@ backup come back, as long as a backend still holds them. Nothing else is needed.
      notes on another computer. Unlock your keyring, or enter the password again." A **PC
      hub** says the same of "this hub's pairing token". Press **Enter new password** and
      enter the app password, or a new token after pairing this computer again on the PC
-     (command: `jotter backends password ID`). The new computer needs a keyring for this
-     if the old one used one.
+     (command: `jotter backends password ID`).
    - A **USB folder** syncs if it is at the same path. If not, remove it and add it again
      with the new path. That copies your notes there again, which is harmless.
 
 If you keep using the old computer too, both go on syncing without trouble.
+
+### On a computer without a keyring
+
+If the old device kept a password in a keyring (an Android phone's copy counts as that), and
+the new computer has none, as over SSH or without `secret-tool`, the card says "Jotter could
+not read this backend's password: Jotter cannot reach a keyring: ..." Keep the password in
+the secrets file instead:
+
+- **Desktop:** press **Enter new password**, type it, and press **Check and keep**. Jotter
+  asks **Keep the password in a file?** Press **Keep it in the file**. The card then says
+  "Its password is kept in plain text in ~/.config/jotter/secrets.json, as you chose."
+- **Command:** `jotter backends password ID` alone answers "Jotter cannot reach a keyring:
+  ... Nothing was changed. To keep the app password in plain text in a file only you can
+  read instead, $XDG_CONFIG_HOME/jotter/secrets.json, run: jotter backends password --store
+  file ID." So run:
+
+  ```
+  jotter backends password --store file ID
+  ```
+
+  It says "Stored the new app password of NAME in the secrets file, in plain text."
+
+Both may add that Jotter "could not delete the old copy, if there was one", and how to
+delete it from a keyring later. On a computer that never had the old keyring, there is
+nothing to delete. The same works for a hub's pairing token. Anyone who can read your files,
+or a backup of them, can read the secrets file.
 
 ## A damaged notes file
 
@@ -177,6 +202,8 @@ a damaged file on a USB folder. On the desktop app: deleting the hub's folder an
 the hub off and on (the phone synced again with its old token). On the Android emulator: a
 backup through Android's test backup service, which held only `jotter.db` and
 `jotter.db-wal`, held nothing when the service said it was not encrypted, and after
-reinstalling brought back the notes but not the passwords. Not tested: Google's real
+reinstalling brought back the notes but not the passwords. The phone's copy, restored on
+Linux without a keyring, synced after `--store file` and after the desktop's **Keep it in
+the file** (built from PR #26's branch). Not tested: Google's real
 backup, moving to a new phone through Android's own transfer, Android 8, and losing
 `hub-devices.json`.

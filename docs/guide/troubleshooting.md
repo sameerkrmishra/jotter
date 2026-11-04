@@ -57,7 +57,7 @@ Other editor messages:
 | The PC hub refused this device's pairing token | Pair this device again on the PC and enter the new token |
 | The PC hub answers, but its folder is not set up | On the PC, turn the hub off and on |
 | Jotter could not read this backend's password (or this hub's pairing token): the keyring may be locked, or the password is not stored on this device | Linux. Unlock your keyring (log in to your desktop), or enter it again with **Enter new password**. Normal after a restore on another computer |
-| Jotter could not read this backend's password: Jotter cannot reach a keyring | Linux, with no keyring, as over SSH. Run it from your desktop session |
+| Jotter could not read this backend's password: Jotter cannot reach a keyring | Linux, with no keyring, as over SSH or without `secret-tool`. Run it from your desktop session, or [keep the password in the secrets file](backup.md#on-a-computer-without-a-keyring) |
 | This backend's password is not stored on this phone (or this hub's pairing token) | Android, after a restore. Press **Enter new password** and enter it again; for the hub, pair the phone on the PC again first |
 | Not fully synced: N files could not be read | Nothing: it is tried again soon |
 | Stopped part way | Nothing: the next sync goes on |
