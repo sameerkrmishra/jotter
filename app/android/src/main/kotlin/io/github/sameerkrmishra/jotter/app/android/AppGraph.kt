@@ -12,6 +12,7 @@ import io.github.sameerkrmishra.jotter.app.sync.AppInfo
 import io.github.sameerkrmishra.jotter.app.sync.BackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
 import io.github.sameerkrmishra.jotter.app.sync.DatabaseExport
+import io.github.sameerkrmishra.jotter.app.sync.SecretHome
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
@@ -133,7 +134,7 @@ internal class AppGraph(
         // Android has no keyring and no plain-text choice: both places are the sealed file. A
         // backend from a database restored from Linux that says "file" thus asks for its secret
         // again, as any backend restored on another device does (ADR-0016).
-        SecretStores(store, store)
+        SecretStores(store, store, home = SecretHome.ANDROID)
     }
 
     private fun open(): Opened {
