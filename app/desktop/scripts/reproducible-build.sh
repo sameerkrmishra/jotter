@@ -72,7 +72,8 @@ build() {
         ./gradlew $JOTTER_GRADLE_ARGS :app:cli:distZip
         app/desktop/scripts/appimage.sh "$src/build/dist"
     ) >"$out/$name.log" 2>&1; then
-        echo "[$name] build failed, see $out/$name.log" >&2
+        echo "[$name] build failed, see $out/$name.log; its end:" >&2
+        tail -n 40 "$out/$name.log" >&2
         exit 2
     fi
     # Each build must have made its own package, in its own copy: once, appimage.sh found the
