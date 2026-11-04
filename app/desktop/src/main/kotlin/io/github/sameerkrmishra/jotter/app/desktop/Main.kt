@@ -46,15 +46,22 @@ public fun main(args: Array<String>) {
         exitProcess(0)
     }
     val autoclose = AUTOCLOSE_ARG in args
+    val shutdown = Shutdown()
     val store =
         try {
             openStore()
         } catch (e: DatabaseUnavailableException) {
             showFailure(e.message.orEmpty(), autoclose)
-            exitProcess(1)
+            // Nothing was opened.
+            shutdown.closed()
+            shutdown.exit(1)
+            return
         }
     runApp(store, autoclose)
-    exitProcess(0)
+    // The editor was saved before the window closed, and runApp finished the scope (the scheduler
+    // and the hub) and closed the store; only now may the process end, if need be by a halt.
+    shutdown.closed()
+    shutdown.exit(0)
 }
 
 @Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
@@ -77,8 +84,8 @@ private fun showFailure(
 
 /**
  * The store is closed after the scope is finished, as no query may still be running. `application`
- * must not exit the process itself, or that would never happen; `main()` does, which also ends it
- * if an AWT thread hangs, as spike 0002 saw once.
+ * must not exit the process itself, or that would never happen; `main()` does, through [Shutdown],
+ * which also ends it if exiting hangs, as spike 0002 saw once and Xvfb runs showed in one in five.
  */
 @Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
 private fun runApp(

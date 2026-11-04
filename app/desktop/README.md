@@ -26,11 +26,16 @@ or holds it exclusively.
   `jotter.root`. `Database.kt` opens the store and is tested.
 - **Exit.** Closing the window saves the open editor first. If that fails, the user
   chooses to keep editing or to close without saving. Then `main()` finishes the view models' scope, closes
-  the store and calls `exitProcess`. Closing checkpoints the WAL, unless another
+  the store and ends the process through `Shutdown`. Closing checkpoints the WAL, unless another
   process is reading or writing: then it gives up at once and the last connection
-  to close does it (`core:sqlite`). So exit never waits for a lock. `exitProcess`
-  also ends the process if an AWT thread hangs after the window closes, as one did
-  in spike 0002.
+  to close does it (`core:sqlite`). So exit never waits for a lock. `Shutdown` waits
+  up to 2 s for AWT to shut itself down before `exitProcess`: exiting at once
+  deadlocked in about one run in five on Xvfb (libGLX's exit handler waiting for the
+  Xlib lock that AWT's toolkit thread held), leaving the process, and the hub's port,
+  alive. A daemon watchdog then halts the process if it is still alive 5 s after exit
+  began, printing `jotter: exit did not finish, halting`. That is safe only because
+  everything is saved and closed by then, so `Shutdown.exit` refuses to run before
+  `closed()`, which `main()` calls after the store is closed (`ShutdownTest`).
 - **Sync.** `main()` builds `app:sync`'s `BackendManager` and `SyncScheduler` on the
   store and starts the scheduler in the app's scope, so it syncs on start, 5 s after
   edits, every 5 minutes and on "Sync now" ([PLAN.md](../../docs/PLAN.md) §6.3). The
