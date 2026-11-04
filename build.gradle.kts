@@ -9,6 +9,7 @@ dependencies {
     kover(projects.app.desktop)
     kover(projects.app.sharedUi)
     kover(projects.app.sync)
+    kover(projects.core.logging)
     kover(projects.core.merge)
     kover(projects.backend.api)
     kover(projects.backend.localfolder)

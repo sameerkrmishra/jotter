@@ -51,6 +51,7 @@ write a new ADR and mark the old one as amended or superseded.
 | [0017](0017-webdav-backend.md) | The WebDAV backend: what it asks of a server, and what no client can enforce | Proposed |
 | [0018](0018-android-app.md) | The Android app: no local folders, Keystore secrets, WorkManager sync and the tailnet | Proposed |
 | [0019](0019-release-builds.md) | Release builds: one version source, signing outside the repository, reproducible APKs | Proposed |
+| [0020](0020-local-logging.md) | Local logging: a small logger of our own, a rotating file, and nothing private in it | Proposed |
 
 ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
 milestone M6.

@@ -34,6 +34,8 @@ ktlint-gradle = "14.2.0"
 # Apache-2.0, with no dependency but kotlin-stdlib.
 markdown = "0.7.18"
 okio = "3.18.2"
+# The version Ktor already brings. core:logging provides its SLF4J backend (ADR-0020).
+slf4j = "2.0.19"
 sqldelight = "2.4.1"
 
 [libraries]
@@ -71,6 +73,7 @@ ktor-http-cio = { module = "io.ktor:ktor-http-cio", version.ref = "ktor" }
 # Raw sockets: backend/peer and server, and backend/webdav's tests of dropped connections.
 ktor-network = { module = "io.ktor:ktor-network", version.ref = "ktor" }
 markdown = { module = "org.jetbrains:markdown", version.ref = "markdown" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 sqldelight-coroutines-extensions = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
 # The SQL dialect of core/storage's .sq files. Both bundled SQLite builds are 3.50 (ADR-0002).
 sqldelight-dialect-sqlite344 = { module = "app.cash.sqldelight:sqlite-3-44-dialect", version.ref = "sqldelight" }
