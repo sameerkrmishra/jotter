@@ -40,6 +40,8 @@ write a new ADR and mark the old one as amended or superseded.
 | [0004](0004-immutable-change-segments.md) | Immutable change segments on dumb blob stores | Accepted, amended by 0014, 0017 |
 | [0005](0005-manual-dependency-injection.md) | Manual constructor injection | Accepted |
 | [0006](0006-native-compatible-shared-modules.md) | Shared modules compile and test on Kotlin/Native | Accepted, amended by 0010, 0015 |
+| [0007](0007-end-to-end-encryption-plan.md) | End-to-end encryption: a keyed codec per backend, a wrapped store key, and a new store to migrate (not built in v1) | Proposed |
+| [0008](0008-multi-user-plan.md) | Sharing notes between people: shared spaces as separate stores (not built in v1) | Proposed |
 | [0009](0009-import-preserves-source-timestamps.md) | Imported notes keep their source timestamps as revision stamps | Accepted |
 | [0010](0010-compose-ui-outside-linuxx64-rule.md) | Compose UI stays outside the linuxX64 rule | Accepted |
 | [0011](0011-touching-changes-and-merge-format.md) | Touching changes merge, and the merge rules are part of the sync format | Accepted, amended by 0013 |
@@ -51,6 +53,3 @@ write a new ADR and mark the old one as amended or superseded.
 | [0017](0017-webdav-backend.md) | The WebDAV backend: what it asks of a server, and what no client can enforce | Proposed |
 | [0018](0018-android-app.md) | The Android app: no local folders, Keystore secrets, WorkManager sync and the tailnet | Proposed |
 | [0019](0019-release-builds.md) | Release builds: one version source, signing outside the repository, reproducible APKs | Proposed |
-
-ADR-0007 (encryption plan) and ADR-0008 (multi-user plan) are planned for
-milestone M6.
