@@ -27,7 +27,9 @@ public fun describe(reachability: Reachability): String =
                         "(${reachability.detail}). If a drive is mounted there, it may be " +
                         "unplugged. If the marker was deleted, remove this backend and add it again."
                 UnreachableReason.UNAUTHORIZED -> WRONG_PASSWORD
-                UnreachableReason.FAILED -> "Cannot be reached: ${reachability.detail}."
+                UnreachableReason.FAILED ->
+                    "Cannot be reached: ${reachability.detail}. Check the network, or that the " +
+                        "drive or server is there; Jotter tries again by itself."
             }
     }
 
