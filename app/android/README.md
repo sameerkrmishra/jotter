@@ -43,6 +43,7 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
 | `SyncWork`, `SyncWorker` | WorkManager: every 15 minutes while a backend exists, and once after leaving the screen, with a network. The worker waits for a round of the scheduler |
 | `SealedFileSecretStore`, `AesGcmCipher`, `keystoreKey` | Backend secrets, sealed with an AES-256 key in the Android Keystore, in `noBackupFilesDir` |
 | `AndroidTailnet`, `tailnetRefusal` | A hub's token goes out only while Tailscale's VPN carries the app, or to loopback |
+| `ScreenExport`, `androidDebugLog`, `androidPlatform` | The debug log: `DebugReport` with the app's log, saved through the Activity on screen |
 
 ## Design
 
@@ -51,8 +52,15 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
   database. The screens' state (`AppViewModel`) lives in the graph, not the Activity, so
   turning the phone keeps the open note and its draft. The app runs in one process.
 - **The database** is `jotter.db` in the app's `databases` folder (`getDatabasePath`), opened
-  on first use. If it cannot be opened, the Activity shows `CannotOpenNotes` with the reason
-  and the worker does nothing.
+  on first use. If it cannot be opened, the Activity shows `CannotOpenNotes` with the reason in
+  plain words (`describeOpenFailure`) and the debug log, the share target says the same, and
+  the worker does nothing. The file is left as it is, never replaced by a new one.
+- **The log** is `noBackupFilesDir/logs/android.log`, which no backup or transfer copies, at
+  INFO, rotated at 256 KiB, four files ([ADR-0020](../../docs/adr/0020-local-logging.md)).
+  `JotterApplication` installs it, routes OkHttp's `java.util.logging` lines to it and logs
+  uncaught failures. "Debug log" on the Sync screen shows the whole debug log, and "Save…"
+  hands it to Android's document picker (`ACTION_CREATE_DOCUMENT`): the user picks a folder or
+  a cloud drive. Jotter itself sends it nowhere.
 - **Threads.** The screens run on the main thread and every database call on
   `Dispatchers.IO`, as on the desktop. The scheduler runs on `Dispatchers.Default`, the sync
   engine and the backends on their own dispatchers: no sync work runs on the main thread,
@@ -140,6 +148,8 @@ tests and the end-to-end script passed on API 36 and API 26.
 
 ## Not verified
 
+- Saving the debug log through the document picker: the Activity's export is not driven by a
+  device test, as the picker is another app's screen.
 - A real phone, a real tailnet, Tailscale's Android app, and MagicDNS names: the emulators
   have no VPN, so only the refusal side of the Tailscale check ran on a device, and socket
   binding ran against the emulator's own network, not a VPN that goes away mid-sync.

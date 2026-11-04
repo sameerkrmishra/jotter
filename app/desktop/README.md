@@ -13,11 +13,25 @@ The notes are the CLI's, in the same file: `JOTTER_DB`, then
 `$XDG_DATA_HOME/jotter/jotter.db`, then `~/.local/share/jotter/jotter.db`
 (`linuxDatabasePath` in `core:storage`). There is no `--db` option. The directory
 is created if needed. If the database cannot be opened, the app shows the reason in
-a window, because an app started from a menu has no stderr. It prints the same line
+a window, because an app started from a menu has no stderr. The reason says what
+happened and what to do (`describeOpenFailure`), and the file is left as it is: a
+damaged file is never replaced by a new one. It prints the same line
 on stderr, and exits with status 1 when the window is closed. That includes a database that stayed locked by
 another process for the 5 s busy timeout, which `NoteStore.open` reports as
 `StorageBusyException`; it can only happen while another process creates the file
 or holds it exclusively.
+
+## Log and debug log
+
+The app logs to `$XDG_STATE_HOME/jotter/logs/desktop.log` (or
+`~/.local/state/jotter/logs/desktop.log`), uncaught failures and the hub's events
+included; `JOTTER_LOG_LEVEL=debug` changes the level for one run
+([ADR-0020](../../docs/adr/0020-local-logging.md)). "Debug log" on the Sync screen, and
+"Show debug log" on the screen for notes that cannot be opened, show the whole debug
+log (`DebugReport`, with the CLI's log too) and save it, after the user has read it, to
+a new file they pick in the desktop's file dialog (`DebugLogFile`; an existing file is
+never overwritten). The version it names is the jar's `Implementation-Version`, from
+`gradle.properties`.
 
 ## Design
 

@@ -49,6 +49,12 @@ depends on this one for the protocol, never the other way round.
 - **A refused token** is `Unreachable(UNAUTHORIZED)`: the device must be paired
   again, and retrying does not help.
 
+## Log
+
+Each request is logged at DEBUG as its method, endpoint, the hub's address, the status
+and the time taken: never the token or a blob's path or content
+([ADR-0020](../../docs/adr/0020-local-logging.md)).
+
 ## Design
 
 - **The protocol lives here**, in `PeerProtocol`, so the server and the client
