@@ -15,6 +15,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.sameerkrmishra.jotter.app.sync.EXPORT_DATABASE_EXPLAINED
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -210,6 +211,32 @@ class MainActivityTest {
             assertTrue(compose.onAllNodesWithText("Add folder").fetchSemanticsNodes().isEmpty())
             pressBack(scenario)
             compose.awaitText("New note")
+        }
+    }
+
+    @Test
+    fun theSyncScreenOffersExportDatabaseAndSaysSecretsAreNotInIt() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            compose.awaitText("Sync")
+            compose.onNodeWithText("Sync").performClick()
+            compose.awaitText("Sync now")
+            compose.onNodeWithText("Export database…").performScrollTo().performClick()
+            compose.waitUntil(TIMEOUT_MS) {
+                compose
+                    .onAllNodesWithText(EXPORT_DATABASE_EXPLAINED)
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            compose.onNodeWithText("Choose where…").assertExists()
+            compose.onNodeWithText("Cancel").performClick()
+            compose.waitForIdle()
+            assertTrue(
+                compose
+                    .onAllNodesWithText(
+                        EXPORT_DATABASE_EXPLAINED,
+                    ).fetchSemanticsNodes()
+                    .isEmpty(),
+            )
         }
     }
 }

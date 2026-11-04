@@ -383,7 +383,11 @@ public class BackendManager internal constructor(
     public fun secretsLeftBehind(backend: Backend): String? {
         if (backend.config.secrets.isEmpty()) return null
         val what = if (backend.config is PeerConfig) "pairing token" else "password"
-        return if (backend.config.secretPlace == SecretPlace.KEYRING) {
+        return if (secrets.home == SecretHome.ANDROID) {
+            "Its $what may still be in Jotter's own storage on this phone, sealed with a key in " +
+                "the Android Keystore, under ${backend.id}. No other app can read it, and " +
+                "clearing Jotter's storage or uninstalling Jotter deletes it."
+        } else if (backend.config.secretPlace == SecretPlace.KEYRING) {
             "Its $what may still be in your keyring, as the item \"Jotter: ... of backend " +
                 "${backend.id}\". Delete it later in your keyring program, such as Seahorse or " +
                 "KWalletManager, or with: secret-tool clear application jotter backend ${backend.id}"
@@ -409,6 +413,9 @@ public class BackendManager internal constructor(
         val what = if (backend.config is PeerConfig) "pairing token" else "password"
         return when {
             backend.config.secrets.isEmpty() -> null
+            secrets.home == SecretHome.ANDROID ->
+                "Its $what is kept on this phone only, in Jotter's own storage, sealed with a " +
+                    "key in the Android Keystore. No backup copies it."
             backend.config.secretPlace == SecretPlace.KEYRING ->
                 "Its $what is kept in the keyring."
             secrets.fileLocation == null ->
@@ -662,7 +669,11 @@ public class BackendManager internal constructor(
                 backend.ended(Outcome.FAILED, "Cannot open it: ${e.message}.")
             } catch (e: SecretStoreException) {
                 log.warn(e) { "The secret of backend ${backend.id} cannot be read" }
-                backend.ended(Outcome.FAILED, "Not synced: ${e.message}. It is tried again later.")
+                backend.ended(
+                    Outcome.FAILED,
+                    "${unreadableSecret(backend.config, e.message, secrets.home)} Until then, " +
+                        "it is tried again later.",
+                )
             } catch (e: Exception) {
                 log.error(e) { "Sync with backend ${backend.id} failed on this device" }
                 backend.ended(
@@ -710,19 +721,35 @@ public class BackendManager internal constructor(
     @Suppress("TooGenericExceptionCaught") // A backend that cannot be opened is reported.
     public suspend fun status(): List<BackendStatus> =
         list().map { backend ->
-            val reachability =
-                try {
-                    factory.open(backend).closing { it.ping() }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
+            try {
+                BackendStatus(backend, factory.open(backend).closing { it.ping() })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: MissingSecretException) {
+                secretMissing(backend, e.message.orEmpty())
+            } catch (e: SecretStoreException) {
+                log.warn(e) { "The secret of backend ${backend.id} cannot be read" }
+                secretMissing(backend, unreadableSecret(backend.config, e.message, secrets.home))
+            } catch (e: Exception) {
+                BackendStatus(
+                    backend,
                     Reachability.Unreachable(
                         UnreachableReason.FAILED,
                         e.message ?: "it cannot be opened",
-                    )
-                }
-            BackendStatus(backend, reachability)
+                    ),
+                )
+            }
         }
+
+    /** The status of [backend], which was not asked, as its secret is missing: [problem]. */
+    private fun secretMissing(
+        backend: Backend,
+        problem: String,
+    ) = BackendStatus(
+        backend,
+        Reachability.Unreachable(UnreachableReason.UNAUTHORIZED, problem),
+        problem,
+    )
 
     private companion object {
         /** Runs [block] on this store, then closes it if it holds anything, as WebDAV's does. */

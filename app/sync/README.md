@@ -30,10 +30,11 @@ each backend implementation it can open: `backend:localfolder`, `backend:webdav`
 |---|---|
 | `BackendConfig`, `LocalFolderConfig`, `WebDavConfig`, `PeerConfig`, `UnknownConfig` | Where a backend is and what secrets it needs. Stored as `kind` and JSON `settings` in the `backend` table, never with a secret. `UnknownConfig` is a kind this version cannot read, listed so that it can be removed, never synced |
 | `Backend`, `Attempt`, `Outcome`, `BackendSync`, `BackendStatus` | A configured backend, how its last sync went, what one sync did, and its reachability now |
-| `BackendFactory`, `StandardBackendFactory`, `MissingSecretException` | Opens the `BlobStore` of a backend, reading its password |
+| `BackendFactory`, `StandardBackendFactory`, `MissingSecretException` | Opens the `BlobStore` of a backend, reading its password. A missing or unreadable one is never said as a network problem: `BackendStatus.secretProblem` says it, with what to do (enter it again; on Linux, maybe unlock the keyring) |
 | `BackendManager`, `AddResult`, `PasswordChange` | Adds a local folder or a WebDAV server, replaces a password, removes a backend, syncs one or all, and reports status |
 | `SyncScheduler`, `SyncTiming` | When the desktop and Android apps sync |
-| `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `SecretPlace`, `SecretStores`, `NoSecretStore`, `SecretStoreException`, `SecretStoreUnavailableException` | Where backend secrets live ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)) |
+| `SecretStore`, `Secret`, `SecretKey`, `SecretKind`, `SecretPlace`, `SecretStores`, `SecretHome`, `NoSecretStore`, `SecretStoreException`, `SecretStoreUnavailableException` | Where backend secrets live ([ADR-0016](../../docs/adr/0016-where-secrets-live.md)). `SecretHome` picks the words: the keyring or a file on Linux, the Android Keystore and the app's own storage on Android |
+| `DatabaseExport`, `ExportOutcome`, `describeExportFailure`, `EXPORT_DATABASE_EXPLAINED` | "Export database" ([ADR-0002](../../docs/adr/0002-sqlite-via-sqldelight.md)): `NoteStore.exportTo` (`VACUUM INTO`) into a hidden file beside the target, checked, synced and renamed into place; an existing file only when asked to replace it, never the live database or its side files; a full disk or a folder without permission in plain words |
 | `SecretServiceStore`, `SecretFileStore`, `linuxSecretStores` | JVM only: the keyring through `secret-tool`, and the 0600 file the user may choose |
 | `describe(Reachability)` | Reachability in plain words |
 | `describeOpenFailure`, `describeStorageFailure` | What a failure of the notes database means and what to do, from `core:storage`'s `StorageProblem`, in the same words in every app |
@@ -182,5 +183,12 @@ tested). `SecretFileStoreTest` checks the modes, links, damage and the XDG paths
 two devices converge through a folder, an unplugged folder and an empty mount point
 read as unreachable and are never set up, removing leaves the files, and failures of a
 backend, of the database and of a secret store end as outcomes. `SyncSchedulerTest`
-runs the scheduler on virtual time against a stand-in for the backends. They run on
-the JVM and on `linuxX64`.
+runs the scheduler on virtual time against a stand-in for the backends.
+`SecretWordsTest` checks the words for a missing or unreadable secret on Linux and
+Android, and that none of them speaks of the network or a keyring Android lacks.
+`DatabaseExportTest` exports real databases: one sound file, an existing file replaced
+only when asked, never the live database, a missing folder said plainly, and a copy
+restored in place of a lost database getting its lost tail back from its folder backend
+(ADR-0014). They run on the JVM and on `linuxX64`. `DatabaseExportJvmTest` exports again
+and again while another JVM writes 2,000 notes (every copy opens, counts only grow, some
+were taken half way), and into a folder without write permission.

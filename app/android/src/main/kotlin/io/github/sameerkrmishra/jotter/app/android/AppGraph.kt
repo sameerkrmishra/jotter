@@ -5,11 +5,14 @@ import android.net.ConnectivityManager
 import android.os.Build
 import androidx.work.WorkManager
 import io.github.sameerkrmishra.jotter.app.sharedui.AppViewModel
+import io.github.sameerkrmishra.jotter.app.sharedui.DatabaseExportPlace
 import io.github.sameerkrmishra.jotter.app.sharedui.DebugLogControls
 import io.github.sameerkrmishra.jotter.app.sharedui.SyncControls
 import io.github.sameerkrmishra.jotter.app.sync.AppInfo
 import io.github.sameerkrmishra.jotter.app.sync.BackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
+import io.github.sameerkrmishra.jotter.app.sync.DatabaseExport
+import io.github.sameerkrmishra.jotter.app.sync.SecretHome
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
@@ -92,6 +95,12 @@ internal class AppGraph(
     /** Saves the debug log through the Activity on the screen, which sets itself here. */
     val debugExport = ScreenExport()
 
+    /** Exports the database through the Activity on the screen, which sets itself here. */
+    val databaseExport = ScreenDatabaseExport()
+
+    /** Where a copy of the database is made before it goes where the user chose. */
+    val exportStaging = File(this.context.cacheDir, EXPORT_STAGING)
+
     /** This app, for the debug log. */
     private val appInfo: AppInfo by lazy {
         @Suppress("DEPRECATION") // getPackageInfo(String, PackageInfoFlags) is API 33 and later.
@@ -125,7 +134,7 @@ internal class AppGraph(
         // Android has no keyring and no plain-text choice: both places are the sealed file. A
         // backend from a database restored from Linux that says "file" thus asks for its secret
         // again, as any backend restored on another device does (ADR-0016).
-        SecretStores(store, store)
+        SecretStores(store, store, home = SecretHome.ANDROID)
     }
 
     private fun open(): Opened {
@@ -151,7 +160,7 @@ internal class AppGraph(
                     WorkManagerJobs(WorkManager.getInstance(context)),
                     background,
                 )
-            Opened.Ready(store, manager, sync, ui, io) { debugLog() }
+            Opened.Ready(store, manager, sync, ui, io, databaseExport) { debugLog() }
         } catch (
             @Suppress("TooGenericExceptionCaught") e: RuntimeException,
         ) {
@@ -195,16 +204,24 @@ internal sealed interface Opened {
      * @property manager Its backends.
      * @property sync When it syncs.
      * @property io Where its blocking calls run.
+     * @param place Where "Export database" asks for a place: the Activity on the screen.
      * @param debugLog The debug log of the screens.
      */
+    @Suppress("LongParameterList") // Only the graph makes it, once.
     class Ready(
         val store: NoteStore,
         val manager: BackendManager,
         override val sync: AndroidSync,
         private val ui: CoroutineScope,
         val io: CoroutineDispatcher,
+        private val place: DatabaseExportPlace,
         private val debugLog: () -> DebugLogControls,
     ) : Opened {
+        /** Makes the copy of "Export database"; its failures name the phone's storage. */
+        val export: DatabaseExport by lazy {
+            DatabaseExport(store, io, describeFolder = { PHONE_STORAGE })
+        }
+
         /** The screens' state, made on first use, for as long as the process lives. */
         val app: AppViewModel by lazy {
             AppViewModel(
@@ -218,6 +235,7 @@ internal sealed interface Opened {
                     foldersUnavailable = FOLDERS_UNAVAILABLE,
                 ),
                 debugLog(),
+                place,
             )
         }
     }

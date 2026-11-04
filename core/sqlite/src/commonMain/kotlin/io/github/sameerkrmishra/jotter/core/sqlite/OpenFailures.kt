@@ -33,6 +33,11 @@ public class DatabaseUpgradeException(
     cause: Throwable,
 ) : IllegalStateException("Upgrading the database failed", cause)
 
+/** A copy of a database, such as one `VACUUM INTO` wrote, failed [checkDatabaseCopy]. */
+public class DamagedCopyException(
+    message: String,
+) : IllegalStateException(message)
+
 /** The extended result codes (such as `SQLITE_BUSY_SNAPSHOT`) keep the primary one here. */
 private const val PRIMARY_RESULT_CODE_MASK = 0xFF
 
