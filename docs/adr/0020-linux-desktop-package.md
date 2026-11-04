@@ -69,6 +69,12 @@ release workflow builds on a pinned runner image (`ubuntu-24.04`, its squashfs-t
 both versions into `BUILDINFO.txt`; to check a release elsewhere one uses those, or compares the
 unpacked contents, which do not depend on mksquashfs.
 
+While this was decided, on 2026-11-04: `reproducible-build.sh` built `d56c782` twice locally
+(Temurin 21.0.12.1, squashfs-tools 4.7.5) and gave the same AppImage (71,223,800 bytes) and CLI
+zip (13,048,226 bytes) both times. The release workflow's dry run on CI, the same tree with
+Temurin 21.0.13 and squashfs-tools 4.6.1, gave a different AppImage, as expected, but the same
+CLI zip (`59e3ba4f…`) and the same unsigned APK as M5's notes record (`a5d606ab…`).
+
 **Release.** `.github/workflows/release.yml` builds the unsigned APK, the AppImage and the CLI
 zip on a `v*` tag, runs the AppImage's smoke test (`smoke-appimage.sh`: `--version`, the CLI's
 `add` and `list` with temporary directories, and the window on Xvfb), writes `SHA256SUMS`, and
@@ -93,8 +99,11 @@ creates a draft release. The maintainer signs the APK and publishes ([RELEASING.
   AppImageLauncher). The desktop entry inside makes that work.
 - AppImages need FUSE to mount themselves. Most desktops have it; elsewhere
   `--appimage-extract-and-run` works.
-- The CLI inside the AppImage starts in about [measured below] instead of about 150 ms, without
-  its class data archive and with the mount. The zip keeps the fast path, but needs Java.
+- The CLI inside the AppImage is slower to start than the standalone one (about 150 ms): no class
+  data archive, and a FUSE mount per run. `jotter add` through the symlink took a median of
+  0.73 s mounted and 0.54 s with `APPIMAGE_EXTRACT_AND_RUN=1` (10 runs each, 2026-11-04, on the
+  machine in app/cli's README, but busy: load average 9 on 12 threads), so a quiet machine should
+  do better. Fine at a prompt, slow in a loop; the zip keeps the fast path, but needs Java.
 - x86_64 only, as Compose's Skiko library in the build is.
 - The runtime is downloaded at build time from GitHub, though pinned by hash; and reproducing
   CI's AppImage byte for byte needs CI's JDK build and squashfs-tools.

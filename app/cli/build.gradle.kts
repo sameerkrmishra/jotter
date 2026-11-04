@@ -27,7 +27,11 @@ val appImageStartScripts =
         applicationName = "jotter"
         mainClass = application.mainClass
         classpath = files(tasks.jar, configurations.runtimeClasspath)
-        outputDir = layout.buildDirectory.dir("appimage-scripts").get().asFile
+        outputDir =
+            layout.buildDirectory
+                .dir("appimage-scripts")
+                .get()
+                .asFile
         (unixStartScriptGenerator as TemplateBasedScriptGenerator).template =
             resources.text.fromFile(template)
     }
