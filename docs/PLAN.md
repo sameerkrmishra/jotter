@@ -30,8 +30,10 @@ WebDAV, or the user's own PC over Tailscale).
 
 ### Explicitly deferred (documented, designed for, not built)
 
-- End-to-end encryption of data on backends (§6.6 keeps the seam for it).
-- Multiple users and login (family use).
+- End-to-end encryption of data on backends (§6.6 keeps the seam for it;
+  [ADR-0007](adr/0007-end-to-end-encryption-plan.md)).
+- Multiple users and login (family use;
+  [ADR-0008](adr/0008-multi-user-plan.md)).
 - Dropbox, Google Drive and S3 backends.
 - Neovim and Emacs plugins (they will drive the CLI or a local API).
 - Snapshot and compaction of the change log.
@@ -362,11 +364,17 @@ for TLS, limits and how it runs:
 
 ### 6.6 Future encryption seam
 
-Segments pass through a `SegmentCodec` (v1: JSON + gzip). End-to-end encryption
-later becomes a codec (for example XChaCha20-Poly1305 with a passphrase-derived
-key) without changing backends or the merge logic. The name of the format file
-records the codec, and a backend with another version's format file is left alone
-([ADR-0017](adr/0017-webdav-backend.md)). Documented as ADR-0007 in M6.
+Segments pass through a `SegmentCodec` (v1: JSON + gzip), and the merge logic never sees
+a file, so end-to-end encryption becomes a codec without changing backends, revisions or
+the merge rules. The name of the format file records the codec, and a backend with
+another version's or codec's format file is left alone
+([ADR-0017](adr/0017-webdav-backend.md)), so a v1 device never writes into an encrypted
+store. The seam covers segments only: `device.json` and the format file are written
+outside it, the segment name's hash is an unkeyed hash of the plaintext, the codec is
+fixed per engine rather than per backend, and it must stay deterministic. The plan, a
+deterministic AEAD codec with keyed names, a random store key wrapped by a passphrase,
+and migration to a new store, is
+[ADR-0007](adr/0007-end-to-end-encryption-plan.md). Not built in v1.
 
 ---
 
@@ -408,8 +416,10 @@ records the codec, and a backend with another version's format file is left alon
 - **Architecture decisions:** recorded as ADRs in `docs/adr/`. Planned:
   0001 local-first, 0002 SQLite/SQLDelight, 0003 revision DAG + diff3,
   0004 immutable segment sync, 0005 manual DI (all in M0); 0006
-  native-compatible shared modules (M1); 0007 encryption plan and
-  0008 multi-user plan (both deferred features, documented in M6); 0009
+  native-compatible shared modules (M1); 0007
+  [encryption plan](adr/0007-end-to-end-encryption-plan.md) and 0008
+  [multi-user plan](adr/0008-multi-user-plan.md) (both deferred features, documented in
+  M6); 0009
   [import keeps source timestamps](adr/0009-import-preserves-source-timestamps.md)
   (M2); 0011
   [touching changes and the merge format](adr/0011-touching-changes-and-merge-format.md)
