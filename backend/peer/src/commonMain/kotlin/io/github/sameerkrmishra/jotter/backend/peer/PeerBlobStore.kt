@@ -304,7 +304,7 @@ public class PeerBlobStore internal constructor(
     private companion object {
         val log = Logger("peer")
 
-        // The last part of an endpoint, such as `ping`: the log never holds a URL's path (ADR-0021).
+        // The last part of an endpoint, such as `ping`: no URL path is logged (ADR-0021).
         fun callName(endpoint: String) = endpoint.substringAfterLast('/')
 
         const val MAX_CONNECTIONS = 4

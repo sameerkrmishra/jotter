@@ -31,6 +31,19 @@ class LinuxLogsTest {
     }
 
     @Test
+    fun theHomeDirectoryIsGivenToTheLogOnlyIfAbsolute() {
+        TempDir().use { dir ->
+            val state = dir.path.toString()
+            installLinuxLogging("cli", mapOf("XDG_STATE_HOME" to state, "HOME" to "/home/me")::get)
+            assertEquals("/home/me", Logging.home)
+            installLinuxLogging("cli", mapOf("XDG_STATE_HOME" to state, "HOME" to "me")::get)
+            assertNull(Logging.home)
+            installLinuxLogging("cli", mapOf("XDG_STATE_HOME" to state)::get)
+            assertNull(Logging.home)
+        }
+    }
+
+    @Test
     fun withoutAHomeNothingIsInstalled() {
         assertNull(installLinuxLogging("cli") { null })
     }

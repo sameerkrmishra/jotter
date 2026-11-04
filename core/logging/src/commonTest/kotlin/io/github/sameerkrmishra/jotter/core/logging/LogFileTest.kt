@@ -115,6 +115,13 @@ class LogFileTest {
     }
 
     @Test
+    fun aLogThatCannotBeReadIsLeftOut() {
+        fs.createDirectories(logs / "app.1.log")
+        RotatingFileSink(logs, "app").use { it.write(record("kept")) }
+        assertEquals(listOf("kept"), LogFiles(logs, fs).recent("app").messages())
+    }
+
+    @Test
     fun noDirectoryMeansNoLogs() {
         val reader = LogFiles(root / "missing", fs)
         assertEquals(emptyList(), reader.names())

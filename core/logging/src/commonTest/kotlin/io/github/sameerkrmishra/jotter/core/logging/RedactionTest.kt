@@ -28,6 +28,7 @@ class RedactionTest {
         // A root or relative home would match everything, so it is not used.
         assertEquals("/x", redact("/x", "/"))
         assertEquals("rel/x", redact("rel/x", "rel"))
+        assertEquals("/home/me/x", redact("/home/me/x", null))
     }
 
     @Test
