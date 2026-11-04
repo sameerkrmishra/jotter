@@ -30,7 +30,11 @@ class SecretWordsTest {
     fun onAndroidSecretsAreInTheKeystoreNotAKeyring() =
         test {
             Device(this, "phone", home = SecretHome.ANDROID).use { device ->
-                device.addRecord("dav", "webdav", """{"url":"https://dav.example.org/","username":"me"}""")
+                device.addRecord(
+                    "dav",
+                    "webdav",
+                    """{"url":"https://dav.example.org/","username":"me"}""",
+                )
                 device.addRecord("hub", "peer", """{"host":"127.0.0.1","port":1}""")
                 device.manager.list().forEach { backend ->
                     val where = device.manager.whereSecretsAre(backend).orEmpty()
@@ -53,7 +57,11 @@ class SecretWordsTest {
     fun onAndroidAMissingSecretSaysToEnterItAgain() =
         test {
             Device(this, "phone", home = SecretHome.ANDROID).use { device ->
-                device.addRecord("dav", "webdav", """{"url":"https://dav.example.org/","username":"me"}""")
+                device.addRecord(
+                    "dav",
+                    "webdav",
+                    """{"url":"https://dav.example.org/","username":"me"}""",
+                )
                 val sync = device.manager.syncAll().single()
                 assertEquals(Outcome.UNAUTHORIZED, sync.attempt.outcome)
                 assertEquals(NO_PASSWORD_ANDROID, sync.attempt.detail)
@@ -87,6 +95,16 @@ class SecretWordsTest {
                 "locked, or pair this device on the PC again and enter the new token.",
             unreadableSecret(hub, null, SecretHome.LINUX),
         )
+        assertEquals(
+            "Jotter could not read this backend's password on this phone. Enter the password " +
+                "again.",
+            unreadableSecret(dav, "  ", SecretHome.ANDROID),
+        )
+        assertEquals(
+            "Jotter could not read this hub's pairing token on this phone: Locked. Pair this " +
+                "device on the PC again and enter the new token.",
+            unreadableSecret(hub, "Locked.", SecretHome.ANDROID),
+        )
         // One period, however the reason ends.
         val said = unreadableSecret(dav, "The keyring is locked..", SecretHome.LINUX)
         assertFalse(".." in said, said)
@@ -94,7 +112,8 @@ class SecretWordsTest {
 
     @Test
     fun aDetailThatEndsWithAPeriodGetsNoSecondOne() {
-        val said = describe(Reachability.Unreachable(UnreachableReason.FAILED, "Connection refused."))
+        val said =
+            describe(Reachability.Unreachable(UnreachableReason.FAILED, "Connection refused."))
         assertEquals(
             "Cannot be reached: Connection refused. Check the network, or that the drive or " +
                 "server is there; Jotter tries again by itself.",

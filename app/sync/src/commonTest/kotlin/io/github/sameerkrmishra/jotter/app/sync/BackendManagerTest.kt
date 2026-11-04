@@ -306,9 +306,9 @@ class BackendManagerTest {
                 val sync = device.manager.syncAll().single()
                 assertEquals(Outcome.FAILED, sync.attempt.outcome)
                 assertEquals(
-                    "Jotter could not read this backend's password: The keyring is locked. Unlock " +
-                        "your keyring if it is locked, or enter the password again. Until then, " +
-                        "it is tried again later.",
+                    "Jotter could not read this backend's password: The keyring is locked. " +
+                        "Unlock your keyring if it is locked, or enter the password again. Until " +
+                        "then, it is tried again later.",
                     sync.attempt.detail,
                 )
                 assertEquals(
@@ -322,8 +322,8 @@ class BackendManagerTest {
                 val status = device.manager.status().single()
                 assertEquals(UnreachableReason.UNAUTHORIZED, unreachable(status).reason)
                 assertEquals(
-                    "Jotter could not read this backend's password: The keyring is locked. Unlock " +
-                        "your keyring if it is locked, or enter the password again.",
+                    "Jotter could not read this backend's password: The keyring is locked. " +
+                        "Unlock your keyring if it is locked, or enter the password again.",
                     status.reachabilityText,
                 )
             }

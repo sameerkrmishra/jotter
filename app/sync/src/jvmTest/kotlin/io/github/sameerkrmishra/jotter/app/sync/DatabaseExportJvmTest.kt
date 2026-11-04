@@ -34,9 +34,14 @@ class DatabaseExportJvmTest {
                             val file = dir.folder("out") / "copy-${seen.size}.db"
                             assertIs<ExportOutcome.Exported>(export.export(file))
                             seen +=
-                                NoteStore.open(file.toString(), "check", EmptyCoroutineContext).use {
-                                    it.notes.list().size
-                                }
+                                NoteStore
+                                    .open(
+                                        file.toString(),
+                                        "check",
+                                        EmptyCoroutineContext,
+                                    ).use {
+                                        it.notes.list().size
+                                    }
                             files.delete(file)
                         }
                         assertEquals(NoteWriterProcess.DONE, fromWriter.readLine())
@@ -46,7 +51,10 @@ class DatabaseExportJvmTest {
                         // and some were taken while the other process was half way.
                         assertEquals(seen.sorted(), seen)
                         assertTrue(seen.all { it in 1..1 + NOTES })
-                        assertTrue(seen.any { it in 2..NOTES }, "no copy was made during the writes")
+                        assertTrue(
+                            seen.any { it in 2..NOTES },
+                            "no copy was made during the writes",
+                        )
                         val last = dir.folder("out") / "last.db"
                         assertIs<ExportOutcome.Exported>(export.export(last))
                         NoteStore.open(last.toString(), "check", EmptyCoroutineContext).use {
@@ -77,10 +85,19 @@ class DatabaseExportJvmTest {
                         val said = assertIs<ExportOutcome.Failed>(outcome).message
                         assertContains(said, "not allowed to write in $locked")
                         assertEquals(emptyList(), files.list(locked))
-                        assertEquals("milk", device.store.notes.list().single().body)
+                        assertEquals(
+                            "milk",
+                            device.store.notes
+                                .list()
+                                .single()
+                                .body,
+                        )
                     }
                 } finally {
-                    Files.setPosixFilePermissions(folder, PosixFilePermissions.fromString("rwx------"))
+                    Files.setPosixFilePermissions(
+                        folder,
+                        PosixFilePermissions.fromString("rwx------"),
+                    )
                 }
             }
         }

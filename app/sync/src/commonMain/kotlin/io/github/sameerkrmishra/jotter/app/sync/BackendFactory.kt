@@ -167,7 +167,8 @@ internal fun unreadableSecret(
 ): String {
     val peer = config is PeerConfig
     val what = if (peer) "this hub's pairing token" else "this backend's password"
-    val why = reason?.trim()?.trimEnd('.')?.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty()
+    val said = reason.orEmpty().trim().trimEnd('.')
+    val why = if (said.isEmpty()) "" else ": $said"
     val again =
         if (peer) {
             "pair this device on the PC again and enter the new token"

@@ -2,8 +2,11 @@ package io.github.sameerkrmishra.jotter.app.sync
 
 import androidx.sqlite.SQLiteException
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import okio.FileHandle
 import okio.FileSystem
+import okio.ForwardingFileSystem
 import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
@@ -11,6 +14,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -41,7 +45,13 @@ class DatabaseExportTest {
                 // Only the database: a copy opens on its own, as Jotter's.
                 NoteStore.open(exported.file.toString(), "other", EmptyCoroutineContext).use {
                     assertEquals(device.store.deviceId, it.deviceId)
-                    assertEquals("milk", it.notes.list().single().body)
+                    assertEquals(
+                        "milk",
+                        it.notes
+                            .list()
+                            .single()
+                            .body,
+                    )
                 }
             }
             assertContains(EXPORT_DATABASE_EXPLAINED, "Passwords and pairing tokens are not in it")
@@ -62,7 +72,13 @@ class DatabaseExportTest {
                 assertIs<ExportOutcome.Exported>(device.export().export(file, replace = true))
                 assertEquals(listOf("jotter.db"), names(out))
                 NoteStore.open(file.toString(), "other", EmptyCoroutineContext).use {
-                    assertEquals("milk", it.notes.list().single().body)
+                    assertEquals(
+                        "milk",
+                        it.notes
+                            .list()
+                            .single()
+                            .body,
+                    )
                 }
             }
         }
@@ -88,7 +104,109 @@ class DatabaseExportTest {
                     device.export().export(other, replace = true),
                 )
                 assertEquals(before, files.read(live) { readByteString() })
-                assertEquals("milk", device.store.notes.list().single().body)
+                assertEquals(
+                    "milk",
+                    device.store.notes
+                        .list()
+                        .single()
+                        .body,
+                )
+            }
+        }
+
+    /** The real file system, but [move] and [delete] may fail, and [opened] runs on each open. */
+    private class Faulty(
+        val move: IOException? = null,
+        val delete: IOException? = null,
+        val opened: (Path) -> Unit = {},
+    ) : ForwardingFileSystem(FileSystem.SYSTEM) {
+        override fun openReadWrite(
+            file: Path,
+            mustCreate: Boolean,
+            mustExist: Boolean,
+        ): FileHandle {
+            opened(file)
+            return super.openReadWrite(file, mustCreate, mustExist)
+        }
+
+        override fun atomicMove(
+            source: Path,
+            target: Path,
+        ) {
+            move?.let { throw it }
+            super.atomicMove(source, target)
+        }
+
+        override fun delete(
+            path: Path,
+            mustExist: Boolean,
+        ) {
+            delete?.let { throw it }
+            super.delete(path, mustExist)
+        }
+    }
+
+    @Test
+    fun aFileThatAppearsWhileTheCopyIsMadeIsLeftAlone() =
+        test {
+            val out = folder("out")
+            val file = out / "jotter.db"
+            val appears = Faulty(opened = { files.write(file) { writeUtf8("theirs") } })
+            Device(this, "a").use { device ->
+                val export = DatabaseExport(device.store, EmptyCoroutineContext, appears)
+                assertEquals(ExportOutcome.Exists(file), export.export(file))
+                assertEquals("theirs", files.read(file) { readUtf8() })
+                assertEquals(listOf("jotter.db"), names(out))
+            }
+        }
+
+    @Test
+    fun aFullDiskAtTheRenameLeavesNoPartAndSaysSo() =
+        test {
+            val out = folder("out")
+            val full = Faulty(move = IOException("No space left on device"))
+            Device(this, "a").use { device ->
+                val outcome =
+                    DatabaseExport(device.store, EmptyCoroutineContext, full) { "the stick" }
+                        .export(out / "jotter.db")
+                assertEquals(
+                    "There is not enough free space in the stick for the copy. Free some space " +
+                        "or choose another place. Your notes have not been changed.",
+                    assertIs<ExportOutcome.Failed>(outcome).message,
+                )
+                assertEquals(emptyList(), names(out))
+            }
+        }
+
+    @Test
+    fun aPartThatCannotBeRemovedStillEndsInPlainWords() =
+        test {
+            val out = folder("out")
+            val stuck =
+                Faulty(
+                    move = IOException("Input/output error"),
+                    delete = IOException("Read-only file system"),
+                )
+            Device(this, "a").use { device ->
+                val outcome =
+                    DatabaseExport(device.store, EmptyCoroutineContext, stuck).export(out / "x.db")
+                assertContains(assertIs<ExportOutcome.Failed>(outcome).message, "plugged in")
+                // The part is hidden and named so; nothing has the name the user chose.
+                val left = names(out)
+                assertTrue(left.single().startsWith(".x.db.") && left.single().endsWith(".part"))
+            }
+        }
+
+    @Test
+    fun aCancelledExportLeavesNoPart() =
+        test {
+            val out = folder("out")
+            val stops = Faulty(opened = { throw CancellationException("the app closes") })
+            Device(this, "a").use { device ->
+                assertFailsWith<CancellationException> {
+                    DatabaseExport(device.store, EmptyCoroutineContext, stops).export(out / "x.db")
+                }
+                assertEquals(emptyList(), names(out))
             }
         }
 
@@ -102,6 +220,12 @@ class DatabaseExportTest {
                 assertContains(assertIs<ExportOutcome.Failed>(relative).message, "not a full path")
                 val folder = device.export().export(folder("out"))
                 assertContains(assertIs<ExportOutcome.Failed>(folder).message, "is a folder")
+                val root = device.export().export("/".toPath())
+                assertContains(assertIs<ExportOutcome.Failed>(root).message, "not a full path")
+                // A file where the folder should be.
+                files.write(path / "plain") { writeUtf8("not a folder") }
+                val underFile = device.export().export(path / "plain" / "jotter.db")
+                assertContains(assertIs<ExportOutcome.Failed>(underFile).message, "does not exist")
                 assertEquals(emptyList(), names(path / "out"))
             }
         }
@@ -124,13 +248,24 @@ class DatabaseExportTest {
             files.delete(live)
             files.copy(copy, live)
             Device(this, "a").use { device ->
-                assertEquals(listOf("before the backup"), device.store.notes.list().map { it.body })
+                assertEquals(
+                    listOf("before the backup"),
+                    device.store.notes
+                        .list()
+                        .map { it.body },
+                )
                 // Its backend is still there, and what it wrote after the backup comes back.
-                assertEquals(listOf(stick.toString()), device.manager.list().map { it.config.location })
+                assertEquals(
+                    listOf(stick.toString()),
+                    device.manager.list().map { it.config.location },
+                )
                 device.manager.syncAll()
                 assertEquals(
                     setOf("before the backup", "after the backup"),
-                    device.store.notes.list().map { it.body }.toSet(),
+                    device.store.notes
+                        .list()
+                        .map { it.body }
+                        .toSet(),
                 )
                 device.store.notes.create("", "after the restore")
                 device.manager.syncAll()
@@ -140,7 +275,10 @@ class DatabaseExportTest {
                 other.manager.syncAll()
                 assertEquals(
                     setOf("before the backup", "after the backup", "after the restore"),
-                    other.store.notes.list().map { it.body }.toSet(),
+                    other.store.notes
+                        .list()
+                        .map { it.body }
+                        .toSet(),
                 )
             }
         }
@@ -159,6 +297,10 @@ class DatabaseExportTest {
                 IOException("Read-only file system") to "not allowed to write",
                 SQLiteException("Error code: 10, message: disk I/O error") to "plugged in",
                 IllegalStateException("The copy failed its integrity check") to "debug log",
+                IOException("Disk quota exceeded") to "not enough free space",
+                IOException("AccessDeniedException /media/stick") to "not allowed to write",
+                SQLiteException("Error code: 5, message: database is locked") to "Try again",
+                SQLiteException("Error code: 8, message: readonly") to "not allowed to write",
             )
         cases.forEach { (failure, words) ->
             val said = describeExportFailure(failure, folder)

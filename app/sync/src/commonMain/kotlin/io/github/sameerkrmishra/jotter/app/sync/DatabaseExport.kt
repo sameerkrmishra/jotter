@@ -10,6 +10,7 @@ import okio.FileSystem
 import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
+import okio.use
 import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 
@@ -97,7 +98,7 @@ public class DatabaseExport(
                 return ExportOutcome.Exists(file)
             }
             fileSystem.atomicMove(part, file)
-            val bytes = fileSystem.metadata(file).size ?: 0L
+            val bytes = fileSystem.openReadOnly(file).use { it.size() }
             log.info { "Exported the database, $bytes bytes" }
             ExportOutcome.Exported(file, bytes, exported(file))
         } catch (e: CancellationException) {
@@ -172,7 +173,8 @@ public fun describeExportFailure(
             "There is not enough free space in $folder for the copy. Free some space or choose " +
                 "another place. $unchanged"
         StorageProblem.NO_ACCESS, StorageProblem.READ_ONLY ->
-            "Jotter is not allowed to write in $folder. Choose a folder you may write to. $unchanged"
+            "Jotter is not allowed to write in $folder. Choose a folder you may write to. " +
+                unchanged
         StorageProblem.DISK_ERROR ->
             "The disk at $folder could not be written. If it is a removable drive, check that it " +
                 "is plugged in, then try again. $unchanged"
