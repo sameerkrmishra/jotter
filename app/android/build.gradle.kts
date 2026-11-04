@@ -36,7 +36,7 @@ val configurationCacheRequested =
         .getOrElse(false)
 require(releaseKeystore == null || !configurationCacheRequested) {
     "JOTTER_KEYSTORE is set: sign with --no-configuration-cache, so that the passwords are not " +
-        "stored in the configuration cache (docs/releasing.md)"
+        "stored in the configuration cache (RELEASING.md)"
 }
 
 android {
@@ -129,5 +129,5 @@ dependencies {
 
 fun requiredEnvironment(name: String): String =
     requireNotNull(providers.environmentVariable(name).orNull) {
-        "$name must be set when JOTTER_KEYSTORE is (docs/releasing.md)"
+        "$name must be set when JOTTER_KEYSTORE is (RELEASING.md)"
     }

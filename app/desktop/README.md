@@ -43,10 +43,45 @@ or holds it exclusively.
 - **`--autoclose`** closes the app a few seconds after the window appears and prints
   `jotter: window shown, closing`, to prove that a build starts. It also closes the
   window for a database that cannot be opened.
+- **`--version`** prints `jotter X.Y.Z` (the packaged version, or `dev` from `gradlew run`)
+  and exits, before any window or the database, so that a package can be checked headless.
 - **Runtime modules.** The jlink image gets `java.instrument` and `jdk.unsupported`,
   as `./gradlew :app:desktop:suggestRuntimeModules` says. Run that again when
   dependencies change. `core:sqlite` uses SQLite through JNI, so `java.sql` is not
   needed.
 - **`kotlinx-coroutines-swing`** gives `Dispatchers.Main`. Compose does not bring it.
 
-Packaging for release and the CI smoke launch come later.
+## The AppImage
+
+Releases ship the app as `Jotter-X.Y.Z-x86_64.AppImage`, with its own Java runtime and the
+CLI inside ([ADR-0020](../../docs/adr/0020-linux-desktop-package.md)). To build one, with
+squashfs-tools 4.6 or newer installed (or `MKSQUASHFS` set to its `mksquashfs`):
+
+```
+app/desktop/scripts/appimage.sh                 # build/dist/Jotter-X.Y.Z-x86_64.AppImage
+app/desktop/scripts/smoke-appimage.sh build/dist/Jotter-*-x86_64.AppImage
+app/desktop/scripts/reproducible-build.sh       # builds it twice, compares
+```
+
+`:app:desktop:appImageDir` assembles the directory in `build/appimage/Jotter.AppDir`, and
+`smoke-appimage.sh` also takes that directory. The smoke test runs the package in an empty
+environment with temporary `HOME`, XDG directories and `JOTTER_DB`: `--version`, then
+`cli add` and `cli list`, and the CLI through a symlink named `jotter`. With
+`JOTTER_SMOKE_GUI=1` it also opens the window under `xvfb-run` with `--autoclose`, which the
+release workflow does; it never uses the caller's display.
+
+For users:
+
+```
+chmod +x Jotter-1.0.0-x86_64.AppImage
+./Jotter-1.0.0-x86_64.AppImage                  # the app
+./Jotter-1.0.0-x86_64.AppImage cli list         # the CLI
+ln -s "$PWD/Jotter-1.0.0-x86_64.AppImage" ~/.local/bin/jotter
+jotter list                                     # the CLI, under the name jotter
+```
+
+`AppRun` chooses: the CLI when the first argument is `cli` or the AppImage was started as
+`jotter`, the app otherwise. After an update, point the symlink at the new file. Without
+FUSE, `--appimage-extract-and-run` or `APPIMAGE_EXTRACT_AND_RUN=1` runs it all the same.
+The CLI inside starts more slowly than the standalone one (see `app/cli`'s README); the
+release's `jotter-cli-X.Y.Z.zip` is the standalone one, for machines with Java 21.
