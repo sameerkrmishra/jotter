@@ -1,4 +1,11 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
+import java.time.LocalDateTime
+import java.util.zip.CRC32
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 
 plugins {
     id("jotter.kotlin-jvm")
@@ -37,6 +44,71 @@ compose.desktop {
     }
 }
 
+/*
+ * Three changes to the distributable, for the AppImage (ADR-0020), made right after jpackage:
+ *
+ * - Compose 1.12.2 takes the native library out of Skiko's runtime jar and writes what is left
+ *   with `new ZipEntry(name)`, so its entries carry the build's clock time, and the jar's hashed
+ *   name in lib/app and jotter.cfg changes with it. The jar is written again with sorted, stored
+ *   entries at a fixed time, renamed after its new content, and jotter.cfg follows.
+ * - Compose's jlink strips the runtime's bin/; the JDK's own `java` launcher goes back, for the
+ *   CLI in the AppImage.
+ * - The runtime's base class data archive (lib/server/classes.jsa), which jlink does not make:
+ *   `java -Xshare:dump`. It is the same bytes on every run (the reproducibility check covers it),
+ *   and it speeds up the start of both the app and the CLI.
+ */
+// Compose registers its tasks after the build script runs, hence the name filter.
+tasks.named { it == "createDistributable" }.configureEach {
+    val appDir = layout.buildDirectory.dir("compose/binaries/main/app/jotter")
+    val javaLauncher = packagingJdk.map { it.file("bin/java").asFile }
+    inputs.file(javaLauncher)
+    doLast {
+        val app = appDir.get().asFile
+        val lib = app.resolve("lib/app")
+        val jar = lib.listFiles { f -> f.name.matches(Regex("skiko-awt-runtime-.*-[0-9a-f]+\\.jar")) }!!.single()
+        val entries =
+            ZipFile(jar).use { zip ->
+                zip.entries().toList().sortedBy { it.name }.map { it.name to zip.getInputStream(it).readBytes() }
+            }
+        val bytes = ByteArrayOutputStream()
+        ZipOutputStream(bytes).use { out ->
+            for ((name, data) in entries) {
+                val crc = CRC32()
+                crc.update(data)
+                val entry = ZipEntry(name)
+                entry.method = ZipEntry.STORED
+                entry.size = data.size.toLong()
+                entry.compressedSize = data.size.toLong()
+                entry.crc = crc.value
+                // Local time without a zone, so the time zone of the build cannot change it.
+                entry.setTimeLocal(LocalDateTime.of(1980, 2, 1, 0, 0))
+                out.putNextEntry(entry)
+                out.write(data)
+                out.closeEntry()
+            }
+        }
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes.toByteArray())
+        val hash = digest.take(16).joinToString("") { "%02x".format(it) }
+        val renamed = jar.name.replace(Regex("-[0-9a-f]+\\.jar$"), "-$hash.jar")
+        jar.delete()
+        lib.resolve(renamed).writeBytes(bytes.toByteArray())
+        val cfg = lib.resolve("jotter.cfg")
+        cfg.writeText(cfg.readText().replace("/${jar.name}\n", "/$renamed\n"))
+        check(renamed in cfg.readText()) { "jotter.cfg does not name $renamed" }
+
+        val launcher = app.resolve("lib/runtime/bin/java")
+        javaLauncher.get().copyTo(launcher, overwrite = true)
+        launcher.setExecutable(true, false)
+        val dump =
+            ProcessBuilder(launcher.path, "-Xshare:dump")
+                .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        dump.environment().keys.removeAll(setOf("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS"))
+        check(dump.start().waitFor() == 0) { "java -Xshare:dump failed" }
+        check(app.resolve("lib/runtime/lib/server/classes.jsa").isFile) { "no classes.jsa" }
+    }
+}
+
 // The CLI's directory for the AppImage, from app:cli's `appImageCli`.
 val appImageCli = configurations.dependencyScope("appImageCli")
 val appImageCliFiles =
@@ -48,8 +120,8 @@ val appImageCliFiles =
     }
 
 /*
- * The AppImage's contents (ADR-0020): the distributable in `opt/jotter`, with the JDK's `java`
- * launcher added to its runtime for the CLI in `opt/jotter-cli`, and the desktop entry, AppStream
+ * The AppImage's contents (ADR-0020): the distributable in `opt/jotter` (whose runtime has `java`
+ * for the CLI, see above), the CLI in `opt/jotter-cli`, and the desktop entry, AppStream
  * metadata and icon. `scripts/appimage.sh` turns it into the AppImage. Modes are normalized so
  * that the image does not depend on the umask: 755 for directories and executables, 644 otherwise.
  */
@@ -66,7 +138,6 @@ tasks.register<Sync>("appImageDir") {
         rename { "$appId.png" }
     }
     from(tasks.named("createDistributable")) { into("opt") }
-    from(packagingJdk.map { it.file("bin/java") }) { into("opt/jotter/lib/runtime/bin") }
     from(appImageCliFiles) { into("opt/jotter-cli") }
     dirPermissions { unix("rwxr-xr-x") }
     eachFile {
