@@ -42,10 +42,12 @@ public fun JotterApp(viewModel: AppViewModel) {
                         backends,
                         viewModel::closeBackends,
                         viewModel::openDebugLog.takeIf { viewModel.hasDebugLog },
+                        viewModel::openDatabaseExport.takeIf { viewModel.exportsDatabase },
                     )
                 editor != null -> EditorScreen(editor, viewModel)
                 else -> NotesScreen(viewModel)
             }
+            viewModel.exportView?.let { ExportDatabaseDialog(it) }
             if (viewModel.pendingExit != null) {
                 ConfirmExit(viewModel)
             }
