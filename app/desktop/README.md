@@ -26,7 +26,7 @@ or holds it exclusively.
 The app logs to `$XDG_STATE_HOME/jotter/logs/desktop.log` (or
 `~/.local/state/jotter/logs/desktop.log`), uncaught failures and the hub's events
 included; `JOTTER_LOG_LEVEL=debug` changes the level for one run
-([ADR-0020](../../docs/adr/0020-local-logging.md)). "Debug log" on the Sync screen, and
+([ADR-0021](../../docs/adr/0021-local-logging.md)). "Debug log" on the Sync screen, and
 "Show debug log" on the screen for notes that cannot be opened, show the whole debug
 log (`DebugReport`, with the CLI's log too) and save it, after the user has read it, to
 a new file they pick in the desktop's file dialog (`DebugLogFile`; an existing file is

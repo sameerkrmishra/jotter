@@ -67,7 +67,7 @@ the linuxX64 rule (ADR-0015 amends ADR-0006 for this module).
 
 The hub logs when it starts, stops or fails, pairings and unpairings by device id, and
 requests it refuses for want of a valid token, by method and endpoint only: never a
-token, a path's query or a body ([ADR-0020](../../docs/adr/0020-local-logging.md)). A
+token, a path's query or a body ([ADR-0021](../../docs/adr/0021-local-logging.md)). A
 failure the user sees says what to do; its exception goes to the log.
 
 ## Design

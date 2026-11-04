@@ -34,7 +34,7 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 | `jotter backends remove ID` | Stops syncing with a backend and forgets it on this device. Its files stay where they are. `--keep-secret` leaves its password or token where it is, for when no keyring answers, and says where |
 | `jotter backends status [ID]` | Asks each backend, or one, whether it can be reached now, and prints that with its last sync and issues |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
-| `jotter debug-log` | Prints the debug log to attach to an issue: versions, platform, each backend's kind and last sync with its issues, and the newest lines of the CLI's and the desktop app's logs. It holds no note, title, tag, password or token ([ADR-0020](../../docs/adr/0020-local-logging.md)). `--output FILE` (`-o`) writes the same text to a new file and never overwrites one. It works also when the notes cannot be opened, and says why. Nothing is sent anywhere |
+| `jotter debug-log` | Prints the debug log to attach to an issue: versions, platform, each backend's kind and last sync with its issues, and the newest lines of the CLI's and the desktop app's logs. It holds no note, title, tag, password or token ([ADR-0021](../../docs/adr/0021-local-logging.md)). `--output FILE` (`-o`) writes the same text to a new file and never overwrites one. It works also when the notes cannot be opened, and says why. Nothing is sent anywhere |
 
 `jotter add` takes anything that is not one of its options as the note, so
 checklist items need no quoting beyond the shell's: `jotter add "- [ ] milk"`,
@@ -207,8 +207,10 @@ The CLI logs to `$XDG_STATE_HOME/jotter/logs/cli.log`, or
 only if `XDG_STATE_HOME` or `HOME` is an absolute path: there is no other fallback.
 The file is opened at the first line, so a command that logs nothing, such as most
 `jotter add`s, costs nothing. INFO by default; `JOTTER_LOG_LEVEL=debug` (or `warn`,
-`error`) for one run. It rotates at 256 KiB and keeps four files. What is never in it:
-see [ADR-0020](../../docs/adr/0020-local-logging.md). Ktor's lines go there too, so
+`error`) for one run. It rotates at 256 KiB and keeps four files. Commands that run at once share it:
+each line is appended under a file lock and carries the process id. The folder is
+0700 and the files 0600. What is never in it:
+see [ADR-0021](../../docs/adr/0021-local-logging.md). Ktor's lines go there too, so
 contacting a server no longer prints SLF4J's "no providers" warnings.
 
 ## Database location

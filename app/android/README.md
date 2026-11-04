@@ -56,7 +56,7 @@ does not apply; what another app could share belongs in `app:sync` or `app:share
   plain words (`describeOpenFailure`) and the debug log, the share target says the same, and
   the worker does nothing. The file is left as it is, never replaced by a new one.
 - **The log** is `noBackupFilesDir/logs/android.log`, which no backup or transfer copies, at
-  INFO, rotated at 256 KiB, four files ([ADR-0020](../../docs/adr/0020-local-logging.md)).
+  INFO, rotated at 256 KiB, four files ([ADR-0021](../../docs/adr/0021-local-logging.md)).
   `JotterApplication` installs it, routes OkHttp's `java.util.logging` lines to it and logs
   uncaught failures. "Debug log" on the Sync screen shows the whole debug log, and "Save…"
   hands it to Android's document picker (`ACTION_CREATE_DOCUMENT`): the user picks a folder or

@@ -27,7 +27,7 @@ internal fun jvmPlatform(property: (String) -> String? = System::getProperty): S
         "Java ${property("java.version")}"
 
 /**
- * `jotter debug-log`: prints the debug log (ADR-0020), so the user sees all of it, and with
+ * `jotter debug-log`: prints the debug log (ADR-0021), so the user sees all of it, and with
  * `--output` writes the same text to a new file to attach to an issue. Nothing is sent anywhere.
  * It works also when the notes cannot be opened, as that is when it is most wanted.
  */

@@ -37,7 +37,7 @@ each backend implementation it can open: `backend:localfolder`, `backend:webdav`
 | `SecretServiceStore`, `SecretFileStore`, `linuxSecretStores` | JVM only: the keyring through `secret-tool`, and the 0600 file the user may choose |
 | `describe(Reachability)` | Reachability in plain words |
 | `describeOpenFailure`, `describeStorageFailure` | What a failure of the notes database means and what to do, from `core:storage`'s `StorageProblem`, in the same words in every app |
-| `DebugReport`, `AppInfo`, `DEBUG_LOG_PREAMBLE` | The debug log the user exports ([ADR-0020](../../docs/adr/0020-local-logging.md)): versions, platform, formats, each backend's id, kind, last sync and issues (never its name or location), and the newest lines of each log, redacted once more |
+| `DebugReport`, `AppInfo`, `DEBUG_LOG_PREAMBLE` | The debug log the user exports ([ADR-0021](../../docs/adr/0021-local-logging.md)): versions, platform, formats, each backend's id, kind, last sync and issues (never its name or configured location), and the newest lines of each log, all redacted: URLs down to scheme, host and port, the home directory as `~` |
 | `linuxLogDirectory`, `installLinuxLogging`, `LOG_LEVEL_ENVVAR` | Where the desktop app and the CLI log, and at what level |
 | `TailnetCheck` | Whether a hub's token may leave the device now, beyond the address rule (Android: only while Tailscale runs) |
 

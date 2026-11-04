@@ -12,7 +12,7 @@ kotlin {
     applyDefaultHierarchyTemplate {
         common {
             // The JVM and Android share the stack frames, the SLF4J provider and the
-            // java.util.logging bridge (docs/adr/0020-local-logging.md).
+            // java.util.logging bridge (docs/adr/0021-local-logging.md).
             group("java") {
                 withCompilations { it.platformType in setOf(jvm, androidJvm) }
             }

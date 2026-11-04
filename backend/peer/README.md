@@ -51,9 +51,9 @@ depends on this one for the protocol, never the other way round.
 
 ## Log
 
-Each request is logged at DEBUG as its method, endpoint, the hub's address, the status
-and the time taken: never the token or a blob's path or content
-([ADR-0020](../../docs/adr/0020-local-logging.md)).
+Each request is logged at DEBUG as its method, the last part of its endpoint (`ping`,
+`list`, `blob`), the hub's address, the status and the time taken: never the token or a blob's path or content
+([ADR-0021](../../docs/adr/0021-local-logging.md)).
 
 ## Design
 

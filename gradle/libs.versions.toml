@@ -34,7 +34,7 @@ ktlint-gradle = "14.2.0"
 # Apache-2.0, with no dependency but kotlin-stdlib.
 markdown = "0.7.18"
 okio = "3.18.2"
-# The version Ktor already brings. core:logging provides its SLF4J backend (ADR-0020).
+# The version Ktor already brings. core:logging provides its SLF4J backend (ADR-0021).
 slf4j = "2.0.19"
 sqldelight = "2.4.1"
 

@@ -86,7 +86,7 @@ internal class AppGraph(
 
     private val opening = lazy(::open)
 
-    /** Where the log is, outside every backup (ADR-0020). */
+    /** Where the log is, outside every backup (ADR-0021). */
     val logs: okio.Path = File(this.context.noBackupFilesDir, LOG_FOLDER).toOkioPath()
 
     /** Saves the debug log through the Activity on the screen, which sets itself here. */

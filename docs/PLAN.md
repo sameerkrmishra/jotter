@@ -93,7 +93,7 @@ jotter/
 │   ├── sqlite/         # SQLDelight driver over the bundled SQLite (WAL, locking)
 │   ├── storage/        # SQLDelight schema, repositories, FTS search
 │   ├── sync/           # revision DAG, change segments, SyncEngine
-│   └── logging/        # small logger + rotating file sink (ADR-0020)
+│   └── logging/        # small logger + rotating file sink (ADR-0021)
 ├── backend/
 │   ├── api/            # BlobStore interface
 │   │   └── contract/   # contract test suite, for the tests of other modules
@@ -146,7 +146,7 @@ Each module has one job and a small public API. Internal details are marked
 | Serialization | kotlinx.serialization (JSON) | Readable change files, easy to debug |
 | Markdown | JetBrains `markdown` parser + a Compose renderer | KMP, maintained |
 | DI | Manual constructor injection with one composition root per app | Easiest to read. No framework to learn |
-| Logging | Own small logger + local rotating log file + "Export debug logs" ([ADR-0020](adr/0020-local-logging.md)) | No telemetry, but debuggable |
+| Logging | Own small logger + local rotating log file + "Export debug logs" ([ADR-0021](adr/0021-local-logging.md)) | No telemetry, but debuggable |
 | CLI | Clikt | Idiomatic, well-documented |
 | Testing | kotlin.test, Turbine (flows), Kotest property tests (sync convergence), Robolectric (Android) | |
 | Coverage | Kover | Enforced in CI |
@@ -421,8 +421,8 @@ records the codec, and a backend with another version's format file is left alon
   [where backend secrets live](adr/0016-where-secrets-live.md) and 0017
   [the WebDAV backend](adr/0017-webdav-backend.md) (M4); 0018
   [the Android app](adr/0018-android-app.md) and 0019
-  [release builds](adr/0019-release-builds.md) (M5); 0020
-  [local logging](adr/0020-local-logging.md) (M6).
+  [release builds](adr/0019-release-builds.md) (M5); 0021
+  [local logging](adr/0021-local-logging.md) (M6).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
   and desktop binaries. Required for every merge. Beside `check`, a `webdav` job

@@ -64,7 +64,7 @@ public class DebugLogControls(
 
 /**
  * The debug log screen: the whole debug log, as it would be saved, and a button that saves or
- * shares it (ADR-0020). The user sees all of it before it goes anywhere.
+ * shares it (ADR-0021). The user sees all of it before it goes anywhere.
  */
 @Stable
 public class DebugLogViewModel internal constructor(

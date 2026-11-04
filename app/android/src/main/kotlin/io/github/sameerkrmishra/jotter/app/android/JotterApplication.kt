@@ -18,7 +18,7 @@ public class JotterApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Before anything that may log; the file is opened at the first line (ADR-0020).
+        // Before anything that may log; the file is opened at the first line (ADR-0021).
         Logging.install(RotatingFileSink(File(noBackupFilesDir, LOG_FOLDER).toOkioPath(), LOG_NAME))
         // The hub client's OkHttp logs through java.util.logging.
         JavaLogging.route()

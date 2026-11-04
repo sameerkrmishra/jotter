@@ -1,4 +1,4 @@
-# 0020. Local logging: a small logger of our own, a rotating file, and nothing private in it
+# 0021. Local logging: a small logger of our own, a rotating file, and nothing private in it
 
 - **Status:** Proposed
 - **Date:** 2026-11-04
@@ -45,21 +45,42 @@ ids and content hashes), file paths of databases and folders, host names and
 ports. Never what the Context lists. Each call site is written to this rule; it
 is the first line of defence.
 
-**Redaction, the second line.** Every message passes `redact`, which removes
-user info from URLs, `Authorization` values, `Bearer`/`Basic` credentials and
-values named password, token, secret or API key. A pattern cannot recognise a
-note's text, so exceptions get a rule of their own: a failure is logged as its
-class, its causes and their first stack frames, and its message **only** for
-classes whose messages say where, not what (`java.net`, `java.io`,
-`java.nio.file`, Ktor's socket errors, `SQLiteException` and our own
-exceptions). A JSON parser's message, which quotes the input it failed on, or a
-`require` that names a tag, is never logged. Messages are put on one line and
-cut at 1,000 characters.
+**Places, in logs and the debug log.** The home directory prefix is written as
+`~`, so the user's name in it stays out. A WebDAV or hub URL is logged as its
+scheme, host and port only: never its path, which often holds the user name (as
+Nextcloud's `/remote.php/dav/files/me/` does), its user info or its query. The
+WebDAV client logs each exchange by method, origin and status; the hub client by
+method, the last part of the endpoint (`ping`, `list`, `blob`) and the hub's
+address. A folder outside the home directory keeps its path.
 
-**The file.** `RotatingFileSink` writes `<name>.log` through okio and flushes
-each line. At 256 KiB it becomes `<name>.1.log` and so on; four files are kept,
-so a log is at most about 1 MiB. Each app has its own name, so the desktop app
-and the CLI, which share a directory, never rotate each other's file:
+**Redaction, the second line.** Every message passes `redact`, which cuts every
+URL down to scheme, host and port, writes the home directory as `~`, and
+replaces `Authorization` values, `Bearer`/`Basic` credentials and values named
+password, token, secret or API key: a quoted value whole, spaces included, an
+unquoted one with the rest of its line, as nothing says where it ends. The debug
+log is redacted the same way as a whole. A pattern cannot recognise a note's
+text, so exceptions get a rule of their own: a failure is logged as its class,
+its causes and their first stack frames, and its message **only** for classes
+whose messages say where, not what: by package `java.net`, `java.io`,
+`java.nio.file`, `okio` and Ktor's socket errors, and by name `SQLiteException`
+and those of Jotter's own exceptions whose code writes the whole message from
+ids, numbers and paths. Not a whole Jotter package: an exception that wraps
+another, such as `BlobStoreFailureException`, may repeat its cause's message in
+its own, and that cause is logged by its own rule instead. A JSON parser's
+message, which quotes the input it failed on, or a `require` that names a tag,
+is never logged. Messages are put on one line and cut at 1,000 characters.
+
+**The file.** `RotatingFileSink` appends each line to `<name>.log` in one write
+in append mode. At 256 KiB it becomes `<name>.1.log` and so on; four files are
+kept, so a log is at most about 1 MiB. Several processes may share a name, as
+CLI commands that run at once share `cli.log`: each write, the size check and
+any rotation happen under an exclusive POSIX record lock on `<name>.lock`
+(`FileChannel.lock()` on the JVM and Android, `lockf` on Linux, which see each
+other's locks), and each line carries its process id after the time. The file is
+opened and closed for each line, as another process may have rotated it. The
+directory is created 0700 and the files 0600; existing ones of the user's with
+a wider mode are narrowed. The desktop app and the CLI still use names of their
+own, so that each log reads as one app's:
 
 | App | Directory | Name |
 |---|---|---|
@@ -99,8 +120,10 @@ full before the user saves or shares it. Nothing is sent anywhere by Jotter.
   harmless; the stack frames usually tell where.
 - Redaction is pattern-based: a credential in an unexpected shape could pass.
   That is why it is the second line, not the first.
-- Two desktop apps on one database would write one file and could rotate it
-  under each other; a line may then be lost, nothing else.
+- Opening the file and taking the lock for every line costs a few system calls a
+  line; logs are written at INFO, a few lines per command or sync.
+- A URL without its path is less telling: which collection failed is left to
+  the backend's id.
 
 ## Alternatives considered
 

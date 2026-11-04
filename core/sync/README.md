@@ -85,7 +85,7 @@ The merge rules are in
 ## Log
 
 Each cycle logs its target, outcome, counts and duration, and each issue by device
-id and segment number ([ADR-0020](../../docs/adr/0020-local-logging.md)): never a
+id and segment number ([ADR-0021](../../docs/adr/0021-local-logging.md)): never a
 revision's content. `SyncEngine.FORMAT` names the format for the debug log.
 
 ## Formats
