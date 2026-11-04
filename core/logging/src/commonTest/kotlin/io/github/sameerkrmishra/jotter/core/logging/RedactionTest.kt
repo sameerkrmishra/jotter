@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.core.logging
 
+import okio.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -7,18 +8,26 @@ import kotlin.test.assertTrue
 
 class RedactionTest {
     @Test
-    fun userInfoLeavesUrls() {
+    fun urlsKeepOnlySchemeHostAndPort() {
         assertEquals(
-            "PUT https://$REDACTED@dav.example.org/jotter/x failed",
+            "PUT https://dav.example.org failed",
             redact("PUT https://me:s3cret@dav.example.org/jotter/x failed"),
         )
-        assertEquals("http://$REDACTED@[::1]:8080/", redact("http://token@[::1]:8080/"))
+        assertEquals("http://[::1]:8080", redact("http://token@[::1]:8080/"))
+        assertEquals(
+            "GET https://cloud.example.org:443 refused",
+            redact("GET https://cloud.example.org:443/remote.php/dav/files/me@x.org/?a=b refused"),
+        )
+        assertEquals("(at http://127.0.0.1:9)", redact("(at http://127.0.0.1:9/dav/)"))
     }
 
     @Test
-    fun anAtInThePathStays() {
-        val url = "https://cloud.example.org/remote.php/dav/files/me@example.org/jotter/"
-        assertEquals(url, redact(url))
+    fun theHomeDirectoryBecomesATilde() {
+        assertEquals("~/notes.db and ~", redact("/home/me/notes.db and /home/me", "/home/me/"))
+        assertEquals("/home/meg/notes.db", redact("/home/meg/notes.db", "/home/me"))
+        // A root or relative home would match everything, so it is not used.
+        assertEquals("/x", redact("/x", "/"))
+        assertEquals("rel/x", redact("rel/x", "rel"))
     }
 
     @Test
@@ -39,11 +48,18 @@ class RedactionTest {
     }
 
     @Test
-    fun namedSecretsGo() {
-        assertEquals("password=$REDACTED&user=me", redact("password=hunter2&user=me"))
-        assertEquals("{\"token\": \"$REDACTED\"}", redact("{\"token\": \"jt_abcdef\"}"))
-        assertEquals("api_key: $REDACTED", redact("api_key: 12345"))
+    fun namedSecretsGoWhole() {
+        // Unquoted: nothing says where it ends, so the rest of the line goes.
+        assertEquals("password=$REDACTED", redact("password=hunter2&user=me"))
+        assertEquals("api_key: $REDACTED\nnext", redact("api_key: 12 34\nnext"))
         assertEquals("secret=$REDACTED", redact("secret=x"))
+        // Quoted: the whole value, spaces and escaped quotes too, and what follows stays.
+        assertEquals("{\"token\": $REDACTED}", redact("{\"token\": \"jt_abcdef\"}"))
+        assertEquals(
+            "{\"password\": $REDACTED, \"user\": \"me\"}",
+            redact("{\"password\": \"a b \\\" c\", \"user\": \"me\"}"),
+        )
+        assertEquals("passphrase=$REDACTED and on", redact("passphrase='two words' and on"))
     }
 
     @Test
@@ -54,13 +70,9 @@ class RedactionTest {
 
     @Test
     fun aFailureShowsItsClassAndFrames() {
-        val text = describeFailure(TestFailure("hub at 100.64.0.1:47734 refused"))
+        val text = describeFailure(IOException("hub at 100.64.0.1:47734 refused"))
         val lines = text.lines()
-        assertEquals(
-            "io.github.sameerkrmishra.jotter.core.logging.TestFailure: " +
-                "hub at 100.64.0.1:47734 refused",
-            lines[0],
-        )
+        assertTrue(lines[0].endsWith("IOException: hub at 100.64.0.1:47734 refused"), lines[0])
         assertTrue(lines.drop(1).all { it.startsWith("  at ") })
         assertTrue(lines.size > 1)
     }
@@ -77,16 +89,16 @@ class RedactionTest {
     @Test
     fun causesFollowEachWithItsOwnRule() {
         val failure =
-            TestFailure(
+            IOException(
                 "sync of b1 failed",
-                IllegalArgumentException("tag MARKER is invalid", TestFailure("root cause")),
+                IllegalArgumentException("tag MARKER is invalid", IOException("root cause")),
             )
         val text = describeFailure(failure)
         assertFalse("MARKER" in text)
         val causes = text.lines().filter { it.startsWith("caused by: ") }
         assertEquals(2, causes.size)
         assertTrue(causes[0].endsWith("IllegalArgumentException"))
-        assertTrue(causes[1].endsWith("TestFailure: root cause"))
+        assertTrue(causes[1].endsWith("IOException: root cause"))
     }
 
     @Test
@@ -101,8 +113,28 @@ class RedactionTest {
 
     @Test
     fun safeMessagesAreRedactedToo() {
-        val text = describeFailure(TestFailure("GET https://me:pw@host/ failed"))
+        val text = describeFailure(IOException("GET https://me:pw@host/ failed"))
         assertFalse("pw@" in text)
+    }
+
+    @Test
+    fun anExceptionThatCopiesItsCausesMessageIsNotTrusted() {
+        // Jotter's own wrappers, such as BlobStoreFailureException, put a cause's message in their
+        // own. Only classes that write their messages whole are trusted, not a whole package.
+        val wrapper = TestFailure("Cannot read: MARKER", IllegalStateException("MARKER"))
+        val text = describeFailure(wrapper)
+        assertFalse("MARKER" in text, text)
+        assertTrue(text.lines()[0].endsWith("TestFailure"))
+        assertTrue(
+            hasSafeMessage("io.github.sameerkrmishra.jotter.core.sqlite.DatabaseUpgradeException"),
+        )
+        assertFalse(
+            hasSafeMessage("io.github.sameerkrmishra.jotter.backend.api.BlobStoreFailureException"),
+        )
+        assertFalse(
+            hasSafeMessage("io.github.sameerkrmishra.jotter.backend.webdav.DavTransportException"),
+        )
+        assertTrue(hasSafeMessage("java.net.ConnectException"))
     }
 
     @Test

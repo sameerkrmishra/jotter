@@ -256,5 +256,6 @@ internal class PeerHandler(
 
 private val log = Logger("hub")
 
-/** A request for the log: its method and endpoint, without the path it names. */
-private fun describe(head: RequestHead) = "${head.method} ${head.target.substringBefore('?')}"
+/** A request for the log: its method and the last part of its endpoint, such as `GET ping`. */
+private fun describe(head: RequestHead) =
+    "${head.method} ${head.target.substringBefore('?').substringAfterLast('/')}"

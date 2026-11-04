@@ -259,7 +259,8 @@ class OpenSqliteDriverTest {
                     openSqliteDriver(dir.path, dangling, TEST_APPLICATION_ID)
                 }
 
-            assertContains(error.message.orEmpty(), "dangling foreign key: child -> parent")
+            assertEquals("Upgrading the database failed", error.message)
+            assertContains(error.cause?.message.orEmpty(), "dangling foreign key: child -> parent")
             openSqliteDriver(dir.path, ParentChildSchema(), TEST_APPLICATION_ID).use { driver ->
                 assertEquals(1L, driver.queryLong("PRAGMA user_version"))
                 assertEquals(1L, driver.queryLong("SELECT count(*) FROM parent"))

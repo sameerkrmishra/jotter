@@ -2,6 +2,7 @@ package io.github.sameerkrmishra.jotter.app.sync
 
 import io.github.sameerkrmishra.jotter.core.logging.DEFAULT_RECENT_BYTES
 import io.github.sameerkrmishra.jotter.core.logging.LogFiles
+import io.github.sameerkrmishra.jotter.core.logging.Logging
 import io.github.sameerkrmishra.jotter.core.logging.redact
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.sync.SyncEngine
@@ -28,24 +29,29 @@ public const val DEBUG_LOG_PREAMBLE: String =
         "attach it to an issue. Jotter never sends it anywhere by itself."
 
 /**
- * Builds the debug log that the user can attach to an issue (ADR-0020): the app, its version and
+ * Builds the debug log that the user can attach to an issue (ADR-0021): the app, its version and
  * platform, the formats it writes, each backend's kind and last sync with its issues, and the
  * newest lines of each log. An app shows the whole text before it is saved or shared, and nothing
  * sends it anywhere.
  *
- * Backends are named by id and kind only: their names and locations are the user's. The text is
- * [redact]ed once more as a whole.
+ * Each backend is named by its id and kind: its name and configured location are left out, as they
+ * are the user's. Its last sync's detail and issues are included, scrubbed as every log line is
+ * (ADR-0021): a URL keeps only its scheme, host and port, the home directory [home] reads as `~`,
+ * and anything that looks like a credential is removed. A folder outside the home directory keeps
+ * its path. The whole text is [redact]ed this way once more.
  *
  * @param app This app.
  * @param logs The logs to include, or null where there are none.
  * @param clock When the log is made.
  * @param recentBytes How much of each log to include, from its end.
+ * @param home The home directory, written as `~`; by default the one the log was installed with.
  */
 public class DebugReport(
     private val app: AppInfo,
     private val logs: LogFiles?,
     private val clock: Clock = Clock.System,
     private val recentBytes: Int = DEFAULT_RECENT_BYTES,
+    private val home: String? = Logging.home,
 ) {
     /**
      * The debug log. [manager] gives the backends, or is null when the notes could not be opened;
@@ -56,21 +62,23 @@ public class DebugReport(
         openProblem: String? = null,
     ): String =
         redact(
-            buildString {
-                appendLine("Jotter debug log")
-                appendLine()
-                appendLine(DEBUG_LOG_PREAMBLE)
-                appendLine()
-                appendLine("Created: ${clock.now()}")
-                appendLine("App: ${app.name} ${app.version}")
-                appendLine("Platform: ${app.platform}")
-                appendLine("Database schema: ${NoteStore.SCHEMA_VERSION}")
-                appendLine("Sync format: ${SyncEngine.FORMAT}")
-                appendLine()
-                if (openProblem != null) appendLine("The notes could not be opened: $openProblem")
-                if (manager != null) appendBackends(manager)
-                appendLogs()
-            },
+            home = home,
+            text =
+                buildString {
+                    appendLine("Jotter debug log")
+                    appendLine()
+                    appendLine(DEBUG_LOG_PREAMBLE)
+                    appendLine()
+                    appendLine("Created: ${clock.now()}")
+                    appendLine("App: ${app.name} ${app.version}")
+                    appendLine("Platform: ${app.platform}")
+                    appendLine("Database schema: ${NoteStore.SCHEMA_VERSION}")
+                    appendLine("Sync format: ${SyncEngine.FORMAT}")
+                    appendLine()
+                    openProblem?.let { appendLine("The notes could not be opened: $it") }
+                    if (manager != null) appendBackends(manager)
+                    appendLogs()
+                },
         )
 
     @Suppress("TooGenericExceptionCaught") // A debug log is wanted most when things fail.

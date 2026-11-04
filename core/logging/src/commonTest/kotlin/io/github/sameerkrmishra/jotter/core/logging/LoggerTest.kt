@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.core.logging
 
+import okio.IOException
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -81,13 +82,11 @@ class LoggerTest {
     @Test
     fun aFailureFollowsIndented() {
         Logging.install(sink, LogLevel.INFO, FixedClock)
-        logger.warn(TestFailure("disk unplugged")) { "Sync failed" }
+        logger.warn(IOException("disk unplugged")) { "Sync failed" }
         val lines = sink.text.lines()
         assertEquals("2026-11-04T10:00:00.123Z WARN sync: Sync failed", lines[0])
-        assertEquals(
-            "  io.github.sameerkrmishra.jotter.core.logging.TestFailure: disk unplugged",
-            lines[1],
-        )
+        assertTrue(lines[1].startsWith("  "))
+        assertTrue(lines[1].endsWith("IOException: disk unplugged"), lines[1])
     }
 
     @Test
@@ -100,6 +99,24 @@ class LoggerTest {
         assertFalse("hunter2" in message)
         assertFalse("bWU6aHVudGVyMg" in message)
         assertFalse('\n' in message)
+    }
+
+    @Test
+    fun theHomeDirectoryIsWrittenAsATilde() {
+        Logging.install(sink, home = "/home/me")
+        logger.info { "Opened /home/me/.local/share/jotter/jotter.db, not /home/meg/x" }
+        assertEquals(
+            "Opened ~/.local/share/jotter/jotter.db, not /home/meg/x",
+            sink.records.single().message,
+        )
+        assertEquals("/home/me", Logging.home)
+    }
+
+    @Test
+    fun aRecordNamesItsProcessIfAsked() {
+        Logging.install(sink, LogLevel.INFO, FixedClock)
+        logger.info { "x" }
+        assertEquals("2026-11-04T10:00:00.123Z 42 INFO sync: x\n", sink.records.single().format(42))
     }
 
     @Test

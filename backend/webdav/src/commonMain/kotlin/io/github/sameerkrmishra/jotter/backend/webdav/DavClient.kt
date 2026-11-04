@@ -150,7 +150,7 @@ internal class DavClient(
             }
             val wait = response?.retryAfter ?: (settings.retryDelay * (1 shl (attempt - 1)))
             log.info {
-                "${method.value} ${urlPath(url)}: attempt $attempt " +
+                "${method.value} $origin: attempt $attempt " +
                     "${response?.let { "answered ${it.status}" } ?: "failed"}, retrying in $wait"
             }
             delay(wait)
@@ -194,7 +194,7 @@ internal class DavClient(
         return try {
             watch.run { exchange(request, url, watch) }.also { (response, _) ->
                 log.debug {
-                    "${request.method.value} ${urlPath(url)} -> ${response.status} in " +
+                    "${request.method.value} $origin -> ${response.status} in " +
                         "${started.elapsedNow().inWholeMilliseconds} ms"
                 }
             }
@@ -206,7 +206,7 @@ internal class DavClient(
         ) {
             // A timeout cancels the request; a cancelled caller must stay cancelled.
             currentCoroutineContext().ensureActive()
-            log.debug(e) { "${request.method.value} ${urlPath(url)} failed" }
+            log.debug(e) { "${request.method.value} $origin failed" }
             throw DavTransportException(describe(request.method, url, e), e)
         }
     }

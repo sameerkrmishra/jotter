@@ -10,7 +10,7 @@ import okio.Path.Companion.toPath
 public const val LOG_LEVEL_ENVVAR: String = "JOTTER_LOG_LEVEL"
 
 /**
- * Where the desktop app and the CLI keep their logs (ADR-0020): `$XDG_STATE_HOME/jotter/logs`, or
+ * Where the desktop app and the CLI keep their logs (ADR-0021): `$XDG_STATE_HOME/jotter/logs`, or
  * `$HOME/.local/state/jotter/logs`. Only absolute paths from the environment count, as the XDG
  * spec says, and there is no fallback to the JVM's idea of home: without either variable, there is
  * no log, rather than one in a place the user did not choose.
@@ -27,7 +27,8 @@ public fun linuxLogDirectory(readEnvvar: (String) -> String?): Path? {
 
 /**
  * Installs the log of the app [name] (`desktop` or `cli`) in [linuxLogDirectory], at the level
- * [LOG_LEVEL_ENVVAR] asks for, or INFO. Returns the directory, or null if there is none, and then
+ * [LOG_LEVEL_ENVVAR] asks for, or INFO, with `HOME` written as `~` (ADR-0021). Returns the
+ * directory, or null if there is none, and then
  * installs nothing. The file is opened at the first line, so this costs a CLI command nothing.
  */
 public fun installLinuxLogging(
@@ -36,6 +37,7 @@ public fun installLinuxLogging(
 ): Path? {
     val directory = linuxLogDirectory(readEnvvar) ?: return null
     val level = LogLevel.parse(readEnvvar(LOG_LEVEL_ENVVAR)) ?: LogLevel.INFO
-    Logging.install(RotatingFileSink(directory, name), level)
+    val home = readEnvvar("HOME")?.takeIf { it.startsWith('/') }
+    Logging.install(RotatingFileSink(directory, name), level, home = home)
     return directory
 }

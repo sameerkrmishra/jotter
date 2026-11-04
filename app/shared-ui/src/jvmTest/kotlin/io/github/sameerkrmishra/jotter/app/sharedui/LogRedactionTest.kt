@@ -6,12 +6,18 @@ import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.AppInfo
 import io.github.sameerkrmishra.jotter.app.sync.DebugReport
 import io.github.sameerkrmishra.jotter.app.sync.Secret
+import io.github.sameerkrmishra.jotter.backend.api.BackendUnavailableException
+import io.github.sameerkrmishra.jotter.backend.api.BlobStoreFailureException
+import io.github.sameerkrmishra.jotter.backend.api.Reachability
+import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.core.logging.LogFiles
 import io.github.sameerkrmishra.jotter.core.logging.LogLevel
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.logging.Logging
 import io.github.sameerkrmishra.jotter.core.logging.RotatingFileSink
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.model.TagName
+import io.github.sameerkrmishra.jotter.core.sqlite.DatabaseUpgradeException
 import kotlinx.coroutines.runBlocking
 import okio.Path.Companion.toOkioPath
 import java.io.ByteArrayOutputStream
@@ -35,7 +41,7 @@ private const val POLL_MS = 20L
 
 /**
  * No log line and no debug log holds a note's text, title or tags, a password, a token, an
- * `Authorization` header, a URL's credentials or a file's contents (ADR-0020). Each of these is a
+ * `Authorization` header, a URL's credentials or a file's contents (ADR-0021). Each of these is a
  * marker string, sent through the real sync paths at DEBUG, where the most is logged: a WebDAV
  * server with a wrong and a right password, the PC hub with a token before and after it is
  * unpaired, a URL with a password in it, a damaged change file that quotes a note, and a failure
@@ -69,6 +75,7 @@ class LogRedactionTest {
             refuseAUrlWithAPassword()
             readADamagedFile()
             reportUnexpected(IllegalStateException("Failed on note $BODY"))
+            launderedCauses()
             val debugLog =
                 DebugReport(AppInfo("desktop", "test", "test"), LogFiles(logs.toOkioPath()))
                     .build(pc.manager)
@@ -84,6 +91,8 @@ class LogRedactionTest {
                 "INFO hub: Refused GET ",
                 "not applied (CORRUPT)",
                 "ERROR ui: Unexpected failure in the UI",
+                "ERROR test: Upgrade failed",
+                "core.sqlite.DatabaseUpgradeException: Upgrading the database failed",
                 "java.lang.IllegalStateException",
             ).forEach { assertContains(log, it) }
             assertContains(debugLog, "(webdav)")
@@ -157,6 +166,27 @@ class LogRedactionTest {
         Files.createDirectories(file.parent)
         Files.write(file, gzip.toByteArray())
         pc.manager.syncAll()
+    }
+
+    /**
+     * Jotter's own exceptions that wrap another, with the cause's message in theirs: a marker in
+     * the cause must not reach the log through the wrapper's message either.
+     */
+    private fun launderedCauses() {
+        val log = Logger("test")
+        val cause = IllegalArgumentException("tag $TAG in $FILE_TEXT")
+        log.error(DatabaseUpgradeException(cause)) { "Upgrade failed" }
+        log.error(
+            BlobStoreFailureException("Cannot read: ${cause.message}", cause),
+        ) { "Read failed" }
+        log.error(
+            BackendUnavailableException(
+                Reachability.Unreachable(UnreachableReason.FAILED, BODY),
+                cause,
+            ),
+        ) {
+            "Unavailable"
+        }
     }
 
     private fun waitFor(condition: () -> Boolean) {

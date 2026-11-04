@@ -50,7 +50,7 @@ class BridgesTest {
         assertFalse(logger.isTraceEnabled)
         logger.trace("Authorization: {}", "never")
         logger.info("i")
-        logger.warn("w", TestFailure("why"))
+        logger.warn("w", java.io.IOException("why"))
         logger.error(MarkerFactory.getMarker("m"), "e")
         logger.atLevel(Level.TRACE).log("t")
         assertEquals(
@@ -61,7 +61,7 @@ class BridgesTest {
             sink.records[1]
                 .failure
                 .orEmpty()
-                .contains("TestFailure: why"),
+                .contains("IOException: why"),
         )
         assertSame(logger, LoggerFactory.getLogger("a.b.Client"))
         assertEquals("a.b.Client", logger.name)
@@ -98,7 +98,7 @@ class BridgesTest {
         okhttp.fine("dropped below INFO")
         JavaLogger.getLogger("okhttp3.internal.concurrent").info("child")
         assertEquals(
-            listOf("A connection to https://hub/ was leaked", "child"),
+            listOf("A connection to https://hub was leaked", "child"),
             sink.records.map { it.message },
         )
         assertEquals("OkHttpClient", sink.records[0].tag)

@@ -77,6 +77,34 @@ class DebugReportTest {
         }
 
     @Test
+    fun theLastSyncIsScrubbedOfUrlPathsAndTheHomeDirectory() =
+        test {
+            Device(this, "a").use { device ->
+                device.manager.addLocalFolder(folder("usb").toString(), setUpNewStore = true)
+                val backend = device.manager.list().single()
+                device.store.backends.recordAttempt(
+                    backend.id,
+                    SyncAttempt(
+                        Instant.fromEpochMilliseconds(0),
+                        Outcome.UNREACHABLE.name,
+                        "Cannot be reached: GET https://me:pw@dav.example.org/files/me/jotter/ " +
+                            "failed. /home/me/usb is missing.",
+                        listOf("token: abc def"),
+                    ),
+                    false,
+                )
+                val text = DebugReport(app, null, home = "/home/me").build(device.manager)
+                assertContains(
+                    text,
+                    "Cannot be reached: GET https://dav.example.org failed. ~/usb is missing.",
+                )
+                assertContains(text, "  issue: token: <redacted>")
+                assertFalse("/files/me" in text)
+                assertFalse("abc def" in text)
+            }
+        }
+
+    @Test
     fun backendsThatCannotBeReadAreSaidSo() =
         test {
             val device = Device(this, "a")

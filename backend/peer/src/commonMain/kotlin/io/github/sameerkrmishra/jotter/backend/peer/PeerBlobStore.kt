@@ -214,8 +214,8 @@ public class PeerBlobStore internal constructor(
                             }.execute { response ->
                                 watch.progress()
                                 log.debug {
-                                    "${response.call.request.method.value} $endpoint at hub " +
-                                        "$address -> ${response.status.value} in " +
+                                    "${response.call.request.method.value} ${callName(endpoint)} " +
+                                        "at hub $address -> ${response.status.value} in " +
                                         "${started.elapsedNow().inWholeMilliseconds} ms"
                                 }
                                 answers.requireHub(response)
@@ -233,7 +233,7 @@ public class PeerBlobStore internal constructor(
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
                 // IOException, timeouts and engine failures alike: the hub cannot be used now.
-                log.debug(e) { "$endpoint at hub $address failed" }
+                log.debug(e) { "${callName(endpoint)} at hub $address failed" }
                 throw answers.gone(e)
             }
         }
@@ -303,6 +303,9 @@ public class PeerBlobStore internal constructor(
 
     private companion object {
         val log = Logger("peer")
+
+        // The last part of an endpoint, such as `ping`: the log never holds a URL's path (ADR-0021).
+        fun callName(endpoint: String) = endpoint.substringAfterLast('/')
 
         const val MAX_CONNECTIONS = 4
         const val UPLOAD_PART = 64 * 1024

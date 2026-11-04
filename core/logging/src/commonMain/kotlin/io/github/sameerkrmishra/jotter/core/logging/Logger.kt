@@ -31,16 +31,17 @@ public enum class LogLevel {
  * Until then, and in tests that install nothing, every line is built at every level and dropped:
  * so the tests of each module run every log line, and one that throws is found there, not in the
  * field. Shared code only makes [Logger]s, so it never depends on where lines go
- * (docs/adr/0020-local-logging.md).
+ * (docs/adr/0021-local-logging.md).
  */
 public object Logging {
     private class Installed(
         val sink: LogSink?,
         val level: LogLevel,
         val clock: Clock,
+        val home: String?,
     )
 
-    private val nowhere = Installed(null, LogLevel.DEBUG, Clock.System)
+    private val nowhere = Installed(null, LogLevel.DEBUG, Clock.System, null)
 
     @Volatile
     private var installed = nowhere
@@ -48,16 +49,21 @@ public object Logging {
     /** The lowest level that is built now; [LogLevel.DEBUG] while nothing is installed. */
     public val level: LogLevel get() = installed.level
 
+    /** The home directory that [redact] writes as `~`, or null. */
+    public val home: String? get() = installed.home
+
     /**
-     * Sends lines at [level] and above to [sink] from now on, stamped by [clock]. Replaces what was
-     * installed before; the caller closes that, if it needs closing.
+     * Sends lines at [level] and above to [sink] from now on, stamped by [clock], with the user's
+     * [home] directory written as `~`. Replaces what was installed before; the caller closes that,
+     * if it needs closing.
      */
     public fun install(
         sink: LogSink,
         level: LogLevel = LogLevel.INFO,
         clock: Clock = Clock.System,
+        home: String? = null,
     ) {
-        installed = Installed(sink, level, clock)
+        installed = Installed(sink, level, clock, home)
     }
 
     /** Drops every line from now on, as before [install]. */
@@ -87,8 +93,8 @@ public object Logging {
                     current.clock.now(),
                     level,
                     tag,
-                    oneLine(redact(message())),
-                    failure?.let(::describeFailure),
+                    oneLine(redact(message(), current.home)),
+                    failure?.let { describeFailure(it, current.home) },
                 )
             current.sink?.write(record)
         } catch (_: Exception) {
@@ -102,7 +108,7 @@ public object Logging {
  *
  * A line says what happened in words of the code: ids, kinds, counts, sizes, states and times.
  * **Never** a note's text, title or tags, a password, token or `Authorization` header, a URL with
- * credentials, or a file's contents (docs/adr/0020-local-logging.md). Messages are built only if
+ * credentials, or a file's contents (docs/adr/0021-local-logging.md). Messages are built only if
  * their level is on, so a disabled [debug] costs one comparison. [redact] runs on every line as a
  * second line of defence, not as the first.
  *

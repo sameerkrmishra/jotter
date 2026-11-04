@@ -26,11 +26,12 @@ public class DatabaseTooNewException(
 
 /**
  * Migrating the database to this app's schema failed and was rolled back, so the file is as it
- * was. [cause] says why; a `SQLiteException` there may say that the disk is full.
+ * was. [cause] says why; a `SQLiteException` there may say that the disk is full. The message
+ * never repeats the cause's, which may quote data: logs trust this class's own words only.
  */
 public class DatabaseUpgradeException(
     cause: Throwable,
-) : IllegalStateException("Upgrading the database failed: ${cause.message}", cause)
+) : IllegalStateException("Upgrading the database failed", cause)
 
 /** The extended result codes (such as `SQLITE_BUSY_SNAPSHOT`) keep the primary one here. */
 private const val PRIMARY_RESULT_CODE_MASK = 0xFF
