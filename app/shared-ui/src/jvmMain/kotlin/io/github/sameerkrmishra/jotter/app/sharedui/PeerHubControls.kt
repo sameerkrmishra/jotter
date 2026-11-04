@@ -43,6 +43,7 @@ private val PRIVATE_FILE: FileAttribute<Set<PosixFilePermission>> =
  * @param io Where the settings file is read and written.
  * @param defaults The settings before the user changed any.
  */
+@Suppress("TooManyFunctions") // One per thing the app or the user does with the hub.
 public class PeerHubControls(
     private val manager: BackendManager,
     private val settingsFile: Path,

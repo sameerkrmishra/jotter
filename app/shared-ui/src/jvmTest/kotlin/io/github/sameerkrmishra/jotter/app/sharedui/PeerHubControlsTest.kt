@@ -120,7 +120,8 @@ class PeerHubControlsTest {
             val first = controls()
             assertNull(first.turnOn(first.settings))
             waitFor { first.state.value is HubState.Running }
-            val port = (first.state.value as HubState.Running).address.substringAfterLast(':').toInt()
+            val address = (first.state.value as HubState.Running).address
+            val port = address.substringAfterLast(':').toInt()
 
             first.stop()
 
