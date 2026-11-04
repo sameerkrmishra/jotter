@@ -48,11 +48,13 @@ public sealed interface ExportOutcome {
  * The live database is only read.
  *
  * @param io Where the blocking work runs.
+ * @param describeFolder A folder as the user knows it, for what is said when the copy fails.
  */
 public class DatabaseExport(
     private val store: NoteStore,
     private val io: CoroutineContext,
     private val fileSystem: FileSystem = FileSystem.SYSTEM,
+    private val describeFolder: (Path) -> String = Path::toString,
 ) {
     /**
      * Writes the copy to [file], an absolute path. If [file] exists and [replace] is false,
@@ -69,7 +71,8 @@ public class DatabaseExport(
                 isLiveDatabase(file) -> ExportOutcome.Failed(LIVE_DATABASE)
                 fileSystem.metadataOrNull(folder)?.isDirectory != true ->
                     ExportOutcome.Failed(
-                        "The folder $folder does not exist. Choose another place for the copy.",
+                        "The folder ${describeFolder(folder)} does not exist. Choose another " +
+                            "place for the copy.",
                     )
                 fileSystem.metadataOrNull(file)?.isDirectory == true ->
                     ExportOutcome.Failed("$file is a folder. Choose a file name for the copy.")
@@ -103,7 +106,7 @@ public class DatabaseExport(
         } catch (e: Exception) {
             removePart(part)
             log.warn(e) { "Exporting the database failed" }
-            ExportOutcome.Failed(describeExportFailure(e, folder.toString()))
+            ExportOutcome.Failed(describeExportFailure(e, describeFolder(folder)))
         }
     }
 

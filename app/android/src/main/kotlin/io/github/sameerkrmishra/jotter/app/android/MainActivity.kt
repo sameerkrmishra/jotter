@@ -2,6 +2,8 @@ package io.github.sameerkrmishra.jotter.app.android
 
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -12,11 +14,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.ui.Modifier
 import io.github.sameerkrmishra.jotter.app.sharedui.CannotOpenNotes
+import io.github.sameerkrmishra.jotter.app.sharedui.DatabaseExportPlace
 import io.github.sameerkrmishra.jotter.app.sharedui.DebugLogExport
+import io.github.sameerkrmishra.jotter.app.sharedui.ExportStep
 import io.github.sameerkrmishra.jotter.app.sharedui.JotterApp
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.OutputStream
 
 /**
  * The app: the shared screens of `app:shared-ui` (ADR-0010) on the process's [AppGraph]. Their
@@ -35,6 +40,7 @@ public class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         graph.debugExport.screen = documents
+        graph.databaseExport.screen = databaseDocument
         when (val opened = graph.opened) {
             is Opened.Failed -> {
                 val debugLog = graph.debugLog()
@@ -55,8 +61,10 @@ public class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         if (graph.debugExport.screen === documents) graph.debugExport.screen = null
+        if (graph.databaseExport.screen === databaseDocument) graph.databaseExport.screen = null
         // A picker still open answers this Activity no more: its export ends as cancelled.
         documents.cancel()
+        databaseDocument.cancel()
         super.onDestroy()
     }
 
@@ -91,6 +99,55 @@ public class MainActivity : ComponentActivity() {
                 waiting?.complete(null)
             }
         }
+
+    /**
+     * Exports the database where the user chooses through Android's document picker. The picker
+     * asks before it overwrites a document, or gives the new one another name.
+     */
+    private val databaseDocument =
+        object : DatabaseExportPlace {
+            private var waiting: CompletableDeferred<Uri?>? = null
+
+            private val picker =
+                registerForActivityResult(
+                    ActivityResultContracts.CreateDocument(DATABASE_FILE_TYPE),
+                ) { waiting?.complete(it) }
+
+            @Suppress("InjectDispatcher") // The Activity is platform glue, like the graph.
+            override suspend fun export(): ExportStep {
+                val opened = graph.opened as? Opened.Ready ?: return ExportStep.Cancelled
+                return exportThroughPicker(opened.export, graph.exportStaging, Dispatchers.IO) {
+                    val answer = CompletableDeferred<Uri?>()
+                    waiting = answer
+                    picker.launch(DATABASE_FILE_NAME)
+                    answer.await()?.let(::document)
+                }
+            }
+
+            fun cancel() {
+                waiting?.complete(null)
+            }
+        }
+
+    /** The document at [uri], which the picker gave. */
+    private fun document(uri: Uri): ChosenDocument {
+        val resolver = applicationContext.contentResolver
+        val name =
+            resolver
+                .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { if (it.moveToFirst()) it.getString(0) else null }
+                ?: DATABASE_FILE_NAME
+        return object : ChosenDocument {
+            override val name: String = name
+
+            override fun open(): OutputStream =
+                checkNotNull(resolver.openOutputStream(uri, "wt")) { "No stream for the document" }
+
+            override fun delete() {
+                DocumentsContract.deleteDocument(resolver, uri)
+            }
+        }
+    }
 
     override fun onStart() {
         super.onStart()
