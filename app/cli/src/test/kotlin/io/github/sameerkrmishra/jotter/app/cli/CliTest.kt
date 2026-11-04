@@ -11,6 +11,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.deleteRecursively
@@ -401,6 +402,25 @@ class CliTest {
             "Jotter cannot create the folder for",
             jotter("list", file = file.resolve("jotter.db")),
         )
+    }
+
+    @Test
+    fun aReadOnlyDatabaseIsSaidInPlainWordsAlsoWhenItCloses() {
+        add("x")
+        Files.setPosixFilePermissions(database, PosixFilePermissions.fromString("r--r--r--"))
+        try {
+            // The second run reads the notes, then cannot checkpoint the WAL on close.
+            repeat(2) {
+                val result = jotter("list")
+                assertFalse("unexpected" in result.stderr, result.stderr)
+                assertFalse("Exception" in result.stderr, result.stderr)
+                if (result.statusCode != 0) {
+                    assertTrue("not allowed to change" in result.stderr, result.stderr)
+                }
+            }
+        } finally {
+            Files.setPosixFilePermissions(database, PosixFilePermissions.fromString("rw-------"))
+        }
     }
 
     @Test

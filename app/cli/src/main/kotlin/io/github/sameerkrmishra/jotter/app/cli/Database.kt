@@ -65,24 +65,23 @@ internal fun <T> withNotes(
 
 /**
  * [withNotes], for a command that needs the whole store, such as what sync left to look at. A
- * failure of the database while [block] runs, such as a full disk, becomes a [CliktError] in plain
- * words too; anything else is [block]'s own.
+ * failure of the database while [block] runs or the store closes, such as a full disk, becomes a
+ * [CliktError] in plain words too; anything else is [block]'s own.
  */
 @Suppress("TooGenericExceptionCaught") // Only failures of the database are caught.
 internal fun <T> withStore(
     path: Path,
     block: (NoteStore) -> T,
 ): T =
-    open(path).use { store ->
-        try {
-            block(store)
-        } catch (e: CliktError) {
-            throw e
-        } catch (e: RuntimeException) {
-            if (storageProblemOf(e) == StorageProblem.OTHER) throw e
-            log.error(e) { "A command failed on the database $path" }
-            throw CliktError("jotter: ${describeStorageFailure(e)}", e)
-        }
+    // Closing counts too: it checkpoints the WAL, which writes to the file.
+    try {
+        open(path).use(block)
+    } catch (e: CliktError) {
+        throw e
+    } catch (e: RuntimeException) {
+        if (storageProblemOf(e) == StorageProblem.OTHER) throw e
+        log.error(e) { "A command failed on the database $path" }
+        throw CliktError("jotter: ${describeStorageFailure(e)}", e)
     }
 
 @Suppress("TooGenericExceptionCaught") // The driver's exception is not part of NoteStore's API.
