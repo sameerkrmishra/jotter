@@ -73,6 +73,7 @@ public class MainActivity : ComponentActivity() {
                     waiting?.complete(it)
                 }
 
+            @Suppress("InjectDispatcher") // The Activity is platform glue, like the graph.
             override suspend fun export(text: String): String? {
                 val answer = CompletableDeferred<Uri?>()
                 waiting = answer

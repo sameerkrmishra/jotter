@@ -107,7 +107,7 @@ class EditorAutosaveTest : EditorTest() {
             settle()
 
             assertEquals("mine", editor.body)
-            assertContains(editor.message.orEmpty(), "disk full")
+            assertContains(editor.message.orEmpty(), "attach the debug log")
             assertNull(app.pendingExit, "no dialog from the autosave")
 
             database.allowWrites()
