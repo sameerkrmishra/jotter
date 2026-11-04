@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.backend.webdav
 
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.plugins.HttpTimeout
@@ -18,6 +19,7 @@ import kotlinx.coroutines.ensureActive
 import kotlin.io.encoding.Base64
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 private const val MAX_REDIRECTS = 5
 private const val READ_CHUNK = 64 * 1024
@@ -146,7 +148,12 @@ internal class DavClient(
                 val asked = response.retryAfter
                 if (asked != null && asked > settings.maxRetryAfter) return response
             }
-            delay(response?.retryAfter ?: (settings.retryDelay * (1 shl (attempt - 1))))
+            val wait = response?.retryAfter ?: (settings.retryDelay * (1 shl (attempt - 1)))
+            log.info {
+                "${method.value} $origin: attempt $attempt " +
+                    "${response?.let { "answered ${it.status}" } ?: "failed"}, retrying in $wait"
+            }
+            delay(wait)
             attempt++
         }
     }
@@ -183,8 +190,14 @@ internal class DavClient(
         url: String,
     ): Pair<DavResponse, String?> {
         val watch = IdleWatch(settings.socketTimeout)
+        val started = TimeSource.Monotonic.markNow()
         return try {
-            watch.run { exchange(request, url, watch) }
+            watch.run { exchange(request, url, watch) }.also { (response, _) ->
+                log.debug {
+                    "${request.method.value} $origin -> ${response.status} in " +
+                        "${started.elapsedNow().inWholeMilliseconds} ms"
+                }
+            }
         } catch (e: DavProtocolException) {
             throw e
         } catch (
@@ -193,6 +206,7 @@ internal class DavClient(
         ) {
             // A timeout cancels the request; a cancelled caller must stay cancelled.
             currentCoroutineContext().ensureActive()
+            log.debug(e) { "${request.method.value} $origin failed" }
             throw DavTransportException(describe(request.method, url, e), e)
         }
     }
@@ -273,6 +287,8 @@ internal class DavClient(
     }
 
     private companion object {
+        val log = Logger("webdav")
+
         fun describe(
             method: HttpMethod,
             url: String,

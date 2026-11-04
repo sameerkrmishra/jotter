@@ -17,6 +17,7 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     // Ktor's HTTP/1.1 parser for request heads. The sockets are the JDK's.
     implementation(libs.ktor.http.cio)
+    implementation(projects.core.logging)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.atomicfu)
 

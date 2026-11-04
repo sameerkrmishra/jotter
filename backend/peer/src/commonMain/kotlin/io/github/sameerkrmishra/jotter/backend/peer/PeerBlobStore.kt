@@ -9,6 +9,7 @@ import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPath
 import io.github.sameerkrmishra.jotter.backend.api.requireValidBlobPrefix
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 import io.ktor.client.engine.cio.CIO
@@ -37,6 +38,7 @@ import kotlin.concurrent.Volatile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 private const val HTTP_OK = 200
 private const val HTTP_CREATED = 201
@@ -198,6 +200,7 @@ public class PeerBlobStore internal constructor(
     ): T =
         // Off the caller's dispatcher: the timeouts must run in real time, also under runTest.
         withContext(dispatcher) {
+            val started = TimeSource.Monotonic.markNow()
             try {
                 check(!closed) { "This store was closed" }
                 val host = urlHostOf(resolvedAddress())
@@ -210,6 +213,11 @@ public class PeerBlobStore internal constructor(
                                 if (upload != null) setBody(UploadContent(upload, watch))
                             }.execute { response ->
                                 watch.progress()
+                                log.debug {
+                                    "${response.call.request.method.value} ${callName(endpoint)} " +
+                                        "at hub $address -> ${response.status.value} in " +
+                                        "${started.elapsedNow().inWholeMilliseconds} ms"
+                                }
                                 answers.requireHub(response)
                                 Exchange(response, watch).handle()
                             }
@@ -225,6 +233,7 @@ public class PeerBlobStore internal constructor(
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
                 // IOException, timeouts and engine failures alike: the hub cannot be used now.
+                log.debug(e) { "${callName(endpoint)} at hub $address failed" }
                 throw answers.gone(e)
             }
         }
@@ -293,6 +302,11 @@ public class PeerBlobStore internal constructor(
     }
 
     private companion object {
+        val log = Logger("peer")
+
+        // The last part of an endpoint, such as `ping`: no URL path is logged (ADR-0021).
+        fun callName(endpoint: String) = endpoint.substringAfterLast('/')
+
         const val MAX_CONNECTIONS = 4
         const val UPLOAD_PART = 64 * 1024
 

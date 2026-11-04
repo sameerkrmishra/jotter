@@ -210,7 +210,7 @@ class EditorLeavingTest : EditorTest() {
             settle()
 
             assertEquals(editor, app.editor)
-            assertContains(editor.message.orEmpty(), "disk full")
+            assertContains(editor.message.orEmpty(), "attach the debug log")
         }
 
     @Test
@@ -387,7 +387,7 @@ class EditorLeavingTest : EditorTest() {
             testScheduler.runCurrent()
 
             assertEquals(editor, held.editor)
-            assertContains(editor.message.orEmpty(), "disk full")
+            assertContains(editor.message.orEmpty(), "attach the debug log")
             editor.close()
         }
 

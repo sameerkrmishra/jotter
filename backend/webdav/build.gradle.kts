@@ -8,6 +8,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.backend.api)
+            implementation(projects.core.logging)
             implementation(libs.ktor.client.core)
             // CIO is the one Ktor engine for the JVM, Android and linuxX64 alike, without a native
             // library such as libcurl to link.

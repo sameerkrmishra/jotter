@@ -1,12 +1,15 @@
 package io.github.sameerkrmishra.jotter.app.cli
 
-import androidx.sqlite.SQLiteException
 import com.github.ajalt.clikt.core.CliktError
+import io.github.sameerkrmishra.jotter.app.sync.describeOpenFailure
+import io.github.sameerkrmishra.jotter.app.sync.describeStorageFailure
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import io.github.sameerkrmishra.jotter.core.storage.NoteService
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
-import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
+import io.github.sameerkrmishra.jotter.core.storage.StorageProblem
 import io.github.sameerkrmishra.jotter.core.storage.linuxDatabasePath
+import io.github.sameerkrmishra.jotter.core.storage.storageProblemOf
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
@@ -15,8 +18,6 @@ import kotlin.coroutines.EmptyCoroutineContext
 
 /** Used only when the database is created. The file may be shared with the desktop app. */
 internal const val DEVICE_NAME = "Linux"
-
-private const val UNABLE_TO_OPEN = "unable to open database file"
 
 /**
  * Returns the database file, by [linuxDatabasePath].
@@ -50,8 +51,9 @@ internal class DatabaseLocation {
 
 /**
  * Opens the notes at [path], creating the file and its directory if needed, runs [block] on them
- * and closes them. A failure the user can meet becomes a [CliktError], which Clikt prints without
- * a stack trace before exiting with status 1.
+ * and closes them. A failure the user can meet becomes a [CliktError] that says what happened and
+ * what to do, which Clikt prints without a stack trace before exiting with status 1. The exception
+ * itself goes to the log.
  *
  * The CLI collects no flows, so the store gets no dispatcher for them. That also keeps the classes
  * of `Dispatchers.IO` out of startup.
@@ -61,30 +63,36 @@ internal fun <T> withNotes(
     block: (NoteService) -> T,
 ): T = withStore(path) { block(it.notes) }
 
-/** [withNotes], for a command that needs the whole store, such as what sync left to look at. */
+/**
+ * [withNotes], for a command that needs the whole store, such as what sync left to look at. A
+ * failure of the database while [block] runs or the store closes, such as a full disk, becomes a
+ * [CliktError] in plain words too; anything else is [block]'s own.
+ */
+@Suppress("TooGenericExceptionCaught") // Only failures of the database are caught.
 internal fun <T> withStore(
     path: Path,
     block: (NoteStore) -> T,
 ): T =
+    // Closing counts too: it checkpoints the WAL, which writes to the file.
     try {
         open(path).use(block)
-    } catch (_: StorageBusyException) {
-        throw locked(path)
-    } catch (e: SQLiteException) {
-        // Without a message, SQLite could not even open the file: a directory, or no permission.
-        val reason = e.message.orEmpty().substringAfter("message: ", UNABLE_TO_OPEN)
-        throw cannotOpen(path, reason, e)
+    } catch (e: CliktError) {
+        throw e
+    } catch (e: RuntimeException) {
+        if (storageProblemOf(e) == StorageProblem.OTHER) throw e
+        log.error(e) { "A command failed on the database $path" }
+        throw CliktError("jotter: ${describeStorageFailure(e)}", e)
     }
 
+@Suppress("TooGenericExceptionCaught") // The driver's exception is not part of NoteStore's API.
 private fun open(path: Path): NoteStore {
     createDirectory(path)
     return try {
         NoteStore.open(path.toAbsolutePath().toString(), DEVICE_NAME, EmptyCoroutineContext)
-    } catch (e: StorageBusyException) {
-        throw e
-    } catch (e: IllegalStateException) {
-        // Another application's database, or one written by a newer version of Jotter.
-        throw cannotOpen(path, e.message.orEmpty(), e)
+    } catch (e: RuntimeException) {
+        // Nothing was changed: a damaged or foreign file stays as it was (NoteStore.open).
+        log.error(e) { "Cannot open the database $path" }
+        throw CliktError("jotter: ${describeOpenFailure(e, path.toString())}", e)
     }
 }
 
@@ -93,14 +101,13 @@ private fun createDirectory(path: Path) {
         // The root directory has no parent.
         path.toAbsolutePath().parent?.let(Files::createDirectories)
     } catch (e: IOException) {
-        throw cannotOpen(path, "cannot create its directory", e)
+        log.error(e) { "Cannot create the folder of $path" }
+        throw CliktError(
+            "jotter: Jotter cannot create the folder for $path. Check that the path is right " +
+                "and that you may create folders there.",
+            e,
+        )
     }
 }
 
-private fun locked(path: Path) = CliktError("jotter: $path is locked by another process, try again")
-
-private fun cannotOpen(
-    path: Path,
-    reason: String,
-    cause: Exception,
-) = CliktError("jotter: cannot open $path: $reason", cause)
+private val log = Logger("cli")

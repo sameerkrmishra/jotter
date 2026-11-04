@@ -19,6 +19,7 @@ import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -66,6 +67,44 @@ class MainActivityTest {
             pressBack(scenario)
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             compose.waitUntil(TIMEOUT_MS) { scenario.state != Lifecycle.State.RESUMED }
+        }
+    }
+
+    @Test
+    fun aDamagedDatabaseIsExplainedLeftAloneAndTheDebugLogShown() {
+        val name = "${test.folder.name}-damaged.db"
+        val damaged = test.context.getDatabasePath(name)
+        checkNotNull(damaged.parentFile).mkdirs()
+        val garbage = "not SQLite, but long enough to be read as a header by SQLite itself"
+        damaged.writeText(garbage)
+        val graph =
+            AppGraph(
+                test.context,
+                databaseName = name,
+                secretsFile = File(test.folder, "s.json"),
+                keyAlias = test.keyAlias,
+            )
+        (test.context as JotterApplication).replaceGraph(graph)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                compose.waitUntil(TIMEOUT_MS) {
+                    compose
+                        .onAllNodesWithText("so Jotter cannot read it", substring = true)
+                        .fetchSemanticsNodes()
+                        .isNotEmpty()
+                }
+                compose.onNodeWithText("Show debug log").performClick()
+                compose.waitUntil(TIMEOUT_MS) {
+                    compose
+                        .onAllNodesWithText("App: android", substring = true)
+                        .fetchSemanticsNodes()
+                        .isNotEmpty()
+                }
+            }
+            assertEquals(garbage, damaged.readText())
+        } finally {
+            graph.close()
+            damaged.delete()
         }
     }
 

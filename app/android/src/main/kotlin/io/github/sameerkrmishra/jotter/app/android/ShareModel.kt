@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.sameerkrmishra.jotter.app.sync.describeStorageFailure
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import kotlinx.coroutines.launch
 
@@ -108,6 +110,9 @@ internal class ShareViewModel(
         } catch (_: StorageBusyException) {
             ShareState.Refused(NOTES_BUSY)
         } catch (e: RuntimeException) {
-            ShareState.Refused("The note could not be saved: ${e.message}")
+            log.error(e) { "A shared text could not be saved" }
+            ShareState.Refused("The note could not be saved. ${describeStorageFailure(e)}")
         }
 }
+
+private val log = Logger("share")

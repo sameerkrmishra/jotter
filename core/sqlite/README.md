@@ -41,6 +41,15 @@ atomicfu. No other Jotter module.
   `foreign_keys = ON` again, also on failure. So a migration can rebuild a
   table that others reference without `DROP TABLE` cascading into them.
 
+## Failures
+
+A file of another application is `ForeignDatabaseException`, one from a newer
+version `DatabaseTooNewException`, a migration that failed and was rolled back
+`DatabaseUpgradeException` (with SQLite's error as its cause), all
+`IllegalStateException`s, and the file is as it was. `sqliteResultCode` reads the
+primary result code from androidx's `SQLiteException`, such as 13 for a full disk;
+`isSqliteBusy` is built on it.
+
 ## Design
 
 - **One connection, one mutex.** Every call takes a reentrant lock, so any

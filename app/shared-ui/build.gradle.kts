@@ -28,6 +28,8 @@ kotlin {
             implementation(projects.server)
         }
         jvmTest.dependencies {
+            // DatabaseUpgradeException, for LogRedactionTest.
+            implementation(projects.core.sqlite)
             implementation(projects.backend.api.contract)
             implementation(libs.androidx.sqlite)
             implementation(libs.androidx.sqlite.bundled)

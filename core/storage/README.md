@@ -43,6 +43,12 @@ of its API) and `core:sqlite`. No merge or backend code. `SyncStore` gives
 | `StaleEditException` | An edit based on a revision that is no longer the current one |
 | `StorageBusyException` | A write, or `NoteStore.open`, found the database locked by another process for the whole busy timeout |
 
+`StorageProblem` and `storageProblemOf` tell what a failure of `NoteStore.open` or of
+a write means: locked, disk full, damaged, read-only, no access, disk error, newer
+version, not Jotter's, failed upgrade or other. They read SQLite's result code and
+`core:sqlite`'s exceptions, through the whole chain of causes. None of these
+failures changes the file; `app:sync` puts them in words.
+
 ## Schema (version 3)
 
 | Table | What it holds |

@@ -101,7 +101,7 @@ class OpenSqliteDriverTest {
         withTempDir { dir ->
             openSqliteDriver(dir.path, RecordingSchema(version = 3), TEST_APPLICATION_ID).close()
             val error =
-                assertFailsWith<IllegalStateException> {
+                assertFailsWith<DatabaseTooNewException> {
                     openSqliteDriver(dir.path, RecordingSchema(version = 2), TEST_APPLICATION_ID)
                 }
             assertContains(error.message.orEmpty(), "schema version 3, newer than this app's 2")
@@ -130,7 +130,7 @@ class OpenSqliteDriverTest {
             val schema = RecordingSchema(version = 2)
             openConnectionDriver(dir.path).use { driver ->
                 val error =
-                    assertFailsWith<IllegalStateException> {
+                    assertFailsWith<DatabaseTooNewException> {
                         createOrMigrate(driver, schema, TEST_APPLICATION_ID, emptyArray())
                     }
                 assertContains(error.message.orEmpty(), "newer than this app's 2")
@@ -255,11 +255,12 @@ class OpenSqliteDriverTest {
             val dangling =
                 ParentChildSchema(version = 2, migration = listOf("DELETE FROM parent"))
             val error =
-                assertFailsWith<IllegalStateException> {
+                assertFailsWith<DatabaseUpgradeException> {
                     openSqliteDriver(dir.path, dangling, TEST_APPLICATION_ID)
                 }
 
-            assertContains(error.message.orEmpty(), "dangling foreign key: child -> parent")
+            assertEquals("Upgrading the database failed", error.message)
+            assertContains(error.cause?.message.orEmpty(), "dangling foreign key: child -> parent")
             openSqliteDriver(dir.path, ParentChildSchema(), TEST_APPLICATION_ID).use { driver ->
                 assertEquals(1L, driver.queryLong("PRAGMA user_version"))
                 assertEquals(1L, driver.queryLong("SELECT count(*) FROM parent"))
@@ -274,9 +275,11 @@ class OpenSqliteDriverTest {
 
             val broken = ParentChildSchema(version = 2, migration = listOf("DROP TABLE missing"))
             openConnectionDriver(dir.path).use { driver ->
-                assertFailsWith<SQLiteException> {
-                    createOrMigrate(driver, broken, TEST_APPLICATION_ID, emptyArray())
-                }
+                val error =
+                    assertFailsWith<DatabaseUpgradeException> {
+                        createOrMigrate(driver, broken, TEST_APPLICATION_ID, emptyArray())
+                    }
+                assertTrue(error.cause is SQLiteException)
                 assertEquals(1L, driver.queryLong("PRAGMA foreign_keys"))
                 assertEquals(1L, driver.queryLong("PRAGMA user_version"))
             }

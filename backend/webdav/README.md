@@ -90,6 +90,12 @@ again.
   letters, full URLs or absolute paths. Unicode is not normalised: a server that
   stores names in another normal form returns other paths.
 
+## Log
+
+Each exchange is logged at DEBUG as its method, the server's origin (scheme, host and
+port, never the path, which often holds the user name), the status and the time
+taken, and each retry at INFO: never a header, a body or a password ([ADR-0021](../../docs/adr/0021-local-logging.md)).
+
 ## Design
 
 - **`DavClient`** sends requests: authentication, retries, redirects, timeouts and
