@@ -83,8 +83,11 @@ internal class Shutdown(
     }
 }
 
-/** The threads AWT ends by itself once no window is left and its event queue is empty. */
+/**
+ * The threads AWT ends by itself once no window is left and its event queue is empty. The map
+ * holds live threads only.
+ */
 internal fun awtThreadsAlive(): Boolean =
     Thread.getAllStackTraces().keys.any {
-        it.isAlive && (it.name.startsWith("AWT-EventQueue") || it.name == "AWT-Shutdown")
+        it.name.startsWith("AWT-EventQueue") || it.name == "AWT-Shutdown"
     }

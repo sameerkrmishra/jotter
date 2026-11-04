@@ -115,6 +115,14 @@ class PeerHubControlsTest {
         }
 
     @Test
+    fun stoppingAHubThatNeverStartedDoesNothing() =
+        runBlocking {
+            val hub = controls()
+            hub.stop()
+            assertEquals(HubState.Off, hub.state.value)
+        }
+
+    @Test
     fun stoppingFreesThePortAndKeepsTheHubOnForTheNextStart() =
         runBlocking {
             val first = controls()
