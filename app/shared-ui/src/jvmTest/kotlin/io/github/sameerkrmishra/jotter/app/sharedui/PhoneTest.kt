@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -190,4 +191,42 @@ class PhoneTest {
             assertEquals(url.top, user.top)
             assertTrue(user.left >= url.right)
         }
+
+    @Test
+    fun onA320DpScreenTheTagFieldItsButtonAndEveryTagFit() =
+        app(width = NARROW) { _ ->
+            onNodeWithText("New note").performClick()
+            awaitTag(TAG_FIELD)
+            val tags = listOf("groceries", "household", "weekend-plans", "x")
+            tags.forEach { tag ->
+                onNodeWithTag(TAG_FIELD).performTextInput(tag)
+                onNodeWithTag(ADD_TAG_BUTTON).performClick()
+                awaitTag(tagChip(tag))
+            }
+            val field = onNodeWithTag(TAG_FIELD).getBoundsInRoot()
+            val button = onNodeWithTag(ADD_TAG_BUTTON).getBoundsInRoot()
+            val label = onNodeWithText(ADD_TAG).getBoundsInRoot()
+            // The button keeps its one line of text, beside a field that is still usable.
+            assertTrue(button.right <= NARROW.dp, "button inside the screen: $button")
+            assertTrue(button.left >= field.right, "button beside the field: $field, $button")
+            assertTrue(field.right - field.left >= MIN_FIELD.dp, "field not squeezed: $field")
+            assertTrue(label.bottom - label.top < field.bottom - field.top, "one line: $label")
+            // Every tag shows whole, below the field, on as many lines as it takes.
+            tags.forEach { tag ->
+                val chip = onNodeWithTag(tagChip(tag))
+                chip.assertIsDisplayed()
+                val bounds = chip.getBoundsInRoot()
+                assertTrue(bounds.top >= field.bottom, "$tag below the field: $bounds")
+                assertTrue(bounds.left >= 0.dp && bounds.right <= NARROW.dp, "$tag fits: $bounds")
+                assertTrue(bounds.right - bounds.left >= MIN_CHIP.dp, "$tag not squeezed: $bounds")
+            }
+            val rows = tags.map { onNodeWithTag(tagChip(it)).getBoundsInRoot().top }.distinct()
+            assertTrue(rows.size > 1, "the tags wrap onto more lines: $rows")
+        }
+
+    private companion object {
+        const val NARROW = 320
+        const val MIN_FIELD = 120
+        const val MIN_CHIP = 40
+    }
 }
