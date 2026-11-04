@@ -231,7 +231,11 @@ class MainActivityTest {
             compose.onNodeWithText("Cancel").performClick()
             compose.waitForIdle()
             assertTrue(
-                compose.onAllNodesWithText(EXPORT_DATABASE_EXPLAINED).fetchSemanticsNodes().isEmpty(),
+                compose
+                    .onAllNodesWithText(
+                        EXPORT_DATABASE_EXPLAINED,
+                    ).fetchSemanticsNodes()
+                    .isEmpty(),
             )
         }
     }

@@ -116,7 +116,11 @@ public class MainActivity : ComponentActivity() {
             @Suppress("InjectDispatcher") // The Activity is platform glue, like the graph.
             override suspend fun export(): ExportStep {
                 val opened = graph.opened as? Opened.Ready ?: return ExportStep.Cancelled
-                return exportThroughPicker(opened.export, graph.exportStaging, Dispatchers.IO) {
+                return exportThroughPicker(
+                    opened.export::export,
+                    graph.exportStaging,
+                    Dispatchers.IO,
+                ) {
                     val answer = CompletableDeferred<Uri?>()
                     waiting = answer
                     picker.launch(DATABASE_FILE_NAME)

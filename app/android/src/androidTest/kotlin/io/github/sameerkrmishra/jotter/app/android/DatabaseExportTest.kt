@@ -26,6 +26,7 @@ import kotlin.test.assertTrue
  * the picker gave, here a file standing in for it. The picker itself is another app's screen.
  */
 @RunWith(AndroidJUnit4::class)
+@Suppress("InjectDispatcher") // The test stands in for the Activity, which chooses dispatchers.
 class DatabaseExportTest {
     private val test = TestGraph()
     private val out = File(test.folder, "out").apply { mkdirs() }
@@ -69,7 +70,7 @@ class DatabaseExportTest {
 
     private fun export(document: FileDocument?): ExportStep =
         runBlocking {
-            exportThroughPicker(test.ready.export, staging, Dispatchers.IO) { document }
+            exportThroughPicker(test.ready.export::export, staging, Dispatchers.IO) { document }
         }
 
     private fun open(file: File) = NoteStore.open(file.path, "check", EmptyCoroutineContext)
@@ -113,7 +114,8 @@ class DatabaseExportTest {
 
     @Test
     fun aCancelledPickerLeavesNothing() {
-        test.ready.store.notes.create("", "milk")
+        test.ready.store.notes
+            .create("", "milk")
         assertEquals(ExportStep.Cancelled, export(null))
         assertFalse(File(staging, DATABASE_FILE_NAME).exists())
         assertEquals(emptyList(), out.list().orEmpty().toList())
@@ -121,7 +123,8 @@ class DatabaseExportTest {
 
     @Test
     fun aFullPlaceIsSaidInPlainWordsAndTheHalfCopyDeleted() {
-        test.ready.store.notes.create("", "milk")
+        test.ready.store.notes
+            .create("", "milk")
         val document = FileDocument(File(out, "copy.db"), IOException("No space left on device"))
         val step = assertIs<ExportStep.Failed>(export(document))
         assertEquals(
@@ -131,7 +134,13 @@ class DatabaseExportTest {
         )
         assertTrue(document.deleted)
         assertFalse(document.file.exists())
-        assertEquals("milk", test.ready.store.notes.list().single().body)
+        assertEquals(
+            "milk",
+            test.ready.store.notes
+                .list()
+                .single()
+                .body,
+        )
     }
 
     private companion object {

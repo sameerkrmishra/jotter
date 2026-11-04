@@ -2,12 +2,12 @@ package io.github.sameerkrmishra.jotter.app.android
 
 import io.github.sameerkrmishra.jotter.app.sharedui.DatabaseExportPlace
 import io.github.sameerkrmishra.jotter.app.sharedui.ExportStep
-import io.github.sameerkrmishra.jotter.app.sync.DatabaseExport
 import io.github.sameerkrmishra.jotter.app.sync.ExportOutcome
 import io.github.sameerkrmishra.jotter.app.sync.describeExportFailure
 import io.github.sameerkrmishra.jotter.core.logging.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import okio.Path
 import okio.Path.Companion.toOkioPath
 import java.io.File
 import java.io.FileOutputStream
@@ -71,10 +71,11 @@ internal interface ChosenDocument {
  * for byte to the document and synced. If that fails, the document is deleted, so no half copy is
  * left under its name. The staged copy is always deleted.
  *
+ * @param export Writes the copy to a file, replacing it if told to: `DatabaseExport.export`.
  * @param choose Shows the picker; null if the user cancelled.
  */
 internal suspend fun exportThroughPicker(
-    export: DatabaseExport,
+    export: suspend (file: Path, replace: Boolean) -> ExportOutcome,
     staging: File,
     io: CoroutineContext,
     choose: suspend () -> ChosenDocument?,
@@ -84,7 +85,7 @@ internal suspend fun exportThroughPicker(
         val made =
             withContext(io) {
                 staging.mkdirs()
-                export.export(copy.toOkioPath(), replace = true)
+                export(copy.toOkioPath(), true)
             }
         return when (made) {
             is ExportOutcome.Exported -> {
@@ -110,7 +111,7 @@ private suspend fun writeDocument(
             document.open().use { output ->
                 copy.inputStream().use { it.copyTo(output) }
                 output.flush()
-                (output as? FileOutputStream)?.fd?.sync()
+                if (output is FileOutputStream) output.fd.sync()
             }
             ExportStep.Done(
                 "Exported your notes to ${document.name}. Passwords and pairing tokens are not " +
