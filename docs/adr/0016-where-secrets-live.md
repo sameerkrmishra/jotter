@@ -65,6 +65,19 @@ would be readable in between. Jotter refuses to read it if it is readable by gro
 others, or owned by another user. The backend's status says that its secret
 is in that file, in plain text.
 
+**Entering a secret again may move it.** Where a secret lives is a setting of the
+backend, so a database restored on a computer with no Secret Service still names the
+keyring. Entering the password or token again (`jotter backends password ID`, or the
+desktop's password dialog) stores it where the backend keeps it, unless the user
+chooses the other place: `--store file|keyring` on the CLI, and on the desktop the same
+offer of the file as adding makes when no keyring answers. A move writes the new copy
+first, under the file rules above, then records the new place in the backend's
+settings, and only then deletes the old copy. If the record cannot be changed, the new
+copy is deleted again. If the old copy cannot be deleted, as when no keyring answers,
+the backend still uses the new place, and Jotter says where the old copy may still be
+and how to delete it, as removing with `--keep-secret` does. The secret is read as on
+adding, never from an argument.
+
 Android (M5) will keep secrets with a key from the Android Keystore; that is M5's
 decision.
 

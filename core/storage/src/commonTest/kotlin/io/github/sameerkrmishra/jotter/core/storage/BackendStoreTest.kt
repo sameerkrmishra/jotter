@@ -63,6 +63,22 @@ class BackendStoreTest {
         }
 
     @Test
+    fun settingsCanBeReplacedKeepingTheRest() =
+        withStore { store ->
+            store.backends.add(stick)
+            val ok = SyncAttempt(Instant.fromEpochMilliseconds(10_000), "COMPLETED", "", listOf())
+            store.backends.recordAttempt("b1", ok, succeeded = true)
+            val before = store.backends.get("b1")!!
+            assertTrue(store.backends.updateSettings("b1", """{"path":"/media/other"}"""))
+            assertEquals(
+                before.copy(settings = """{"path":"/media/other"}"""),
+                store.backends.get("b1"),
+            )
+            assertFalse(store.backends.updateSettings("b2", "{}"))
+            assertNull(store.backends.get("b2"))
+        }
+
+    @Test
     fun aFailedAttemptKeepsTheLastSuccess() =
         withStore { store ->
             store.backends.add(stick)
