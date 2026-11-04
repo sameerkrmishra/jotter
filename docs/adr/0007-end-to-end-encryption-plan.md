@@ -125,8 +125,8 @@ m = 64 MiB, p = 4 lanes. Memory and lanes stay fixed there; setup raises only t,
 phone bears in about a second. A device refuses, as damaged, a key file that asks for less
 than that minimum or more than a cap (t ≤ 10, m = 64 MiB at most, as more can exhaust a
 phone's Java heap under Bouncy Castle, p ≤ 4), so a hostile key file cannot exhaust a
-phone or ask for a key that is cheap to guess. Key files are written once with `writeNew` and named by their
-content, like everything else. Several may exist for one key id.
+phone or ask for a key that is cheap to guess. Key files are written once with `writeNew`
+and named by their content, like everything else. Several may exist for one key id.
 
 **On a device** the store key is a secret like any other
 ([ADR-0016](0016-where-secrets-live.md)): the Secret Service on Linux, or the 0600 file the
