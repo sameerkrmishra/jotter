@@ -1,6 +1,7 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
+import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.core.storage.BackendRecord
 import io.github.sameerkrmishra.jotter.core.sync.SyncReport
 import kotlin.time.Instant
@@ -93,14 +94,20 @@ public data class BackendSync(
  * The state of [backend] now: whether it can be reached, besides how its last sync went.
  *
  * @property backend The backend, with its last sync.
- * @property reachability What it said when asked just now.
+ * @property reachability What it said when asked just now. A backend whose secret is missing or
+ *   unreadable was not asked: it is unreachable as [UnreachableReason.UNAUTHORIZED], so the app
+ *   offers to enter the secret again.
+ * @property secretProblem Why its secret could not be read, and what to do, if that is why it was
+ *   not asked; null otherwise.
  */
 public data class BackendStatus(
     val backend: Backend,
     val reachability: Reachability,
+    val secretProblem: String? = null,
 ) {
-    /** [reachability] in plain words. */
-    public val reachabilityText: String get() = describe(reachability, backend.config)
+    /** [reachability] in plain words, or [secretProblem]. */
+    public val reachabilityText: String
+        get() = secretProblem ?: describe(reachability, backend.config)
 }
 
 internal fun backendOf(record: BackendRecord): Backend =

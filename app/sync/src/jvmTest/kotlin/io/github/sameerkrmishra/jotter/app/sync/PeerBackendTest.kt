@@ -335,13 +335,13 @@ class PeerBackendTest {
                 val sync = device.manager.syncAll().single()
                 assertEquals(Outcome.UNAUTHORIZED, sync.attempt.outcome)
                 assertEquals(NO_TOKEN, sync.attempt.detail)
+                // Its own words on the card, and the app offers to enter it.
+                val status = device.manager.status().single()
                 assertEquals(
-                    Reachability.Unreachable(UnreachableReason.FAILED, NO_TOKEN),
-                    device.manager
-                        .status()
-                        .single()
-                        .reachability,
+                    Reachability.Unreachable(UnreachableReason.UNAUTHORIZED, NO_TOKEN),
+                    status.reachability,
                 )
+                assertEquals(NO_TOKEN, status.reachabilityText)
             }
         }
 

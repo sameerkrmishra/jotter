@@ -494,11 +494,14 @@ class WebDavBackendTest {
                 assertTrue(NO_PASSWORD.contains("the keyring may be locked"))
                 assertTrue(NO_PASSWORD.contains("Unlock your keyring, or enter the password again"))
                 assertEquals(1, device.manager.list().size)
+                // Its own words, the right action, and no network advice (no "Cannot be reached").
                 val status = device.manager.status().single()
                 assertEquals(
-                    Reachability.Unreachable(UnreachableReason.FAILED, NO_PASSWORD),
+                    Reachability.Unreachable(UnreachableReason.UNAUTHORIZED, NO_PASSWORD),
                     status.reachability,
                 )
+                assertEquals(NO_PASSWORD, status.reachabilityText)
+                assertFalse("network" in status.reachabilityText)
             }
         }
 

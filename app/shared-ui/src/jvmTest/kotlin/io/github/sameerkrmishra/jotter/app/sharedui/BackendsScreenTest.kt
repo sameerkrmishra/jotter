@@ -20,6 +20,7 @@ import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.execSQL
 import io.github.sameerkrmishra.jotter.app.sync.AddResult
+import io.github.sameerkrmishra.jotter.core.storage.BackendRecord
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -231,6 +232,31 @@ class BackendsScreenTest {
             clickInDialog("Set up and add")
             awaitText("That did not work:", substring = true)
             assertEquals(emptyList(), runBlocking { device.manager.list() })
+        }
+
+    @Test
+    fun aMissingPasswordIsSaidInItsOwnWordsWithTheWayToEnterIt() =
+        app {
+            // A database restored on this computer: the backend is there, its password is not.
+            device.store.backends.add(
+                BackendRecord(
+                    "dav",
+                    "webdav",
+                    "My server",
+                    """{"url":"https://dav.example.org/","username":"me"}""",
+                    Instant.fromEpochMilliseconds(0),
+                ),
+            )
+            onNodeWithText("Back").performClick()
+            onNodeWithText(BACKENDS_TITLE).performClick()
+            awaitText("Jotter could not read this backend's password", substring = true)
+            awaitText("enter the password again.", substring = true)
+            // Nothing on the card speaks of the network, or ends with two periods.
+            listOf("Cannot be reached", "network", "..").forEach { words ->
+                val onCard = hasText(words, substring = true) and hasAnyAncestor(hasTestTag(backendTag("dav")))
+                assertTrue(onAllNodes(onCard).fetchSemanticsNodes().isEmpty(), words)
+            }
+            onNodeWithText(NEW_PASSWORD).assertExists()
         }
 
     @Test
