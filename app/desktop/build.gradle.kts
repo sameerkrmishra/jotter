@@ -56,8 +56,9 @@ compose.desktop {
  * - The runtime's base class data archive (lib/server/classes.jsa), which jlink does not make:
  *   `java -Xshare:dump`, in an empty environment, gives the same bytes on every run (the
  *   reproducibility check covers it), and speeds up the start of both the app and the CLI.
+ *
+ * Compose registers its tasks after the build script runs, hence the name filter.
  */
-// Compose registers its tasks after the build script runs, hence the name filter.
 tasks.named { it == "createDistributable" }.configureEach {
     val appDir = layout.buildDirectory.dir("compose/binaries/main/app/jotter")
     val javaLauncher = packagingJdk.map { it.file("bin/java").asFile }
@@ -65,10 +66,19 @@ tasks.named { it == "createDistributable" }.configureEach {
     doLast {
         val app = appDir.get().asFile
         val lib = app.resolve("lib/app")
-        val jar = lib.listFiles { f -> f.name.matches(Regex("skiko-awt-runtime-.*-[0-9a-f]+\\.jar")) }!!.single()
+        val jar =
+            lib
+                .listFiles { f ->
+                    f.name.matches(Regex("skiko-awt-runtime-.*-[0-9a-f]+\\.jar"))
+                }!!
+                .single()
         val entries =
             ZipFile(jar).use { zip ->
-                zip.entries().toList().sortedBy { it.name }.map { it.name to zip.getInputStream(it).readBytes() }
+                zip
+                    .entries()
+                    .toList()
+                    .sortedBy { it.name }
+                    .map { it.name to zip.getInputStream(it).readBytes() }
             }
         val bytes = ByteArrayOutputStream()
         ZipOutputStream(bytes).use { out ->
