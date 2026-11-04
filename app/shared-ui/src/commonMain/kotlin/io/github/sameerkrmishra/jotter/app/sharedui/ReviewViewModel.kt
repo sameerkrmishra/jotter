@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.sameerkrmishra.jotter.app.sync.describeStorageFailure
 import io.github.sameerkrmishra.jotter.core.merge.MergeResult
 import io.github.sameerkrmishra.jotter.core.merge.merge
 import io.github.sameerkrmishra.jotter.core.merge.withConflictMarkers
@@ -389,7 +390,7 @@ internal class ReviewViewModel(
             throw e
         } catch (e: RuntimeException) {
             reportUnexpected(e)
-            message = "$DRAFT_NOT_KEPT_MESSAGE ${e.message.orEmpty()}".trim()
+            message = "$DRAFT_NOT_KEPT_MESSAGE ${describeStorageFailure(e)}"
             false
         }
 
@@ -462,7 +463,7 @@ internal class ReviewViewModel(
                 message = COMBINED_TOO_LARGE_MESSAGE
             } catch (e: RuntimeException) {
                 reportUnexpected(e)
-                message = "$RESOLVE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
+                message = "$RESOLVE_FAILED_MESSAGE ${describeStorageFailure(e)}"
             } finally {
                 isWorking = false
             }

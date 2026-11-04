@@ -8,6 +8,7 @@ import io.github.sameerkrmishra.jotter.app.sharedui.markdown.MarkdownDocument
 import io.github.sameerkrmishra.jotter.app.sharedui.markdown.Task
 import io.github.sameerkrmishra.jotter.app.sharedui.markdown.parseMarkdown
 import io.github.sameerkrmishra.jotter.app.sharedui.markdown.toggled
+import io.github.sameerkrmishra.jotter.app.sync.describeStorageFailure
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteId
 import io.github.sameerkrmishra.jotter.core.model.NoteState
@@ -398,7 +399,7 @@ internal class EditorViewModel(
         } catch (_: NoteTooLargeException) {
             message = TOO_LARGE_MESSAGE
         } catch (e: RuntimeException) {
-            val failure = "$SAVE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
+            val failure = "$SAVE_FAILED_MESSAGE ${describeStorageFailure(e)}"
             // Once per failure, as the autosave retries for as long as it lasts.
             if (failure != message) reportUnexpected(e)
             message = failure

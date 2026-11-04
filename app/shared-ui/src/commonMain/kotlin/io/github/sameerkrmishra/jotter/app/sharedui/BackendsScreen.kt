@@ -91,11 +91,15 @@ internal fun Form(content: @Composable (field: (weight: Float) -> Modifier) -> U
 /** The test tag of the card of the backend [id]. */
 internal fun backendTag(id: String) = "backend-$id"
 
-/** The backend screen: see [BackendsViewModel]. */
+/**
+ * The backend screen: see [BackendsViewModel]. [onDebugLog] opens the debug log, if the app has
+ * one: this is where the user looks when sync fails.
+ */
 @Composable
 internal fun BackendsScreen(
     backends: BackendsViewModel,
     onClose: () -> Unit,
+    onDebugLog: (() -> Unit)? = null,
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(spacing),
@@ -107,6 +111,7 @@ internal fun BackendsScreen(
         ) {
             TextButton(onClick = onClose) { Text("Back") }
             Text(BACKENDS_TITLE, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            onDebugLog?.let { TextButton(onClick = it) { Text(DEBUG_LOG_TITLE) } }
             Button(onClick = backends::syncNow, enabled = !backends.syncing) {
                 Text(if (backends.syncing) "Syncing…" else "Sync now")
             }

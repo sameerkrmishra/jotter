@@ -270,7 +270,9 @@ class EditorViewModelTest : EditorTest() {
 
             assertEquals("my text", editor.body)
             assertContains(editor.message.orEmpty(), SAVE_FAILED_MESSAGE)
-            assertContains(editor.message.orEmpty(), "disk full")
+            // In plain words: SQLite's text, and any stack trace, go to the log only.
+            assertContains(editor.message.orEmpty(), "report it and attach the debug log")
+            assertFalse("disk full" in editor.message.orEmpty())
 
             database.allowWrites()
             assertTrue(editor.save())
