@@ -75,6 +75,12 @@ build() {
         echo "[$name] build failed, see $out/$name.log" >&2
         exit 2
     fi
+    # Each build must have made its own package, in its own copy: once, appimage.sh found the
+    # enclosing checkout through git and packed that twice, which compared equal by construction.
+    if [[ ! -d $src/app/desktop/build/appimage/Jotter.AppDir || ! -f $src/build/dist/$image ]]; then
+        echo "[$name] the copy in $src did not build its own AppImage" >&2
+        exit 2
+    fi
     cp "$src/build/dist/$image" "$out/$name.AppImage"
     cp "$src/$zip_path" "$out/$name-cli.zip"
     echo "[$name] $(sha256sum "$out/$name.AppImage" | cut -d' ' -f1)  AppImage"
@@ -82,6 +88,9 @@ build() {
 }
 
 build a UTC C.UTF-8 022
+# The second build starts in a later minute than the first ended, so that a time that leaks into
+# the package (such as a zip entry's, at two-second resolution) cannot match by chance.
+sleep $((61 - $(date +%-S)))
 fresh_home "$out/b/gradle-home"
 build b Pacific/Kiritimati POSIX 077 "$out/b/gradle-home"
 

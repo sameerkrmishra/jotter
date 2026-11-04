@@ -15,7 +15,7 @@
 #
 # Deterministic: the same commit, the same JDK 21 build (the toolchain Gradle uses, whose jlink
 # image the AppImage bundles) and the same squashfs-tools version give the same bytes. The image's
-# file times are all SOURCE_DATE_EPOCH (default 0), owners root, modes normalized by Gradle, and
+# file times are all 0 (1970), owners root, modes normalized by Gradle, and
 # entries sorted by mksquashfs.
 
 set -euo pipefail
@@ -24,13 +24,15 @@ runtime_release=20251108
 runtime_sha256=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 runtime_url=https://github.com/AppImage/type2-runtime/releases/download/$runtime_release/runtime-x86_64
 
-root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) ||
-    root=$(cd -- "$(dirname "$0")/../../.." && pwd -P)
+# From the script's own place, not from git: a `git archive` copy inside another checkout (as
+# reproducible-build.sh makes them, under build/) would otherwise build that checkout instead.
+root=$(cd -- "$(dirname -- "$0")/../../.." && pwd -P)
 out=${1:-$root/build/dist}
 version=$(sed -n 's/^jotter\.versionName=//p' "$root/gradle.properties")
 mksquashfs=${MKSQUASHFS:-mksquashfs}
 appdir=$root/app/desktop/build/appimage/Jotter.AppDir
-epoch=${SOURCE_DATE_EPOCH:-0}
+# Every file time in the image: one fixed value, never the caller's.
+epoch=0
 
 if ! command -v "$mksquashfs" >/dev/null; then
     echo "mksquashfs not found: install squashfs-tools, or set MKSQUASHFS" >&2
