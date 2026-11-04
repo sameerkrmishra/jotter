@@ -10,8 +10,9 @@
 #
 #   - the desktop app's launcher starts the bundled runtime: `--version` prints `jotter VERSION`
 #     (VERSION defaults to jotter.versionName in gradle.properties);
-#   - the CLI runs from inside the package: `cli add`, then `cli list` and, for an AppImage, `list`
-#     through a symlink named `jotter`, which must show the note;
+#   - the CLI runs from inside the package: `cli add`, then `cli list`, which must show the note;
+#   - AppRun chooses by name: started as `jotter` it runs the CLI; started as the desktop entry's
+#     Exec name, or any other name, the app;
 #   - with JOTTER_SMOKE_GUI=1 and xvfb-run installed, the window opens on a virtual display and
 #     the app closes itself (`--autoclose`). Never on the caller's display.
 #
@@ -61,12 +62,45 @@ grep -q "^$id"$'\t'".*"$'\t'"smoke"$'\t'"smoke test note$" <<<"$listing" ||
     fail "cli list did not show the note: $listing"
 echo "ok: cli list"
 
-if [[ ! -d $target ]]; then
-    ln -s "$target" "$tmp/bin/jotter"
-    listing=$(run "$tmp/bin/jotter" list --tag smoke) || fail "jotter list exited with $?"
-    grep -q "^$id"$'\t' <<<"$listing" || fail "jotter (symlink) list did not show the note: $listing"
-    echo "ok: symlink named jotter runs the CLI"
+# -Xshare:on fails instead of going on without the runtime's base class data archive.
+run env JAVA_OPTS=-Xshare:on "$launcher" cli list >/dev/null ||
+    fail "the runtime's class data archive (lib/server/classes.jsa) is missing or unusable"
+echo "ok: the runtime's class data archive is used"
+
+# run_as NAME ARGS...: the package started under NAME, as through a symlink on PATH or the desktop
+# entry. An AppImage gets a symlink, and its runtime sets ARGV0; an AppDir gets ARGV0 directly.
+run_as() {
+    local name=$1
+    shift
+    if [[ -d $target ]]; then
+        run env ARGV0="$tmp/bin/$name" "$launcher" "$@"
+    else
+        ln -sfn "$target" "$tmp/bin/$name"
+        run "$tmp/bin/$name" "$@"
+    fi
+}
+
+# AppRun's choice for each name: `jotter` is the CLI, anything else the app.
+listing=$(run_as jotter list --tag smoke) || fail "jotter list exited with $?"
+grep -q "^$id"$'\t' <<<"$listing" || fail "jotter (symlink) list did not show the note: $listing"
+echo "ok: started as jotter, the CLI ran"
+
+# The desktop entry's Exec must start the app, not the CLI.
+entry=io.github.sameerkrmishra.jotter.desktop
+if [[ -d $target ]]; then
+    cp "$target/$entry" "$tmp/"
+else
+    (cd "$tmp" && "$target" --appimage-extract "$entry" >/dev/null && cp "squashfs-root/$entry" .)
 fi
+exec_name=$(sed -n 's/^Exec=\([^ ]*\).*/\1/p' "$tmp/$entry")
+[[ -n $exec_name && $exec_name != jotter ]] || fail "the desktop entry's Exec is '$exec_name'"
+out=$(run_as "$exec_name" --version) || fail "$exec_name --version exited with $?"
+[[ $out == "jotter $version" ]] || fail "$exec_name --version printed '$out': not the app"
+echo "ok: started as $exec_name (the desktop entry's Exec), the app ran"
+
+out=$(run_as Jotter.AppImage --version) || fail "Jotter.AppImage --version exited with $?"
+[[ $out == "jotter $version" ]] || fail "Jotter.AppImage --version printed '$out': not the app"
+echo "ok: started under another name, the app ran"
 
 [[ -s $tmp/notes.db ]] || fail "no database at JOTTER_DB"
 

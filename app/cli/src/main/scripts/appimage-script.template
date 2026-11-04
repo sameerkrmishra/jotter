@@ -1,9 +1,10 @@
 #!/bin/sh
 # Starts jotter inside the desktop app's AppImage (docs/adr/0020-linux-desktop-package.md), with the
-# Java runtime bundled there. The flags are start-script.template's, without its class data
-# archive: an AppImage is mounted at a new path on every run, an archive is valid only for the
-# classpath it was made with, and every jar in the image has the same time, so the archive could
-# never be told stale. So this is about 100 ms slower than the standalone CLI.
+# Java runtime bundled there. The flags are start-script.template's, with the runtime's base class
+# data archive (classes.jsa, made at build time) but without the CLI's own dynamic archive: one
+# made at build time would make the AppImage non-deterministic (JDK 21 writes a different archive
+# on every run), and one made at run time could not be told stale, as every file in the image has
+# the same time. ADR-0020 has the measured start-up times.
 
 self=\$0
 if [ -L "\$self" ]; then self=\$(readlink -f -- "\$self"); fi

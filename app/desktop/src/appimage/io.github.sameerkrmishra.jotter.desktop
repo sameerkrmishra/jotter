@@ -2,7 +2,7 @@
 Type=Application
 Name=Jotter
 Comment=Local-first notes
-Exec=jotter
+Exec=jotter-desktop
 Icon=io.github.sameerkrmishra.jotter
 Terminal=false
 Categories=Office;Utility;

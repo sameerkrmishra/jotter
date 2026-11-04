@@ -1,7 +1,8 @@
 #!/bin/sh
-# The AppImage's entry point (docs/adr/0020-linux-desktop-package.md). It starts the desktop app,
-# or the CLI when the AppImage is started under the name `jotter` (a symlink on PATH) or with
-# `cli` as its first argument:
+# The AppImage's entry point (docs/adr/0020-linux-desktop-package.md). It starts the CLI when the
+# AppImage is started under the name `jotter` (a symlink on PATH) or with `cli` as its first
+# argument, and the desktop app under any other name, such as the AppImage's own file name or
+# `jotter-desktop`, the desktop entry's Exec:
 #
 #   ln -s ~/Applications/Jotter-1.0.0-x86_64.AppImage ~/.local/bin/jotter
 #   jotter list
