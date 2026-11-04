@@ -164,7 +164,10 @@ public class PeerHub internal constructor(
                     if (server === next) {
                         log.warn { "The hub on ${config.host}:${config.port} stopped: $reason" }
                         mutableStatus.value =
-                            HubStatus.Failed("The hub on ${config.host}: $reason")
+                            HubStatus.Failed(
+                                "The hub on ${config.host} stopped: $reason. Turn it off and on " +
+                                    "again; the log says more.",
+                            )
                     }
                 }
             var started = false
@@ -184,7 +187,10 @@ public class PeerHub internal constructor(
                     @Suppress("TooGenericExceptionCaught") e: Exception,
                 ) {
                     val where = "${config.host}:${config.port}"
-                    val message = "The hub cannot start on $where: ${e.message}"
+                    val message =
+                        "The hub cannot start on $where: ${e.message}. If another program uses " +
+                            "this port, choose another one. If the address is this PC's " +
+                            "Tailscale address, check that Tailscale runs."
                     log.error(e) { "The hub cannot start on $where" }
                     mutableStatus.value = HubStatus.Failed(message)
                     throw HubStartException(message, e)
