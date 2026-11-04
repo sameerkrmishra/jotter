@@ -15,9 +15,9 @@ private const val POLL_MS = 20L
  *
  * So [exit] first waits, at most [awtWaitMs], for AWT to shut itself down, and starts a daemon
  * watchdog that halts the process if it is still alive [haltAfterMs] later. A halt skips shutdown
- * hooks and finalization, which is safe only because the editor was saved, the sync scope (with
- * the scheduler and the hub) finished and the store closed before: [closed] records that, and
- * [exit] refuses to run without it.
+ * hooks and finalization, which is safe only because [Closer] ran before: the editor was saved,
+ * the sync scope (with the scheduler) finished, the hub stopped and the store closed. [closed]
+ * records that, and [exit] refuses to run without it.
  */
 internal class Shutdown(
     private val awtAlive: () -> Boolean = ::awtThreadsAlive,

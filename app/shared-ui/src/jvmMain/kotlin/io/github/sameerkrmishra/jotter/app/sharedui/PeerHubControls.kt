@@ -101,6 +101,17 @@ public class PeerHubControls(
             problem
         }
 
+    /**
+     * Stops the hub and frees its port, but keeps the user's setting: as the app exits, so that a
+     * hub left on starts again with the app ([resume]).
+     */
+    public suspend fun stop() {
+        lock.withLock {
+            following?.cancel()
+            hub?.stop()
+        }
+    }
+
     override suspend fun turnOff() {
         lock.withLock {
             hub?.stop()

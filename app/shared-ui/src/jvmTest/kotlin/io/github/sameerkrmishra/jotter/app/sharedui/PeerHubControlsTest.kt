@@ -115,6 +115,26 @@ class PeerHubControlsTest {
         }
 
     @Test
+    fun stoppingFreesThePortAndKeepsTheHubOnForTheNextStart() =
+        runBlocking {
+            val first = controls()
+            assertNull(first.turnOn(first.settings))
+            waitFor { first.state.value is HubState.Running }
+            val port = (first.state.value as HubState.Running).address.substringAfterLast(':').toInt()
+
+            first.stop()
+
+            // The port is free: something else can listen on it at once.
+            java.net.ServerSocket(port, 1, java.net.InetAddress.getByName("127.0.0.1")).close()
+            assertTrue(first.settings.on)
+            val next = controls()
+            assertTrue(next.settings.on)
+            next.resume()
+            waitFor { next.state.value is HubState.Running }
+            next.turnOff()
+        }
+
+    @Test
     fun anOpenConfigFolderOfItsOwnIsTightenedButNotItsParent() =
         runBlocking {
             val open = PosixFilePermissions.fromString("rwxr-xr-x")

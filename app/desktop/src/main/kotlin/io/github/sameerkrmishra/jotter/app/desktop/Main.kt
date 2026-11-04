@@ -58,8 +58,9 @@ public fun main(args: Array<String>) {
             return
         }
     runApp(store, autoclose)
-    // The editor was saved before the window closed, and runApp finished the scope (the scheduler
-    // and the hub) and closed the store; only now may the process end, if need be by a halt.
+    // The editor was saved before the window closed, and runApp finished the scope (sync and the
+    // scheduler), stopped the hub and closed the store; only now may the process end, if need be
+    // by a halt.
     shutdown.closed()
     shutdown.exit(0)
 }
@@ -83,9 +84,11 @@ private fun showFailure(
 }
 
 /**
- * The store is closed after the scope is finished, as no query may still be running. `application`
- * must not exit the process itself, or that would never happen; `main()` does, through [Shutdown],
- * which also ends it if exiting hangs, as spike 0002 saw once and Xvfb runs showed in one in five.
+ * The store is closed after the scope is finished, as no query may still be running, and after the
+ * hub is stopped, by [Closer]: when the window closes, or first, on SIGTERM, SIGINT or SIGHUP,
+ * through a shutdown hook that also saves what the user typed. `application` must not exit the
+ * process itself, or that would never happen; `main()` does, through [Shutdown], which also ends
+ * it if exiting hangs, as spike 0002 saw once and Xvfb runs showed in one in five.
  */
 @Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
 private fun runApp(
@@ -118,6 +121,19 @@ private fun runApp(
             Dispatchers.IO,
             SyncControls(manager, scheduler, hub),
         )
+    val closer =
+        Closer(
+            keep = { app.keep().join() },
+            finish = { scope.coroutineContext.job.cancelAndJoin() },
+            // Stops it, but keeps the user's setting, so that it starts again with the app.
+            stopHub = { hub.stop() },
+            closeStore = store::close,
+        )
+    // A signal runs the shutdown hooks, but not the window's close: logout and system shutdown
+    // send SIGTERM. When the window's close got there first, this finds everything closed.
+    Runtime.getRuntime().addShutdownHook(
+        Thread({ runBlocking { closer.close(saveFirst = true) } }, "jotter-close-on-signal"),
+    )
     application(exitProcessOnExit = false) {
         val close = { app.requestExit(::exitApplication) }
         Window(onCloseRequest = close, title = "Jotter") {
@@ -125,8 +141,7 @@ private fun runApp(
             JotterApp(app)
         }
     }
-    runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-    store.close()
+    runBlocking { closer.close(saveFirst = false) }
 }
 
 /**

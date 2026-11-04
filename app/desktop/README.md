@@ -25,8 +25,12 @@ or holds it exclusively.
   `main()`, in `Main.kt`, excluded with its lambdas from the coverage gate in
   `jotter.root`. `Database.kt` opens the store and is tested.
 - **Exit.** Closing the window saves the open editor first. If that fails, the user
-  chooses to keep editing or to close without saving. Then `main()` finishes the view models' scope, closes
-  the store and ends the process through `Shutdown`. Closing checkpoints the WAL, unless another
+  chooses to keep editing or to close without saving. Then `main()`, through `Closer`, finishes
+  the view models' scope (sync and the scheduler), stops the hub (keeping the user's setting, so
+  that it starts again with the app), closes the store, and ends the process through `Shutdown`.
+  SIGTERM (logout, system shutdown), SIGINT and SIGHUP run a shutdown hook that does the same
+  through `Closer`, saving the open editor and the review first; each step is bounded, about 7 s
+  in all. Both paths take one lock and close once (`CloserTest`). Closing checkpoints the WAL, unless another
   process is reading or writing: then it gives up at once and the last connection
   to close does it (`core:sqlite`). So exit never waits for a lock. `Shutdown` waits
   up to 2 s for AWT to shut itself down before `exitProcess`: exiting at once
