@@ -102,7 +102,10 @@ class ShareViewModelTest {
                 model(note, FakeNotes(StorageBusyException(IllegalStateException()))).state,
             )
             assertEquals(
-                ShareState.Refused("The note could not be saved: disk full"),
+                ShareState.Refused(
+                    "The note could not be saved. Something unexpected went wrong. If it keeps " +
+                        "happening, report it and attach the debug log.",
+                ),
                 model(note, FakeNotes(IllegalStateException("disk full"))).state,
             )
         }

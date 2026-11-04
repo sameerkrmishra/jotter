@@ -5,7 +5,9 @@ import android.net.ConnectivityManager
 import android.os.Build
 import androidx.work.WorkManager
 import io.github.sameerkrmishra.jotter.app.sharedui.AppViewModel
+import io.github.sameerkrmishra.jotter.app.sharedui.DebugLogControls
 import io.github.sameerkrmishra.jotter.app.sharedui.SyncControls
+import io.github.sameerkrmishra.jotter.app.sync.AppInfo
 import io.github.sameerkrmishra.jotter.app.sync.BackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
@@ -13,8 +15,9 @@ import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
 import io.github.sameerkrmishra.jotter.app.sync.SyncTiming
 import io.github.sameerkrmishra.jotter.app.sync.TailnetCheck
+import io.github.sameerkrmishra.jotter.app.sync.describeOpenFailure
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
-import io.github.sameerkrmishra.jotter.core.storage.StorageBusyException
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
 import io.github.sameerkrmishra.jotter.core.sync.SyncEngine
@@ -30,6 +33,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import okio.Path.Companion.toOkioPath
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.minutes
@@ -82,6 +86,36 @@ internal class AppGraph(
 
     private val opening = lazy(::open)
 
+    /** Where the log is, outside every backup (ADR-0020). */
+    val logs: okio.Path = File(this.context.noBackupFilesDir, LOG_FOLDER).toOkioPath()
+
+    /** Saves the debug log through the Activity on the screen, which sets itself here. */
+    val debugExport = ScreenExport()
+
+    /** This app, for the debug log. */
+    private val appInfo: AppInfo by lazy {
+        @Suppress("DEPRECATION") // getPackageInfo(String, PackageInfoFlags) is API 33 and later.
+        val packages = this.context.packageManager
+        val version = packages.getPackageInfo(this.context.packageName, 0).versionName
+        AppInfo(
+            "android",
+            version ?: "unknown",
+            androidPlatform(
+                Build.VERSION.RELEASE,
+                Build.VERSION.SDK_INT,
+                Build.MANUFACTURER,
+                Build.MODEL,
+            ),
+        )
+    }
+
+    /** The debug log, with the backends if the notes are open, or why they are not. */
+    fun debugLog(): DebugLogControls =
+        when (val state = opened) {
+            is Opened.Ready -> androidDebugLog(appInfo, logs, state.manager, null, debugExport)
+            is Opened.Failed -> androidDebugLog(appInfo, logs, null, state.reason, debugExport)
+        }
+
     /** The notes and their sync, or why they could not be opened. Opened on first use. */
     val opened: Opened by opening
 
@@ -117,14 +151,14 @@ internal class AppGraph(
                     WorkManagerJobs(WorkManager.getInstance(context)),
                     background,
                 )
-            Opened.Ready(store, manager, sync, ui, io)
-        } catch (e: StorageBusyException) {
-            Opened.Failed("${file.path} is locked by another process. Try again. (${e.message})")
+            Opened.Ready(store, manager, sync, ui, io) { debugLog() }
         } catch (
             @Suppress("TooGenericExceptionCaught") e: RuntimeException,
         ) {
-            // The driver's exceptions are not part of NoteStore's API; the user sees why.
-            Opened.Failed("Cannot open ${file.path}: ${e.message}")
+            // The driver's exceptions are not part of NoteStore's API. The user sees what happened
+            // and what to do; the file stays as it is, and no new one is made in its place.
+            log.error(e) { "Cannot open the database ${file.path}" }
+            Opened.Failed(describeOpenFailure(e, file.path))
         }
     }
 
@@ -142,6 +176,8 @@ internal class AppGraph(
     }
 
     private companion object {
+        val log = Logger("android")
+
         /** The phone's model, such as "Pixel 8", to tell this device apart on other devices. */
         fun deviceName(): String = Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android"
     }
@@ -159,6 +195,7 @@ internal sealed interface Opened {
      * @property manager Its backends.
      * @property sync When it syncs.
      * @property io Where its blocking calls run.
+     * @param debugLog The debug log of the screens.
      */
     class Ready(
         val store: NoteStore,
@@ -166,6 +203,7 @@ internal sealed interface Opened {
         override val sync: AndroidSync,
         private val ui: CoroutineScope,
         val io: CoroutineDispatcher,
+        private val debugLog: () -> DebugLogControls,
     ) : Opened {
         /** The screens' state, made on first use, for as long as the process lives. */
         val app: AppViewModel by lazy {
@@ -179,6 +217,7 @@ internal sealed interface Opened {
                     sync.scheduler,
                     foldersUnavailable = FOLDERS_UNAVAILABLE,
                 ),
+                debugLog(),
             )
         }
     }

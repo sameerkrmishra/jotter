@@ -1,16 +1,22 @@
 package io.github.sameerkrmishra.jotter.app.android
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.ui.Modifier
 import io.github.sameerkrmishra.jotter.app.sharedui.CannotOpenNotes
+import io.github.sameerkrmishra.jotter.app.sharedui.DebugLogExport
 import io.github.sameerkrmishra.jotter.app.sharedui.JotterApp
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The app: the shared screens of `app:shared-ui` (ADR-0010) on the process's [AppGraph]. Their
@@ -28,13 +34,16 @@ public class MainActivity : ComponentActivity() {
         // screens out from under them and the keyboard.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        graph.debugExport.screen = documents
         when (val opened = graph.opened) {
-            is Opened.Failed ->
+            is Opened.Failed -> {
+                val debugLog = graph.debugLog()
                 setContent {
                     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                        CannotOpenNotes(opened.reason, ::finish)
+                        CannotOpenNotes(opened.reason, debugLog, ::finish)
                     }
                 }
+            }
             is Opened.Ready -> {
                 onBackPressedDispatcher.addCallback(this, BackToList(opened))
                 setContent {
@@ -43,6 +52,44 @@ public class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onDestroy() {
+        if (graph.debugExport.screen === documents) graph.debugExport.screen = null
+        // A picker still open answers this Activity no more: its export ends as cancelled.
+        documents.cancel()
+        super.onDestroy()
+    }
+
+    /**
+     * Saves the debug log where the user chooses, through Android's document picker (the Storage
+     * Access Framework): any folder, or a cloud drive's, that offers to take a file.
+     */
+    private val documents =
+        object : DebugLogExport {
+            private var waiting: CompletableDeferred<Uri?>? = null
+
+            private val picker =
+                registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) {
+                    waiting?.complete(it)
+                }
+
+            override suspend fun export(text: String): String? {
+                val answer = CompletableDeferred<Uri?>()
+                waiting = answer
+                picker.launch(DEBUG_LOG_FILE_NAME)
+                val uri = answer.await() ?: return null
+                withContext(Dispatchers.IO) {
+                    checkNotNull(contentResolver.openOutputStream(uri, "wt")) { "No stream" }.use {
+                        it.write(text.encodeToByteArray())
+                    }
+                }
+                return "Saved the debug log. Attach that file to your issue."
+            }
+
+            fun cancel() {
+                waiting?.complete(null)
+            }
+        }
 
     override fun onStart() {
         super.onStart()
