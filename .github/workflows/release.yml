@@ -1,0 +1,175 @@
+name: Release
+
+# Builds a release's files and puts them on a draft GitHub release, for the maintainer to check,
+# add the signed APK to and publish (RELEASING.md). Only a pushed `v*` tag makes a release. A
+# manual run is a dry run unless it is started on a tag with dry-run unticked: it builds, checks
+# and uploads the same files as a workflow artifact, and creates nothing. Never on pull requests or
+# branches.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Build and upload the files as a workflow artifact only; create no release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    # Pinned, not -latest: its squashfs-tools makes the AppImage (ADR-0020).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The version comes from gradle.properties (ADR-0019). A tag must name the same one, and its
+      # changelog entry must exist.
+      - id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          version=$(sed -n 's/^jotter\.versionName=//p' gradle.properties)
+          test -n "$version"
+          publish=false
+          if [[ $REF_TYPE == tag ]] && [[ $EVENT == push || $DRY_RUN == false ]]; then
+            publish=true
+          elif [[ $EVENT == workflow_dispatch && $DRY_RUN == false ]]; then
+            echo "::error::Only a run on a tag can make a release; this one is on $REF_NAME"
+            exit 1
+          fi
+          if [[ $REF_TYPE == tag && $REF_NAME != "v$version" ]]; then
+            echo "::error::Tag $REF_NAME does not match jotter.versionName $version"
+            exit 1
+          fi
+          if ! grep -q "^## $version " CHANGELOG.md; then
+            if [[ $publish == true ]]; then
+              echo "::error::CHANGELOG.md has no entry for $version"
+              exit 1
+            fi
+            echo "::warning::CHANGELOG.md has no entry for $version yet"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Version $version, publish: $publish"
+
+      # The JDK the AppImage bundles, and the only one Gradle may use, so that the build info
+      # below names it.
+      - id: jdk
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # No cache: a release is built from the tag and downloaded dependencies alone.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+
+      - name: Install squashfs-tools and Xvfb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends squashfs-tools xvfb xauth
+
+      - name: Build the APK, the CLI and the AppImage
+        env:
+          JOTTER_GRADLE_ARGS: >-
+            --no-build-cache --no-configuration-cache
+            -Porg.gradle.java.installations.auto-detect=false
+            -Porg.gradle.java.installations.auto-download=false
+            -Porg.gradle.java.installations.paths=${{ steps.jdk.outputs.path }}
+        run: |
+          # shellcheck disable=SC2086
+          ./gradlew $JOTTER_GRADLE_ARGS :app:android:assembleRelease :app:cli:distZip
+          app/desktop/scripts/appimage.sh "$PWD/build/appimage-out"
+
+      # Headless: the CLI from inside the AppImage, and the window on Xvfb.
+      - name: Smoke test the AppImage
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          JOTTER_SMOKE_GUI: "1"
+        run: app/desktop/scripts/smoke-appimage.sh "build/appimage-out/Jotter-$VERSION-x86_64.AppImage"
+
+      - name: Collect the files, build info and checksums
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          JDK: ${{ steps.jdk.outputs.path }}
+        run: |
+          mkdir dist
+          cp app/android/build/outputs/apk/release/android-release-unsigned.apk \
+            "dist/jotter-$VERSION-unsigned.apk"
+          cp app/cli/build/distributions/jotter.zip "dist/jotter-cli-$VERSION.zip"
+          cp "build/appimage-out/Jotter-$VERSION-x86_64.AppImage" dist/
+          {
+            echo "commit: $GITHUB_SHA"
+            echo "ref: $GITHUB_REF"
+            echo "runner: $ImageOS $ImageVersion"
+            echo "jdk: $("$JDK/bin/java" -XshowSettings:properties -version 2>&1 \
+              | sed -n 's/^ *java.vm.vendor = //p;s/^ *java.runtime.version = //p' | paste -sd' ')"
+            echo "appimage runtime jdk: $(grep -h '^JAVA_VERSION=\|^IMPLEMENTOR=' \
+              app/desktop/build/appimage/Jotter.AppDir/opt/jotter/lib/runtime/release | paste -sd' ')"
+            echo "mksquashfs: $(mksquashfs -version | head -1)"
+          } > dist/BUILDINFO.txt
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          cat dist/BUILDINFO.txt dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jotter-${{ steps.version.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  # A draft, never published by CI: the maintainer adds the signed APK and publishes it.
+  draft-release:
+    name: draft release
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: jotter-${{ needs.build.outputs.version }}
+          path: dist
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # The changelog's entry for this version, up to the next one.
+          awk -v v="$VERSION" '$0 ~ "^## " v " " {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+          {
+            echo
+            echo "Files: the AppImage holds the desktop app and the \`jotter\` command, with its own"
+            echo "Java runtime. \`jotter-cli-$VERSION.zip\` is the command alone, for Java 21 or newer."
+            echo "\`SHA256SUMS\` lists every file's hash, \`BUILDINFO.txt\` what built them."
+          } >> notes.md
+          gh release create "$TAG" --draft --verify-tag --title "Jotter $VERSION" \
+            --notes-file notes.md dist/*

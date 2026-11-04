@@ -14,6 +14,16 @@ app/cli/build/install/jotter/bin/jotter add "buy milk"
 `java` comes from `JAVA_HOME`, or else from `PATH`, and must be version 21 or
 newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 
+A release has the CLI twice ([ADR-0020](../../docs/adr/0020-linux-desktop-package.md)):
+as `jotter-cli-X.Y.Z.zip`, this distribution (`./gradlew :app:cli:distZip`), which needs
+Java 21; and inside the desktop app's AppImage, with its Java runtime, as `AppImage cli
+...` or through a symlink to the AppImage named `jotter` ([app:desktop](../desktop/README.md#the-appimage)).
+The AppImage's copy runs from `appImageDist` with its own start script,
+`src/main/scripts/appimage-script.template`: the same JVM flags and the runtime's base
+class data archive, but not this CLI's own archive, which JDK 21 cannot write the same way
+twice ([ADR-0020](../../docs/adr/0020-linux-desktop-package.md)). It is the convenient
+path, not the fast one: ADR-0006's 200 ms target is for this distribution.
+
 ## Commands
 
 | Command | What it does |

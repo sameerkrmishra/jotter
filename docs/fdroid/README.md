@@ -10,11 +10,11 @@ What F-Droid needs from Jotter, and what was checked
   colour, cut to the adaptive icon's visible 72 dp). No screenshots yet.
 - **Build recipe:** [io.github.sameerkrmishra.jotter.yml](io.github.sameerkrmishra.jotter.yml),
   a draft for `metadata/` in [fdroiddata](https://gitlab.com/fdroid/fdroiddata). The maintainer
-  submits it; [docs/releasing.md](../releasing.md) has the release steps it relies on.
+  submits it; [RELEASING.md](../../RELEASING.md) has the release steps it relies on.
 
 ## Before submitting
 
-1. Make the first release (docs/releasing.md), and fill in the recipe's `commit` and
+1. Make the first release (RELEASING.md), and fill in the recipe's `commit` and
    `AllowedAPKSigningKeys`.
 2. Check the recipe's `sudo` lines against F-Droid's current build server image: they install
    JDK 21, which the build requires.

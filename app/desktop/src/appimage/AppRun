@@ -1,0 +1,22 @@
+#!/bin/sh
+# The AppImage's entry point (docs/adr/0020-linux-desktop-package.md). It starts the CLI when the
+# AppImage is started under the name `jotter` (a symlink on PATH) or with `cli` as its first
+# argument, and the desktop app under any other name, such as the AppImage's own file name or
+# `jotter-desktop`, the desktop entry's Exec:
+#
+#   ln -s ~/Applications/Jotter-1.0.0-x86_64.AppImage ~/.local/bin/jotter
+#   jotter list
+#   ./Jotter-1.0.0-x86_64.AppImage cli list
+#
+# The AppImage runtime sets ARGV0 to the name it was started under, and APPDIR to its mount point.
+
+here=${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)}
+
+if [ "$1" = cli ]; then
+    shift
+    exec "$here/opt/jotter-cli/bin/jotter" "$@"
+fi
+case "${ARGV0##*/}" in
+    jotter) exec "$here/opt/jotter-cli/bin/jotter" "$@" ;;
+esac
+exec "$here/opt/jotter/bin/jotter" "$@"

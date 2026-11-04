@@ -43,6 +43,7 @@ private val PRIVATE_FILE: FileAttribute<Set<PosixFilePermission>> =
  * @param io Where the settings file is read and written.
  * @param defaults The settings before the user changed any.
  */
+@Suppress("TooManyFunctions") // One per thing the app or the user does with the hub.
 public class PeerHubControls(
     private val manager: BackendManager,
     private val settingsFile: Path,
@@ -100,6 +101,17 @@ public class PeerHubControls(
             if (problem == null) save(settings.copy(on = true))
             problem
         }
+
+    /**
+     * Stops the hub and frees its port, but keeps the user's setting: as the app exits, so that a
+     * hub left on starts again with the app ([resume]).
+     */
+    public suspend fun stop() {
+        lock.withLock {
+            following?.cancel()
+            hub?.stop()
+        }
+    }
 
     override suspend fun turnOff() {
         lock.withLock {

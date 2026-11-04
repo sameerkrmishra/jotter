@@ -23,7 +23,7 @@ commit are byte-identical ([ADR-0019](../../docs/adr/0019-release-builds.md)).
 `reproducible` workflow runs that on `main`, on tags and on pull requests that change the build.
 The version is `jotter.versionName` and `jotter.versionCode` in the root `gradle.properties`.
 Only with `JOTTER_KEYSTORE` (and its password in `JOTTER_KEYSTORE_PASSWORD`) is the APK signed:
-[docs/releasing.md](../../docs/releasing.md) has the maintainer's steps, and
+[RELEASING.md](../../RELEASING.md) has the maintainer's steps, and
 [docs/fdroid](../../docs/fdroid/README.md) the F-Droid recipe, store listing and dependency
 audit.
 

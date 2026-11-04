@@ -40,13 +40,28 @@ import kotlin.system.exitProcess
 
 private const val AUTOCLOSE_ARG = "--autoclose"
 private const val AUTOCLOSE_DELAY_MS = 4_000L
+private const val VERSION_ARG = "--version"
 
 /**
  * The desktop app and its composition root (ADR-0005). With `--autoclose` it closes itself a few
- * seconds after the window appears, to prove that a build starts.
+ * seconds after the window appears, to prove that a build starts. `--version` prints the version
+ * and exits without a window or the database, so that a package can be checked headless.
  */
 public fun main(args: Array<String>) {
+    if (VERSION_ARG in args) {
+        // jpackage's launcher sets it from packageVersion; `gradlew run` does not.
+        println("jotter ${System.getProperty("jpackage.app-version") ?: "dev"}")
+        exitProcess(0)
+    }
     val autoclose = AUTOCLOSE_ARG in args
+    val shutdown = Shutdown()
+    // Before the store opens, so that a signal at any time finds a way to close it.
+    val signals =
+        SignalClose {
+            shutdown.closed()
+            shutdown.afterSignal()
+        }
+    signals.install()
     val logs = installLinuxLogging("desktop", System::getenv)
     logUncaughtFailures()
     log.info { "Jotter ${desktopVersion()} starts on ${desktopPlatform()}" }
@@ -55,11 +70,22 @@ public fun main(args: Array<String>) {
             openStore()
         } catch (e: DatabaseUnavailableException) {
             showFailure(e.message.orEmpty(), autoclose, logs)
-            exitProcess(1)
+            // Nothing was opened.
+            shutdown.closed()
+            shutdown.exit(1)
+            return
         }
-    runApp(store, autoclose, logs)
+    signals.storeOpened(store::close)
+    if (!runApp(store, autoclose, logs, signals)) {
+        // SQLite undoes the write that did not finish when the process ends.
+        log.warn { "Jotter exits with the store open, as sync did not stop" }
+    }
     log.info { "Jotter exits" }
-    exitProcess(0)
+    // The editor was saved before the window closed, and runApp stopped sync and the hub and
+    // closed the store, or left it to SQLite if sync would not stop; only now may the process
+    // end, if need be by a halt.
+    shutdown.closed()
+    shutdown.exit(0)
 }
 
 private val log = Logger("desktop")
@@ -116,16 +142,20 @@ private fun showFailure(
 }
 
 /**
- * The store is closed after the scope is finished, as no query may still be running. `application`
- * must not exit the process itself, or that would never happen; `main()` does, which also ends it
- * if an AWT thread hangs, as spike 0002 saw once.
+ * The store is closed after the scope is finished, as no query may still be running, and after the
+ * hub is stopped, by [Closer]: when the window closes, or first, on SIGTERM, SIGINT or SIGHUP,
+ * through [signals]' shutdown hook, which also saves what the user typed. The [Closer] is attached
+ * before sync, the hub or the window start. `application` must not exit the process itself, or
+ * that would never happen; `main()` does, through [Shutdown], which also ends it if exiting hangs,
+ * as spike 0002 saw once and Xvfb runs showed in one in five. Returns whether the store is closed.
  */
 @Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
 private fun runApp(
     store: NoteStore,
     autoclose: Boolean,
     logs: okio.Path?,
-) {
+    signals: SignalClose,
+): Boolean {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val engine = SyncEngine(store, DeviceInfo(DEVICE_NAME, "linux"), Dispatchers.IO)
     // The keyring through the Secret Service, or the file the user chose (ADR-0016).
@@ -140,11 +170,21 @@ private fun runApp(
         )
     val scheduler = SyncScheduler(manager::syncAll)
     val hub = hubControls(manager, scope)
+    var app: AppViewModel? = null
+    val closer =
+        Closer(
+            keep = { app?.keep()?.join() },
+            finish = { scope.coroutineContext.job.cancelAndJoin() },
+            // Stops it, but keeps the user's setting, so that it starts again with the app.
+            stopHub = { hub.stop() },
+            closeStore = store::close,
+        )
+    signals.attach(closer)
     // A hub the user left on starts again with the app.
     scope.launch { hub.resume() }
     // In the app's scope, so that exit cancels a running sync before the store closes.
     scheduler.start(scope, store.notes.observeRevisionMark())
-    val app =
+    val viewModel =
         AppViewModel(
             store.notes,
             ConflictResolver(store),
@@ -157,8 +197,9 @@ private fun runApp(
                 DatabaseExport(store, Dispatchers.IO, sameFile = ::sameFileOnDisk),
             ),
         )
+    app = viewModel
     application(exitProcessOnExit = false) {
-        val close = { app.requestExit(::exitApplication) }
+        val close = { viewModel.requestExit(::exitApplication) }
         Window(onCloseRequest = close, title = "Jotter") {
             MenuBar {
                 Menu("File", mnemonic = 'F') {
@@ -168,11 +209,10 @@ private fun runApp(
                 }
             }
             AutoClose(autoclose, close)
-            JotterApp(app)
+            JotterApp(viewModel)
         }
     }
-    runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-    store.close()
+    return runBlocking { closer.close(saveFirst = false) }
 }
 
 /**

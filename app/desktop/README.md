@@ -53,12 +53,24 @@ it can be the database of another computer, or of this one after a loss.
   `main()`, in `Main.kt`, excluded with its lambdas from the coverage gate in
   `jotter.root`. `Database.kt` opens the store and is tested.
 - **Exit.** Closing the window saves the open editor first. If that fails, the user
-  chooses to keep editing or to close without saving. Then `main()` finishes the view models' scope, closes
-  the store and calls `exitProcess`. Closing checkpoints the WAL, unless another
+  chooses to keep editing or to close without saving. Then `main()`, through `Closer`, finishes
+  the view models' scope (sync and the scheduler), stops the hub (keeping the user's setting, so
+  that it starts again with the app), closes the store, and ends the process through `Shutdown`.
+  SIGTERM (logout, system shutdown), SIGINT and SIGHUP run a shutdown hook (`SignalClose`,
+  registered before the store opens) that does the same through `Closer`, saving the open editor
+  and the review first, then disposes the window, waits for AWT and starts the same watchdog as
+  a normal exit. Each step is bounded, about 15 s in all. Both paths take one lock and close once
+  (`CloserTest`, `SignalCloseTest`). If sync does not stop in time, the store is left open rather
+  than closed under it, the log says so, and SQLite undoes the write that did not finish. Closing checkpoints the WAL, unless another
   process is reading or writing: then it gives up at once and the last connection
-  to close does it (`core:sqlite`). So exit never waits for a lock. `exitProcess`
-  also ends the process if an AWT thread hangs after the window closes, as one did
-  in spike 0002.
+  to close does it (`core:sqlite`). So exit never waits for a lock. `Shutdown` waits
+  up to 2 s for AWT to shut itself down before `exitProcess`: exiting at once
+  deadlocked in about one run in five on Xvfb (libGLX's exit handler waiting for the
+  Xlib lock that AWT's toolkit thread held), leaving the process, and the hub's port,
+  alive. A daemon watchdog then halts the process if it is still alive 5 s after exit
+  began, printing `jotter: exit did not finish, halting`. That is safe only because
+  everything is saved and closed by then, so `Shutdown.exit` refuses to run before
+  `closed()`, which `main()` calls after the store is closed (`ShutdownTest`).
 - **Sync.** `main()` builds `app:sync`'s `BackendManager` and `SyncScheduler` on the
   store and starts the scheduler in the app's scope, so it syncs on start, 5 s after
   edits, every 5 minutes and on "Sync now" ([PLAN.md](../../docs/PLAN.md) §6.3). The
@@ -73,10 +85,49 @@ it can be the database of another computer, or of this one after a loss.
 - **`--autoclose`** closes the app a few seconds after the window appears and prints
   `jotter: window shown, closing`, to prove that a build starts. It also closes the
   window for a database that cannot be opened.
+- **`--version`** prints `jotter X.Y.Z` (the packaged version, or `dev` from `gradlew run`)
+  and exits, before any window or the database, so that a package can be checked headless.
 - **Runtime modules.** The jlink image gets `java.instrument` and `jdk.unsupported`,
   as `./gradlew :app:desktop:suggestRuntimeModules` says. Run that again when
   dependencies change. `core:sqlite` uses SQLite through JNI, so `java.sql` is not
   needed.
 - **`kotlinx-coroutines-swing`** gives `Dispatchers.Main`. Compose does not bring it.
 
-Packaging for release and the CI smoke launch come later.
+## The AppImage
+
+Releases ship the app as `Jotter-X.Y.Z-x86_64.AppImage`, with its own Java runtime and the
+CLI inside ([ADR-0020](../../docs/adr/0020-linux-desktop-package.md)). To build one, with
+squashfs-tools 4.6 or newer installed (or `MKSQUASHFS` set to its `mksquashfs`):
+
+```
+app/desktop/scripts/appimage.sh                 # build/dist/Jotter-X.Y.Z-x86_64.AppImage
+app/desktop/scripts/smoke-appimage.sh build/dist/Jotter-*-x86_64.AppImage
+app/desktop/scripts/reproducible-build.sh       # builds it twice, compares
+```
+
+`:app:desktop:appImageDir` assembles the directory in `build/appimage/Jotter.AppDir`, and
+`smoke-appimage.sh` also takes that directory. The smoke test runs the package in an empty
+environment with temporary `HOME`, XDG directories and `JOTTER_DB`: `--version`, then
+`cli add` and `cli list` (again with `-Xshare:on`, which fails without the runtime's class
+data archive), and `AppRun`'s choice for the names `jotter`, the desktop entry's `Exec` and
+another name. With
+`JOTTER_SMOKE_GUI=1` it also opens the window under `xvfb-run` with `--autoclose`, which the
+release workflow does; it never uses the caller's display.
+
+For users:
+
+```
+chmod +x Jotter-1.0.0-x86_64.AppImage
+./Jotter-1.0.0-x86_64.AppImage                  # the app
+./Jotter-1.0.0-x86_64.AppImage cli list         # the CLI
+ln -s "$PWD/Jotter-1.0.0-x86_64.AppImage" ~/.local/bin/jotter
+jotter list                                     # the CLI, under the name jotter
+```
+
+`AppRun` chooses: the CLI when the first argument is `cli` or the AppImage was started as
+`jotter`, the app under any other name. The desktop entry's `Exec` is therefore
+`jotter-desktop`, never `jotter`; tools that add AppImages to the menu replace it with the
+file's path. After an update, point the symlink at the new file. Without
+FUSE, `--appimage-extract-and-run` or `APPIMAGE_EXTRACT_AND_RUN=1` runs it all the same.
+The CLI inside starts more slowly than the standalone one (see `app/cli`'s README); the
+release's `jotter-cli-X.Y.Z.zip` is the standalone one, for machines with Java 21.

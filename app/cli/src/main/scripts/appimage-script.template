@@ -1,0 +1,19 @@
+#!/bin/sh
+# Starts jotter inside the desktop app's AppImage (docs/adr/0020-linux-desktop-package.md), with the
+# Java runtime bundled there. The flags are start-script.template's, with the runtime's base class
+# data archive (classes.jsa, made at build time) but without the CLI's own dynamic archive: one
+# made at build time would make the AppImage non-deterministic (JDK 21 writes a different archive
+# on every run), and one made at run time could not be told stale, as every file in the image has
+# the same time. ADR-0020 has the measured start-up times.
+
+self=\$0
+if [ -L "\$self" ]; then self=\$(readlink -f -- "\$self"); fi
+APP_HOME=\$(CDPATH= cd -- "\${self%/*}/.." && pwd -P) || exit 1
+classpath="$classpath"
+# The desktop app's runtime, next to this directory in the AppImage.
+java=\$APP_HOME/../jotter/lib/runtime/bin/java
+
+jvm_flags="-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:-UsePerfData -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 --enable-native-access=ALL-UNNAMED"
+
+# \$JAVA_OPTS and the flags split at spaces on purpose.
+exec "\$java" \$jvm_flags \$JAVA_OPTS -cp "\$classpath" ${mainClassName} "\$@"

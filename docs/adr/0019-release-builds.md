@@ -42,7 +42,7 @@ APK is signed with it; the passwords come from `JOTTER_KEYSTORE_PASSWORD` and
 (`jotter` if unset). Without it, as in CI and on F-Droid's server, the APK is unsigned. With
 `minSdk` 26, AGP signs with APK Signature Scheme v2 only, which sits in front of the zip's
 central directory and leaves its entries alone, so the signed APK is the unsigned one plus a
-signing block. [docs/releasing.md](../releasing.md) has the maintainer's steps.
+signing block. [RELEASING.md](../../RELEASING.md) has the maintainer's steps.
 
 **The release APK depends on the sources only.** `dependenciesInfo` is off (no Google metadata
 block), and `vcsInfo` is off (no `META-INF/version-control-info.textproto`, which differs
