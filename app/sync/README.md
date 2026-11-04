@@ -76,7 +76,11 @@ syncs it.
   password. The scheduler then waits its longest backoff, 30 minutes, instead of
   retrying quickly; "Sync now" still tries at once. A password missing from its store,
   as after restoring the database elsewhere, is `UNAUTHORIZED` too.
-  `changePassword` checks a new password with the server before storing it.
+  `changePassword` checks a new password with the server before storing it. Given
+  another `SecretPlace`, it moves the secret: it writes the new copy, then records the
+  new place in the backend's settings, then deletes the old copy; `Moved.leftBehind`
+  says where the old copy may stay if that delete failed. A keyring that does not
+  answer gives `PasswordChange.NoKeyring`, and nothing changes.
 - **Removing** deletes the passwords first: if the keyring cannot be reached, nothing
   is removed and the `SecretStoreException` says why, so no password is left behind.
 - **`SecretServiceStore`** runs `secret-tool` with the secret on stdin (`store`) or

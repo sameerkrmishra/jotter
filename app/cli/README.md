@@ -30,7 +30,7 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 | `jotter backends add PATH` | Adds a folder, such as a USB stick, as a backend and prints its id. `--name NAME`. A folder that is not a Jotter store yet needs `--new`, see below |
 | `jotter backends add webdav URL --user NAME` | Adds a collection on a WebDAV server and prints its id. The app password is read from the terminal without echo, or else from the first line of stdin, never from an argument. `--new` sets up a collection that is not a store yet; `--password-in-file` keeps the password in a file instead of the keyring, see below |
 | `jotter backends add peer HOST[:PORT]` | Adds the PC hub ([ADR-0015](../../docs/adr/0015-pc-hub-peer-protocol.md)) at the PC's Tailscale address or name, and prints its id. The pairing token the PC showed is read like a password. `--password-in-file` as for WebDAV |
-| `jotter backends password ID` | Replaces a WebDAV backend's app password, or the hub's pairing token after pairing again, read as above, after the server or hub accepted it |
+| `jotter backends password ID` | Replaces a WebDAV backend's app password, or the hub's pairing token after pairing again, read as above, after the server or hub accepted it. `--store file` or `--store keyring` keeps it there instead of where the backend kept it, see below |
 | `jotter backends remove ID` | Stops syncing with a backend and forgets it on this device. Its files stay where they are. `--keep-secret` leaves its password or token where it is, for when no keyring answers, and says where |
 | `jotter backends status [ID]` | Asks each backend, or one, whether it can be reached now, and prints that with its last sync and issues |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
@@ -93,6 +93,13 @@ the Secret Service (`secret-tool`, from `libsecret`), never to the database
 over SSH, adding fails with the reason, and `--password-in-file` keeps it in plain text
 in `$XDG_CONFIG_HOME/jotter/secrets.json`, readable by your user alone. A server that
 refuses the password ends a sync as `unauthorized`; `backends password` replaces it.
+`backends password --store file` moves a password into that file, as on a computer
+where no keyring answers, and `--store keyring` moves it back. The new copy is
+written first, then the backend records where it is, and then the old copy is
+deleted; if that fails, as when no keyring answers, it says where the old copy may
+still be and how to delete it, as `--keep-secret` does. Without `--store`, the
+password stays where the backend keeps it, and if that is a keyring that does not
+answer, nothing changes and the message names `--store file`.
 `backends remove` deletes the password first, and removes nothing if it cannot; `--keep-secret` then removes it anyway and says where the password stays and how to delete it (`secret-tool clear application jotter backend ID`, or the entry in the secrets file).
 
 `backends add peer` refuses an IPv4 address outside loopback and Tailscale's
@@ -130,7 +137,8 @@ backends and what sync has read. Opened elsewhere, with `--db FILE` or as the
 desktop's database, it is a restored device (ADR-0014): it keeps the id, and
 syncing gets back what its backends hold that it does not. Passwords and pairing
 tokens live in the keyring or the secrets file, never in the database, so on
-another computer `jotter backends password ID` enters them again. With no
+another computer `jotter backends password ID` enters them again, with
+`--store file` where that computer has no keyring. With no
 database yet it fails rather than export an empty one.
 
 ## Output

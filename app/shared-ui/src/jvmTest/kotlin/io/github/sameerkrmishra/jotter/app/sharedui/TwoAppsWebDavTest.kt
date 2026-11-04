@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
+import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.Secret
 import io.github.sameerkrmishra.jotter.app.sync.SecretKey
 import io.github.sameerkrmishra.jotter.app.sync.SecretStore
@@ -22,9 +23,11 @@ import io.github.sameerkrmishra.jotter.app.sync.SecretStoreUnavailableException
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 private const val TIMEOUT_MS = 20_000L
@@ -154,6 +157,72 @@ class TwoAppsWebDavTest {
                 awaitText("Its password is kept in plain text in /config/jotter/secrets.json")
                 assertEquals(1, secrets.file.secrets.size)
                 assertTrue(secrets.keyring.secrets.isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun restoredWithoutAKeyringThePasswordMayGoInTheFile() {
+        // The backend as another computer added it, with its password in that computer's keyring.
+        val record =
+            SyncedDevice("there").use { there ->
+                val added =
+                    runBlocking {
+                        there.manager.addWebDav(
+                            server.url,
+                            "me",
+                            Secret(server.password),
+                            setUpNewStore = true,
+                        )
+                    }
+                assertIs<AddResult.Added>(added)
+                there.store.backends
+                    .list()
+                    .single()
+            }
+        val secrets = TestSecrets()
+        val noKeyring =
+            object : SecretStore {
+                override suspend fun read(key: SecretKey): Secret? = throw unavailable()
+
+                override suspend fun write(
+                    key: SecretKey,
+                    secret: Secret,
+                ): Unit = throw unavailable()
+
+                override suspend fun delete(key: SecretKey): Unit = throw unavailable()
+
+                fun unavailable() =
+                    SecretStoreUnavailableException("Jotter cannot reach a keyring.")
+            }
+        val stores = SecretStores(noKeyring, secrets.file, "/config/jotter/secrets.json")
+        SyncedDevice("here", TestSecrets(secrets.keyring, secrets.file, stores)).use { device ->
+            device.store.backends.add(record)
+            screen(device) {
+                onNodeWithText(NEW_PASSWORD).performClick()
+                awaitText(PASSWORD_TITLE)
+                onNodeWithTag(NEW_PASSWORD_FIELD).performTextReplacement(server.password)
+                clickInDialog("Check and keep")
+                awaitText(NO_KEYRING_TITLE)
+                awaitText("Jotter cannot reach a keyring. Jotter can keep the app password")
+                clickInDialog("Cancel")
+                // Back to the password, which nothing stored.
+                awaitText(PASSWORD_TITLE)
+                assertTrue(secrets.file.secrets.isEmpty())
+                clickInDialog("Check and keep")
+                awaitText(NO_KEYRING_TITLE)
+                clickInDialog("Keep it in the file")
+                awaitText("in the secrets file, in plain text. It syncs now.")
+                awaitText("Jotter could not delete the old copy")
+                awaitText("Its password is kept in plain text in /config/jotter/secrets.json")
+                waitUntil(timeoutMillis = TIMEOUT_MS) {
+                    device.store.backends
+                        .list()
+                        .single()
+                        .lastAttempt
+                        ?.outcome == "SYNCED"
+                }
+                assertEquals(1, secrets.file.secrets.size)
             }
         }
     }

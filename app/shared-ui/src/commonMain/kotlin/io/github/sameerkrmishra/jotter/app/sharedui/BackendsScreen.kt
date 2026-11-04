@@ -227,7 +227,10 @@ private fun BackendsDialogs(backends: BackendsViewModel) {
             },
         )
     }
-    backends.changingPassword?.let { PasswordDialog(backends, it) }
+    // Hidden while the user decides whether the new password may go to the file instead.
+    backends.changingPassword
+        ?.takeIf { backends.noKeyring == null }
+        ?.let { PasswordDialog(backends, it) }
 }
 
 @Composable
@@ -260,7 +263,7 @@ private fun PasswordDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = backends::confirmPassword,
+                onClick = { backends.confirmPassword() },
                 enabled = !backends.busy && backends.davPassword.isNotEmpty(),
             ) { Text("Check and keep") }
         },

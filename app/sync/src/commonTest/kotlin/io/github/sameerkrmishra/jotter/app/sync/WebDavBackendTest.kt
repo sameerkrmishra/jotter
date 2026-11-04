@@ -30,7 +30,7 @@ class WebDavBackendTest {
     private val password = Secret("app-password-1")
 
     /** A server's collection, shared by every store opened on it, and what the stores were. */
-    private class Server : WebDavOpener {
+    internal class Server : WebDavOpener {
         val files = InMemoryBlobStore()
         var marked = false
         var answer: Reachability.Unreachable? = null
@@ -249,8 +249,7 @@ class WebDavBackendTest {
                 assertEquals(SecretPlace.FILE, backend.config.secretPlace)
                 assertEquals(password, file.read(SecretKey(backend.id, SecretKind.APP_PASSWORD)))
                 assertEquals(
-                    "Its password is kept in plain text in /config/secrets.json, as chosen when " +
-                        "it was added.",
+                    "Its password is kept in plain text in /config/secrets.json, as you chose.",
                     device.manager.whereSecretsAre(backend),
                 )
                 assertTrue(device.manager.remove(backend.id))
