@@ -107,11 +107,17 @@ echo "ok: started under another name, the app ran"
 if [[ ${JOTTER_SMOKE_GUI:-} == 1 ]]; then
     command -v xvfb-run >/dev/null || fail "JOTTER_SMOKE_GUI=1 needs xvfb-run"
     # xvfb-run sets DISPLAY to its own server; the caller's is never passed on.
-    out=$(env -i PATH=/usr/bin:/bin HOME="$tmp/home" TMPDIR="$tmp/tmp" \
+    # The timeout is on the app itself, inside xvfb-run, so that a hung app is killed rather than
+    # left holding the output open. Output goes to a file, to be shown whatever happens.
+    status=0
+    env -i PATH=/usr/bin:/bin HOME="$tmp/home" TMPDIR="$tmp/tmp" \
         XDG_DATA_HOME="$tmp/data" XDG_CONFIG_HOME="$tmp/config" XDG_CACHE_HOME="$tmp/cache" \
         JOTTER_DB="$tmp/notes.db" APPIMAGE_EXTRACT_AND_RUN=1 \
-        timeout 120 xvfb-run -a "$launcher" --autoclose 2>&1) || fail "--autoclose: $out"
-    grep -q "window shown, closing" <<<"$out" || fail "--autoclose printed: $out"
+        xvfb-run -a timeout -k 10 90 "$launcher" --autoclose >"$tmp/gui.log" 2>&1 || status=$?
+    shown=no
+    if grep -q "window shown, closing" "$tmp/gui.log"; then shown=yes; fi
+    [[ $status == 0 && $shown == yes ]] ||
+        fail "--autoclose: exit status $status, window shown: $shown; output: $(cat "$tmp/gui.log")"
     echo "ok: window shown on a virtual display, and closed"
 fi
 
