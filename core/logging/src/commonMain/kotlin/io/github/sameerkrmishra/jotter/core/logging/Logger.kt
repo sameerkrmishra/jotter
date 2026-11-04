@@ -27,22 +27,26 @@ public enum class LogLevel {
 }
 
 /**
- * Where the log of this process goes. An app's composition root calls [install] once, at start;
- * until then, and in tests that install nothing, every line is dropped. Shared code only makes
- * [Logger]s, so it never depends on where lines go (docs/adr/0020-local-logging.md).
+ * Where the log of this process goes. An app's composition root calls [install] once, at start.
+ * Until then, and in tests that install nothing, every line is built at every level and dropped:
+ * so the tests of each module run every log line, and one that throws is found there, not in the
+ * field. Shared code only makes [Logger]s, so it never depends on where lines go
+ * (docs/adr/0020-local-logging.md).
  */
 public object Logging {
     private class Installed(
-        val sink: LogSink,
+        val sink: LogSink?,
         val level: LogLevel,
         val clock: Clock,
     )
 
-    @Volatile
-    private var installed: Installed? = null
+    private val nowhere = Installed(null, LogLevel.DEBUG, Clock.System)
 
-    /** The lowest level that reaches the sink now, or null while nothing is installed. */
-    public val level: LogLevel? get() = installed?.level
+    @Volatile
+    private var installed = nowhere
+
+    /** The lowest level that is built now; [LogLevel.DEBUG] while nothing is installed. */
+    public val level: LogLevel get() = installed.level
 
     /**
      * Sends lines at [level] and above to [sink] from now on, stamped by [clock]. Replaces what was
@@ -58,37 +62,35 @@ public object Logging {
 
     /** Drops every line from now on, as before [install]. */
     public fun uninstall() {
-        installed = null
+        installed = nowhere
     }
 
-    internal fun isEnabled(level: LogLevel): Boolean {
-        val current = installed
-        return current != null && level >= current.level
-    }
+    internal fun isEnabled(level: LogLevel): Boolean = level >= installed.level
 
     /**
-     * Writes one line, after [redact]ing it, with [failure] as [describeFailure] gives it. A sink
-     * that throws loses the line and nothing else: logging must never end what it describes.
+     * Writes one line, after [redact]ing it, with [failure] as [describeFailure] gives it. A
+     * message or a sink that throws loses the line and nothing else: logging must never end what it
+     * describes.
      */
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     internal fun write(
         level: LogLevel,
         tag: String,
-        message: String,
+        message: () -> String,
         failure: Throwable?,
     ) {
         val current = installed
-        if (current == null || level < current.level) return
-        val record =
-            LogRecord(
-                current.clock.now(),
-                level,
-                tag,
-                oneLine(redact(message)),
-                failure?.let(::describeFailure),
-            )
+        if (level < current.level) return
         try {
-            current.sink.write(record)
+            val record =
+                LogRecord(
+                    current.clock.now(),
+                    level,
+                    tag,
+                    oneLine(redact(message())),
+                    failure?.let(::describeFailure),
+                )
+            current.sink?.write(record)
         } catch (_: Exception) {
             // Nowhere left to say it.
         }
@@ -141,6 +143,6 @@ public class Logger(
         failure: Throwable?,
         message: () -> String,
     ) {
-        if (Logging.isEnabled(level)) Logging.write(level, tag, message(), failure)
+        Logging.write(level, tag, message, failure)
     }
 }

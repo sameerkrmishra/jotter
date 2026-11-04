@@ -47,13 +47,17 @@ public class NoteStore private constructor(
 
     /** Opens a [NoteStore]. */
     public companion object {
+        /** The schema version of the databases this version of Jotter writes. */
+        public val SCHEMA_VERSION: Long get() = JotterDatabase.Schema.version
+
         /**
          * Opens the database file at [path], or creates it with a new [deviceId] named
          * [deviceName] if it does not exist. Blocking: call it off the UI thread.
          *
          * If the file cannot be opened for any other reason than a lock, this throws the SQLite
          * driver's exception (androidx `SQLiteException`, which is not part of this module's API)
-         * and leaves nothing open.
+         * and leaves nothing open. [storageProblemOf] tells what any of these failures means. None
+         * of them changes or replaces the file: a damaged or foreign file is never recreated.
          *
          * @param path The database file, on a local file system (see core/sqlite).
          * @param deviceName A name for this device, such as "Laptop". Used only when the database
@@ -63,7 +67,8 @@ public class NoteStore private constructor(
          * @param ids Where new ids come from. Random, except in a simulation that must replay.
          * @throws StorageBusyException if another process kept the database locked.
          * @throws IllegalStateException if the file was written by a newer version of Jotter, or
-         *   is a SQLite database that is not Jotter's, which is left untouched.
+         *   is a SQLite database that is not Jotter's, which is left untouched, or if upgrading it
+         *   to this version failed and was rolled back.
          */
         public fun open(
             path: String,

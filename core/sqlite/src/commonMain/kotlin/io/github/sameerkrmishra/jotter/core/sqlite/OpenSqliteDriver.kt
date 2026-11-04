@@ -52,11 +52,14 @@ internal const val BUSY_TIMEOUT_MILLIS = 5_000
  * @param applicationId the application's `PRAGMA application_id`. Not 0, which is what a database
  *   has when nothing set one.
  * @throws IllegalArgumentException if [applicationId] is 0.
- * @throws IllegalStateException if the file is a database of another application, if the
- *   database's schema version is newer than [schema]'s (it was written by a newer version of the
- *   app), if the file cannot be put into WAL mode, or if a migration left a dangling foreign key.
- * @throws androidx.sqlite.SQLiteException if the file cannot be opened, or creating or migrating
- *   the schema fails.
+ * @throws ForeignDatabaseException if the file is a database of another application.
+ * @throws DatabaseTooNewException if the database's schema version is newer than [schema]'s (it
+ *   was written by a newer version of the app).
+ * @throws DatabaseUpgradeException if migrating the schema failed, for example because a migration
+ *   left a dangling foreign key. The file is as it was.
+ * @throws IllegalStateException if the file cannot be put into WAL mode.
+ * @throws androidx.sqlite.SQLiteException if the file cannot be opened or is damaged, or if
+ *   creating the schema fails.
  */
 public fun openSqliteDriver(
     path: String,
@@ -115,9 +118,11 @@ private fun checkOpenable(
         val objects = statement.getLong(2)
         val isNew = version == 0L && objects == 0L
         val isOurs = found == applicationId.toLong() && (isNew || version != 0L)
-        check(isOurs || (isNew && found == 0L)) {
-            "Not a database of this application: its application id is $found, its schema " +
-                "version $version, and it has $objects schema objects"
+        if (!isOurs && !(isNew && found == 0L)) {
+            throw ForeignDatabaseException(
+                "Not a database of this application: its application id is $found, its schema " +
+                    "version $version, and it has $objects schema objects",
+            )
         }
         checkNotNewer(version, schemaVersion)
     }

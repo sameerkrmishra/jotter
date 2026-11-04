@@ -34,14 +34,16 @@ class LoggerTest {
     }
 
     @Test
-    fun nothingIsWrittenBeforeInstall() {
+    fun beforeInstallEveryLineIsBuiltAndDropped() {
         var built = false
-        logger.error {
+        logger.debug {
             built = true
             "lost"
         }
-        assertFalse(built)
-        assertNull(Logging.level)
+        assertTrue(built)
+        assertEquals(LogLevel.DEBUG, Logging.level)
+        // A message that throws costs the line only.
+        logger.warn(TestFailure("x")) { error("broken message") }
     }
 
     @Test
@@ -110,6 +112,14 @@ class LoggerTest {
                 .single()
                 .message.length,
         )
+    }
+
+    @Test
+    fun aMessageThatThrowsLosesTheLineOnly() {
+        Logging.install(sink)
+        logger.info { error("broken message") }
+        logger.info { "next" }
+        assertEquals("next", sink.records.single().message)
     }
 
     @Test
