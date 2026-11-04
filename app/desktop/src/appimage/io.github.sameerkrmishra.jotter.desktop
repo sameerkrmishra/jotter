@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Jotter
+Comment=Local-first notes
+Exec=jotter
+Icon=io.github.sameerkrmishra.jotter
+Terminal=false
+Categories=Office;Utility;
+Keywords=notes;markdown;sync;

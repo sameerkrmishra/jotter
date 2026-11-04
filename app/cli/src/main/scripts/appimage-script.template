@@ -1,0 +1,18 @@
+#!/bin/sh
+# Starts jotter inside the desktop app's AppImage (docs/adr/0020-linux-desktop-package.md), with the
+# Java runtime bundled there. The flags are start-script.template's, without its class data
+# archive: an AppImage is mounted at a new path on every run, an archive is valid only for the
+# classpath it was made with, and every jar in the image has the same time, so the archive could
+# never be told stale. So this is about 100 ms slower than the standalone CLI.
+
+self=\$0
+if [ -L "\$self" ]; then self=\$(readlink -f -- "\$self"); fi
+APP_HOME=\$(CDPATH= cd -- "\${self%/*}/.." && pwd -P) || exit 1
+classpath="$classpath"
+# The desktop app's runtime, next to this directory in the AppImage.
+java=\$APP_HOME/../jotter/lib/runtime/bin/java
+
+jvm_flags="-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -XX:-UsePerfData -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 --enable-native-access=ALL-UNNAMED"
+
+# \$JAVA_OPTS and the flags split at spaces on purpose.
+exec "\$java" \$jvm_flags \$JAVA_OPTS -cp "\$classpath" ${mainClassName} "\$@"

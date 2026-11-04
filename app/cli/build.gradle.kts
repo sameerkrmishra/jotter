@@ -18,6 +18,37 @@ tasks.startScripts {
         resources.text.fromFile(template)
 }
 
+// The CLI inside the desktop app's AppImage (ADR-0020): the same jars, and a start script that
+// runs the runtime bundled there. app:desktop takes the directory through `appImageCli`.
+val appImageStartScripts =
+    tasks.register<CreateStartScripts>("appImageStartScripts") {
+        val template = file("src/main/scripts/appimage-script.template")
+        inputs.file(template)
+        applicationName = "jotter"
+        mainClass = application.mainClass
+        classpath = files(tasks.jar, configurations.runtimeClasspath)
+        outputDir = layout.buildDirectory.dir("appimage-scripts").get().asFile
+        (unixStartScriptGenerator as TemplateBasedScriptGenerator).template =
+            resources.text.fromFile(template)
+    }
+
+val appImageDist =
+    tasks.register<Sync>("appImageDist") {
+        into(layout.buildDirectory.dir("appimage/jotter-cli"))
+        from(appImageStartScripts) {
+            into("bin")
+            exclude("*.bat")
+        }
+        from(files(tasks.jar, configurations.runtimeClasspath)) { into("lib") }
+    }
+
+configurations.consumable("appImageCli") {
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named("jotter-appimage-cli"))
+    }
+    outgoing.artifact(appImageDist.map { it.destinationDir }) { builtBy(appImageDist) }
+}
+
 // StartScriptTest runs the real start script from the installed distribution.
 tasks.test {
     dependsOn(tasks.installDist)

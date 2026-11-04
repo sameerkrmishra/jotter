@@ -32,12 +32,19 @@ import kotlin.system.exitProcess
 
 private const val AUTOCLOSE_ARG = "--autoclose"
 private const val AUTOCLOSE_DELAY_MS = 4_000L
+private const val VERSION_ARG = "--version"
 
 /**
  * The desktop app and its composition root (ADR-0005). With `--autoclose` it closes itself a few
- * seconds after the window appears, to prove that a build starts.
+ * seconds after the window appears, to prove that a build starts. `--version` prints the version
+ * and exits without a window or the database, so that a package can be checked headless.
  */
 public fun main(args: Array<String>) {
+    if (VERSION_ARG in args) {
+        // jpackage's launcher sets it from packageVersion; `gradlew run` does not.
+        println("jotter ${System.getProperty("jpackage.app-version") ?: "dev"}")
+        exitProcess(0)
+    }
     val autoclose = AUTOCLOSE_ARG in args
     val store =
         try {
