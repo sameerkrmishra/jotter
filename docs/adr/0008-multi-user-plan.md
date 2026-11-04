@@ -47,6 +47,17 @@ the hub), whose key its members hold. Every note belongs to exactly one space fo
 life. Being a member means holding the space's key and access to one of its backends.
 Nothing else grants access, and nothing less is possible on a dumb backend.
 
+**A new member gets the space key wrapped to them.** Each person also has an X25519 key pair
+for this, as Ed25519 can sign but not encrypt. A member adds a person by wrapping the space
+key to that person's X25519 public key, in a key file in the space's store named by the
+person, and signing it with their Ed25519 key. The public keys are exchanged in person, as a
+QR code or a code compared on both screens, never trusted from a backend. We chose this over
+a shared passphrase per space: a passphrase has to be passed around by some other channel,
+can be guessed offline from its key file, and after removing someone a new one would have to
+reach every remaining member. Wrapped keys need no shared secret, and a rotation simply
+wraps the new key to the remaining members, so their devices pick it up without anyone
+typing anything.
+
 **No accounts and no login.** A *person* is a member key pair (Ed25519), made on their first
 device and copied to their others with ADR-0007's recovery-code transfer, kept in the
 `SecretStore` ([ADR-0016](0016-where-secrets-live.md), [ADR-0018](0018-android-app.md)).
@@ -64,10 +75,12 @@ with their key; names are not unique and are not identity.
   a revision of another space is refused, like a segment in the wrong device folder today.
   Without this, a member of "Family" could write a revision with the id of someone's
   private note into the shared store and edit it.
-- **Personal fields leave the shared note.** Title, body, tags and trash stay shared and
-  merge as today. Pin and archive become per person: a small record per (space, note),
-  synced in that person's private space only. This changes the snapshot, so it is a new
-  sync format.
+- **Personal fields leave the shared note.** Title, body and tags stay shared and merge as
+  today. Today archive and trash are one last-writer-wins field, `state` (`ACTIVE`,
+  `ARCHIVED`, `TRASHED`). It splits: a shared `trashed` flag, last writer wins as now, and a
+  per-person `archived` flag. Pin and archive become per person: a small record per (space,
+  note), synced in that person's private space only. This changes the snapshot, so it is a
+  new sync format.
 - **Sharing an existing note copies it.** It becomes a new note in the space, with a new id
   and one root revision. Its private history is not revealed. The user then keeps or trashes
   the original.
@@ -86,15 +99,32 @@ with their key; names are not unique and are not identity.
   segments. The signature covers the revision's bytes and its space. A user revision
   without a valid signature from a member of its space is invalid, in private spaces too,
   so that nobody can pass off an unsigned revision as someone's private one.
-- **Membership** is a chain of signed records in the space's store: the creator signs the
-  first, and any member can add a person. A removal is a record too, and names the removed
-  person's revisions it still accepts, by their latest ids that the remover held; their
-  revisions outside those ancestors are invalid. That needs no clock, so every device judges
-  it alike.
+- **Membership** is a DAG of signed records in the space's store, like revisions: each names
+  the records its signer had seen. The creator signs the first, and any member can add a
+  person. A removal is a record too, and names the removed person's revisions it still
+  accepts, by their latest ids that the remover held. Their revisions that are not among
+  those ancestors are invalid, and so are records they signed that the removal does not
+  have among its ancestors. That needs no clock, so every device judges it alike.
+- **What a removal takes with it.** Under ADR-0014 a revision built on an invalid one is
+  invalid. So a removal also invalidates every honest member's edit built on a revision of the
+  removed person that the remover had not seen. Nothing of it is lost: ADR-0014 already lists
+  every invalid revision with its text (`ConflictResolver.invalid`), as set-aside text. A
+  device also offers its own person's set-aside edits to apply again, as a new user revision
+  on the head the note now shows, and others' to save as a note.
+- **When removal records disagree**, for example two members remove the same person, each
+  having seen different revisions of theirs: a revision of the removed person counts if any
+  removal of them accepts it. Taking the union loses the fewest honest edits built on them,
+  and costs nothing in safety, as each accepted revision was seen by a member who chose to
+  accept it. Two members who remove each other at the same time are both removed, as each
+  record is valid when it is judged against what its signer had seen.
 - **Merges are derived again.** In a shared space a received automatic merge counts only if
-  the receiver computes the same revision from its parents. This is the alternative ADR-0014
-  rejected for one person; with several people, a forged merge is an attack, not a bug.
-  It costs a merge per received merge.
+  the receiver, from the merge's two parents and their ancestors, derives the same text,
+  title, tags, last-writer-wins values and stamps, and the same losing parent, and so the
+  same id. Every byte that ADR-0013 hashes for a merge comes from its parents: its timestamp
+  and device id are those of the higher-stamped parent, not the device that made it
+  (ADR-0003), so the comparison is exact. This is the alternative ADR-0014 rejected for one
+  person; with several people, a forged merge is an attack, not a bug. It costs a merge per
+  received merge.
 
 **Conflicts.** The same rules, across people. The conflict screen shows who wrote each side,
 from the signatures. Two people resolving one conflict differently make two heads, which
@@ -137,8 +167,9 @@ recoverable by everyone who had it.
   in `unpushed` and in relaying.
 - Unauthenticated device ids and unsigned revisions: authorship is a format change and a new
   validity rule.
-- Pin and archive as shared fields of the snapshot: moving them out is a format change and
-  a migration of each person's existing notes.
+- Pin, and archive inside the shared `state` field, as shared fields of the snapshot:
+  splitting `state` and moving pin and archive out is a format change and a migration of
+  each person's existing notes.
 - Accepting received merges without deriving them: changing it costs CPU on every sync of a
   shared space.
 - Backends that grant all or nothing: shared WebDAV can only be guarded by keys and

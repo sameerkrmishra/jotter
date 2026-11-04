@@ -88,14 +88,23 @@ writes today, so compression, the JSON and its limits are unchanged. A file is a
 header (magic `JOTE`, a version byte, the 16-byte key id, a 12-byte nonce), then the
 ciphertext and its tag. The header is the associated data.
 
-- **Deterministic.** The nonce is the first 12 bytes of HMAC-SHA-256 under a nonce key, over
-  the plaintext, as in SIV. The same segment gives the same file, so the codec keeps its
-  KDoc's promise, a repair writes the same bytes, and ADR-0017's two winners still wrote one
-  thing. What it reveals is equality of two files, which their names already reveal.
-- **Primitives:** AES-256-GCM, HMAC-SHA-256, HKDF-SHA-256, all in the JDK, Android and
-  OpenSSL, so no native library is bundled ([ADR-0006](0006-native-compatible-shared-modules.md),
-  F-Droid). Three keys come from the store key by HKDF with fixed labels: content, nonce,
-  name. This replaces PLAN.md's XChaCha20 example.
+- **The cipher is AES-256-GCM-SIV** ([RFC 8452](https://www.rfc-editor.org/rfc/rfc8452)),
+  under the content key, with the header as associated data.
+- **Deterministic.** The nonce is the first 12 bytes of HMAC-SHA-256 under the nonce key,
+  over the plaintext. The same segment gives the same file, so the codec keeps its KDoc's
+  promise, a repair writes the same bytes, and ADR-0017's two winners still wrote one thing.
+  What it reveals is equality of two files, which their names already reveal. GCM-SIV is
+  built for a repeated nonce: should two different plaintexts ever get one nonce, that too
+  reveals only whether they are equal, where plain GCM would give away its authentication
+  key.
+- **Three separate keys** come from the store key by HKDF-SHA-256, each with its own fixed
+  label: `jotter-aead1 content`, `jotter-aead1 nonce`, `jotter-aead1 name`. No key is used
+  for two purposes.
+- **Where the primitives come from:** GCM-SIV and Argon2id are not in the JDK, so Bouncy
+  Castle (pure Java) on the JVM and Android, and OpenSSL 3.2 or later on `linuxX64`, which
+  has both. HMAC and HKDF are in all three. No native library is bundled
+  ([ADR-0006](0006-native-compatible-shared-modules.md), F-Droid). This replaces PLAN.md's
+  XChaCha20 example.
 - **Decoding order:** header; key id (unknown: the new `SegmentProblem.NO_KEY`, unread and
   tried again, like `FUTURE_FORMAT`); authenticate and decrypt (failure: `CORRUPT`); inflate;
   format number; keyed name hash; device and number against the folder, as `Puller` does
@@ -105,12 +114,16 @@ ciphertext and its tag. The header is the associated data.
 
 **Keys.** A **store key** is 32 random bytes with a random 16-byte key id. One person has one
 store key for all their backends, so there is one passphrase; each encrypted backend holds
-its own key file. A key file is plain JSON: the key id, the KDF and its parameters, a salt,
-and the store key wrapped with AES-256-GCM under a key from the passphrase, with the key id
-as associated data. The KDF is Argon2id (Bouncy Castle on the JVM and Android, OpenSSL 3.2
-or later on `linuxX64`; to be confirmed when built), at parameters a phone can bear in about
-a second. Key files are written once with `writeNew` and named by their content, like
-everything else. Several may exist for one key id.
+its own key file. A key file is plain JSON: the key id, the KDF and its parameters, a random
+16-byte salt, a random 12-byte nonce, and the store key wrapped with AES-256-GCM under the
+key from the passphrase, with the key id as associated data. Salt and nonce are new for each
+key file; a key file is written once, so a random nonce does no harm there. The KDF is
+Argon2id. Setup never goes below RFC 9106's second recommended setting, t = 3 passes,
+m = 64 MiB, p = 4 lanes, and raises t as far as a phone bears in about a second. A device
+refuses, as damaged, a key file that asks for less than that minimum or more than a cap
+(t ≤ 10, m ≤ 256 MiB, p ≤ 8), so a hostile key file cannot exhaust a phone or ask for a key
+that is cheap to guess. Key files are written once with `writeNew` and named by their
+content, like everything else. Several may exist for one key id.
 
 **On a device** the store key is a secret like any other
 ([ADR-0016](0016-where-secrets-live.md)): the Secret Service on Linux, or the 0600 file the
@@ -137,9 +150,30 @@ offers the recovery code to write down, and says this in plain words.
 files. New segments use it; old files keep the old key, as nothing is rewritten. The new key
 is never wrapped under the old one, so a device that has only the old key, such as a lost
 phone, cannot follow; the user enters the new passphrase on each remaining device, and
-revokes the lost one's backend access (hub `unpair`, a new WebDAV app password). Devices keep
-every old key to read old files. Rotation protects the future only: the lost device already
-holds every note in plain text. A **passphrase change** alone writes a new key file for the
+revokes the lost one's backend access where that is possible (hub `unpair`, a new WebDAV app
+password).
+
+**After a rotation the old key is read-only.** The rotating device writes a *rotation record*
+on each backend, sealed under the new key: the retired key id and the names of every file
+under that key on that backend at that moment. From then on a device accepts a file under a
+retired key only if a rotation record names it; any other is left unread as `RETIRED_KEY`, a
+new `SegmentProblem`. So a lost device that still holds the old key cannot add files that
+count, even where its access cannot be revoked, as on a USB stick or a local folder. A
+rotation record is itself a file under the new key, so a later rotation names it in turn, and
+the chain holds. Two rotations from the same old key both stand: a file counts if either
+names it.
+
+- **What it costs:** a device that was offline across a rotation may hold segments under the
+  old key that are recorded, or even published, but named in no rotation record. Once it has
+  the new key it gives those segments up (ADR-0014's rule for a segment that cannot be
+  published), and pushes their revisions again under the new key. Until the user enters the
+  new passphrase there, its new edits reach no one.
+- **The limit, plainly:** a revoked device can still read everything written up to the
+  rotation, on any backend it can reach, and it already holds every note of that time in
+  plain text. It can also still delete files where its access cannot be revoked. Rotation
+  protects only what comes after.
+
+Devices keep every old key to read old files. A **passphrase change** alone writes a new key file for the
 same key; the old file stays, so the old passphrase still opens the key for anyone who holds
 it and the backend. Retiring old material for good is a new store (below).
 
@@ -186,9 +220,9 @@ decrypts with one and encrypts with the other.
 **What the later change breaks or changes** (all inside `core:sync`, plus a format record):
 `SegmentCodec` gains a name and a key lookup, and moves from `SyncSeams` to `SyncTarget` so
 each backend has its own; `SYNC_CODEC` goes; `device.json` goes through the codec;
-PLAN.md §6.2's name rule becomes "the codec's name hash"; a new `SegmentProblem.NO_KEY`;
-`SecretKey` names a key id, not only a backend. No backend, no `BlobStore` method, no merge
-rule and no revision byte changes.
+PLAN.md §6.2's name rule becomes "the codec's name hash"; new `SegmentProblem`s `NO_KEY`
+and `RETIRED_KEY`; `SecretKey` names a key id, not only a backend. No backend, no
+`BlobStore` method, no merge rule and no revision byte changes.
 
 ## Consequences
 
@@ -205,18 +239,33 @@ rule and no revision byte changes.
 - Metadata stays visible: device count, activity times, sizes.
 - Losing every device and the passphrase loses the backend's copy for good.
 - Key files allow offline passphrase guessing.
-- Rotation and passphrase changes protect the future only; old files and old key files stay
-  until the whole store is replaced by hand.
+- Rotation and passphrase changes protect the future only: a revoked device reads
+  everything up to the rotation, and old files and old key files stay until the whole store
+  is replaced by hand.
 - Migration costs a second store, a full upload, a passphrase on every device, and manual
   deletion of the old files.
-- Argon2id needs Bouncy Castle (or similar) on the JVM and Android, a new dependency.
+- GCM-SIV and Argon2id need Bouncy Castle on the JVM and Android, a new dependency, and
+  OpenSSL 3.2 or later on `linuxX64`.
+- A device offline across a rotation must re-encrypt and push again what it had not
+  published in time.
 - With the Linux file fallback, the store key is in plain text in the home directory.
 
 ## Alternatives considered
 
+- **Rotation that leaves the old key writable:** simpler, and no device has to push again,
+  but a lost device could go on adding files that count to any backend whose access cannot
+  be revoked.
 - **Derive the encryption key from the passphrase directly**, as PLAN.md's example implied:
   no key file, but a passphrase change then means re-encrypting everything, which immutable
   files forbid, and there is nothing to show as a recovery code.
+- **AES-SIV ([RFC 5297](https://www.rfc-editor.org/rfc/rfc5297)):** deterministic by
+  itself, with no nonce key, and in Bouncy Castle and OpenSSL too. Not chosen because its
+  CMAC is a serial pass over the whole segment, up to 32 MiB, where GCM-SIV's POLYVAL uses
+  the carry-less multiply that phones and PCs accelerate, as for GCM. With the nonce derived
+  by HMAC, GCM-SIV is just as deterministic, and keeps its misuse resistance as a second
+  line.
+- **AES-256-GCM with the HMAC-derived nonce:** in the JDK, so no Bouncy Castle for the
+  cipher, but a home-made SIV, and a repeated nonce would be fatal rather than harmless.
 - **A random nonce (XChaCha20-Poly1305 or AES-GCM):** standard, but the same segment would
   give different files, against the codec's contract and the reasoning of ADR-0014 and
   ADR-0017. A synthetic nonce costs one HMAC.
