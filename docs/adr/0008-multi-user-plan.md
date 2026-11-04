@@ -119,8 +119,10 @@ with their key; names are not unique and are not identity.
   and costs nothing in safety, as each accepted revision was seen by a member who chose to
   accept it. **Two members who remove each other at the same time are both removed.**
   Neither record is an ancestor of the other, so by the exception above each stands, and
-  each voids only what its target signed after it in the DAG. Whether two records are
-  concurrent is read from the DAG alone, so every device computes the same members. If
+  each voids what its target signed that it does not have among its ancestors, except the
+  other removal record. Honest edits built on what is voided stay visible as set-aside
+  text, as above. Whether two records are concurrent is read from the DAG alone, so every
+  device computes the same members. If
   nobody is left, the space can no longer change; its notes stay readable, and anyone who
   held its key can start a new space from them.
 - **Merges are derived again.** In a shared space a received automatic merge counts only if

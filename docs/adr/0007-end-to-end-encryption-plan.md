@@ -124,8 +124,8 @@ Argon2id. Setup never goes below RFC 9106's second recommended setting, t = 3 pa
 m = 64 MiB, p = 4 lanes. Memory and lanes stay fixed there; setup raises only t, as far as a
 phone bears in about a second. A device refuses, as damaged, a key file that asks for less
 than that minimum or more than a cap (t ≤ 10, m = 64 MiB at most, as more can exhaust a
-phone's Java heap under Bouncy Castle, p ≤ 4), so a hostile key file cannot exhaust a phone or ask for a key
-that is cheap to guess. Key files are written once with `writeNew` and named by their
+phone's Java heap under Bouncy Castle, p ≤ 4), so a hostile key file cannot exhaust a
+phone or ask for a key that is cheap to guess. Key files are written once with `writeNew` and named by their
 content, like everything else. Several may exist for one key id.
 
 **On a device** the store key is a secret like any other
