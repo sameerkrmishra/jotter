@@ -66,7 +66,9 @@ app/desktop/scripts/reproducible-build.sh       # builds it twice, compares
 `:app:desktop:appImageDir` assembles the directory in `build/appimage/Jotter.AppDir`, and
 `smoke-appimage.sh` also takes that directory. The smoke test runs the package in an empty
 environment with temporary `HOME`, XDG directories and `JOTTER_DB`: `--version`, then
-`cli add` and `cli list`, and the CLI through a symlink named `jotter`. With
+`cli add` and `cli list` (again with `-Xshare:on`, which fails without the runtime's class
+data archive), and `AppRun`'s choice for the names `jotter`, the desktop entry's `Exec` and
+another name. With
 `JOTTER_SMOKE_GUI=1` it also opens the window under `xvfb-run` with `--autoclose`, which the
 release workflow does; it never uses the caller's display.
 
@@ -81,7 +83,9 @@ jotter list                                     # the CLI, under the name jotter
 ```
 
 `AppRun` chooses: the CLI when the first argument is `cli` or the AppImage was started as
-`jotter`, the app otherwise. After an update, point the symlink at the new file. Without
+`jotter`, the app under any other name. The desktop entry's `Exec` is therefore
+`jotter-desktop`, never `jotter`; tools that add AppImages to the menu replace it with the
+file's path. After an update, point the symlink at the new file. Without
 FUSE, `--appimage-extract-and-run` or `APPIMAGE_EXTRACT_AND_RUN=1` runs it all the same.
 The CLI inside starts more slowly than the standalone one (see `app/cli`'s README); the
 release's `jotter-cli-X.Y.Z.zip` is the standalone one, for machines with Java 21.

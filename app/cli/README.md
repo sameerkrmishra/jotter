@@ -19,8 +19,10 @@ as `jotter-cli-X.Y.Z.zip`, this distribution (`./gradlew :app:cli:distZip`), whi
 Java 21; and inside the desktop app's AppImage, with its Java runtime, as `AppImage cli
 ...` or through a symlink to the AppImage named `jotter` ([app:desktop](../desktop/README.md#the-appimage)).
 The AppImage's copy runs from `appImageDist` with its own start script,
-`src/main/scripts/appimage-script.template`: the same JVM flags, but no class data
-archive, because the AppImage's mount point changes on every run.
+`src/main/scripts/appimage-script.template`: the same JVM flags and the runtime's base
+class data archive, but not this CLI's own archive, which JDK 21 cannot write the same way
+twice ([ADR-0020](../../docs/adr/0020-linux-desktop-package.md)). It is the convenient
+path, not the fast one: ADR-0006's 200 ms target is for this distribution.
 
 ## Commands
 
