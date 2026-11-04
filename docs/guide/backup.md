@@ -5,22 +5,46 @@ you against mistakes that sync would copy everywhere, such as a note deleted for
 
 ## What to back up
 
-| Platform | Back up | Where |
+| Platform | Back up | How |
 |---|---|---|
-| Linux | The notes file `jotter.db` | `~/.local/share/jotter/` (see [where Jotter keeps things](README.md#where-jotter-keeps-things-on-linux)) |
-| Android | Nothing by hand: you cannot reach the file. Use sync, and Android's own backup | Below |
+| Linux | The notes file, `~/.local/share/jotter/jotter.db` (see [where Jotter keeps things](README.md#where-jotter-keeps-things-on-linux)) | **Export database**, or copy the file with Jotter closed |
+| Android | The notes file, which only Jotter can reach | **Export database**, sync, and Android's own backup |
 
-That one file holds all your notes, their history, your tags and the list of backends. While
-Jotter runs, recent changes may also sit in `jotter.db-wal` next to it.
+That one file holds all your notes, their history, the trash, your tags, and which backends
+the device syncs with.
 
-**Passwords and pairing tokens are not in the notes file.** They are in your keyring, or in
+**Passwords and pairing tokens are not in it.** They are in your keyring, or in
 `~/.config/jotter/secrets.json` if you chose that, and on Android in a place no backup
-copies. After a restore on another device you enter them again, so you need not back them
+copies. After restoring a copy you enter them again (see below), so you need not back them
 up.
 
-## Make a backup on Linux
+## Make a backup: Export database
 
-**The simple way: with Jotter closed.**
+Export database writes a checked copy of the notes file, also while Jotter runs and syncs.
+
+**Desktop:** **File** → **Export database…**, or **Export database…** at the foot of the
+**Sync** screen. Press **Choose where…**, pick a folder and a file name (Jotter suggests
+`jotter-notes.db`), and press **Save**. Jotter says "Exported your notes to ... Passwords and
+pairing tokens are not in it: after restoring it, enter them again."
+
+**Android:** **Sync** → **Export database…** at the foot of the screen → **Choose where…**.
+Android's file picker opens: choose a place, such as **Downloads** or a cloud drive, and
+press **Save**. Copy the file off the phone if you want it safe from losing the phone.
+The Android app cannot load a copy back yet. On a computer you can read it with
+`jotter --db ~/Downloads/jotter-notes.db list`, or restore it there as below.
+
+**Command:**
+
+```
+mkdir -p ~/Backups
+jotter export-database ~/Backups/jotter-2026-11-04.db
+```
+
+The command refuses to overwrite a file unless you add `--replace`.
+
+To see what a copy holds: `jotter --db ~/Backups/jotter-2026-11-04.db list`.
+
+## Or: copy the file with Jotter closed
 
 1. Close the desktop app, and wait for any `jotter` command to finish.
 2. Check that only `jotter.db` is left:
@@ -30,30 +54,14 @@ up.
    ```
 
    If `jotter.db-wal` is still there (after a crash, for example), run `jotter list` once
-   and look again. Jotter tidies it up when it closes.
-3. Copy the file, with the date in its name:
+   and look again. Jotter tidies it up when it closes. Never copy `jotter.db` alone while
+   that file is there: recent changes may be in it.
+3. Copy the file:
 
    ```
    mkdir -p ~/Backups
    cp ~/.local/share/jotter/jotter.db ~/Backups/jotter-2026-11-04.db
    ```
-
-**While Jotter runs.** Copying `jotter.db` alone can miss recent changes. Use SQLite's own
-copy instead. It needs the `sqlite3` program (package `sqlite` or `sqlite3`). The target
-file must not exist yet:
-
-```
-sqlite3 ~/.local/share/jotter/jotter.db "VACUUM INTO '$HOME/Backups/jotter-live.db'"
-```
-
-**Check the backup.** Both ways, make sure the copy opens and holds your notes:
-
-```
-sqlite3 ~/Backups/jotter-live.db "PRAGMA integrity_check"
-jotter --db ~/Backups/jotter-live.db list
-```
-
-The first must print `ok`. The second lists the notes in the backup.
 
 ## Restore on the same computer
 
@@ -83,8 +91,8 @@ backup come back, as long as a backend still holds them. Nothing else is needed.
 ## Restore on a new computer, or move to one
 
 1. [Install Jotter](install.md) on the new computer, but do not start it yet.
-2. Copy your backup (or the old computer's `jotter.db`, with Jotter closed there) into
-   place on the new one:
+2. Copy your exported copy (or the old computer's `jotter.db`, with Jotter closed there)
+   into place on the new one:
 
    ```
    mkdir -p ~/.local/share/jotter
@@ -92,10 +100,13 @@ backup come back, as long as a backend still holds them. Nothing else is needed.
    ```
 
 3. Start Jotter and open **Sync**. Your backends are listed:
-   - A **WebDAV server** says Jotter "could not read this backend's password", and a **PC
-     hub** that it "could not read this hub's pairing token". Make a new app password, or
-     pair this computer again on the PC, and enter it with **Enter new password** (command:
-     `jotter backends password ID`).
+   - A **WebDAV server** says "Jotter could not read this backend's password: the keyring
+     may be locked, or the password is not stored on this device, as after restoring the
+     notes on another computer. Unlock your keyring, or enter the password again." A **PC
+     hub** says the same of "this hub's pairing token". Press **Enter new password** and
+     enter the app password, or a new token after pairing this computer again on the PC
+     (command: `jotter backends password ID`). The new computer needs a keyring for this
+     if the old one used one.
    - A **USB folder** syncs if it is at the same path. If not, remove it and add it again
      with the new path. That copies your notes there again, which is harmless.
 
@@ -133,9 +144,11 @@ old one) includes Jotter's notes file and nothing else: not your passwords or to
 not the app's settings. Google's cloud backup includes it only when the backup is encrypted
 with your screen lock. On Android 8.0 and 8.1, Jotter is left out of backups altogether.
 
-After Android restores Jotter, your notes are there. Open **Sync**: each backend says Jotter
-could not read its password or pairing token. Press **Enter new password** and enter an
-app password, or a new token after pairing the phone again on the PC. Then sync brings in
+After Android restores Jotter, your notes are there. Open **Sync**: a WebDAV server says
+"This backend's password is not stored on this phone, as after restoring your notes from a
+backup or another device, which never hold passwords. Enter the password again." The PC hub
+says the same of its pairing token, and asks you to pair this phone on the PC again. Press
+**Enter new password** and enter the app password, or the new token. Then sync brings in
 what changed since the backup.
 
 **Moving to a new phone.** The simplest way is sync:
@@ -154,7 +167,10 @@ pair your devices again and enter the new tokens.
 
 ## Checked
 
-On Linux with the command: both backup ways, the checks, a restore on the same account (a
+Export database on all three: with the command (also while another program held the file
+open and had just written to it), from the desktop's **File** menu, and on the Android
+emulator through the file picker; the phone's copy was then read on Linux. On Linux with the
+command: copying with Jotter closed, a restore on the same account (a
 note written after the backup came back at the next sync), a restore into a new account (the
 WebDAV password had to be entered again), starting fresh after a damaged file, and recovering
 a damaged file on a USB folder. On the desktop app: deleting the hub's folder and turning

@@ -59,7 +59,9 @@ The folder can also be one that another program copies between your computers.
 4. The first time, Jotter asks **Set this server folder up for Jotter?** Press **Set up
    and add**. On your other devices the folder is added at once.
 
-On Linux the password goes to your desktop's keyring. If there is none, Jotter asks
+On Android the password is kept on the phone only, sealed with a key in the Android
+Keystore, and no backup copies it. On Linux it goes to your desktop's keyring. If there is
+none, Jotter asks
 **Keep the password in a file?** **Keep it in the file** stores it in
 `~/.config/jotter/secrets.json`, which only you can read, in plain text.
 

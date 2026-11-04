@@ -56,7 +56,9 @@ Other editor messages:
 | The server refused the user name or app password | Make a new app password and enter it ([how](sync-status.md#the-status-of-a-backend)) |
 | The PC hub refused this device's pairing token | Pair this device again on the PC and enter the new token |
 | The PC hub answers, but its folder is not set up | On the PC, turn the hub off and on |
-| Jotter could not read this backend's password, or this hub's pairing token | Unlock your keyring (log in to your desktop), or enter it again. Normal after a restore on another device |
+| Jotter could not read this backend's password (or this hub's pairing token): the keyring may be locked, or the password is not stored on this device | Linux. Unlock your keyring (log in to your desktop), or enter it again with **Enter new password**. Normal after a restore on another computer |
+| Jotter could not read this backend's password: Jotter cannot reach a keyring | Linux, with no keyring, as over SSH. Run it from your desktop session |
+| This backend's password is not stored on this phone (or this hub's pairing token) | Android, after a restore. Press **Enter new password** and enter it again; for the hub, pair the phone on the PC again first |
 | Not fully synced: N files could not be read | Nothing: it is tried again soon |
 | Stopped part way | Nothing: the next sync goes on |
 | Not synced: ... A newer version of Jotter may be able to use it | Update Jotter |
@@ -84,6 +86,23 @@ in [Issues](sync-status.md#issues).
 | The hub refused this pairing token | Pair the device again on the PC, and copy the new token exactly |
 | The hub at ... answers, but its folder is not set up | Turn the hub on, on the PC |
 
+## Export database
+
+| The message starts with | What to do |
+|---|---|
+| ... exists already, so it was left alone | Choose a new name, or add `--replace` (command) |
+| That is the notes file Jotter is using | Choose another name or folder for the copy |
+| The folder ... does not exist | Choose another place |
+| ... is a folder. Choose a file name for the copy | Give a file name, not only a folder |
+| Jotter is not allowed to write in ... | Choose a folder you may write to |
+| There is not enough free space in ... for the copy | Free some space, or choose another place |
+| The disk at ... could not be written | If it is a removable drive, plug it in, then try again |
+| Another Jotter program kept the notes busy for too long | Try again |
+| The copy could not be written to ... | Try again. If it keeps happening, report it with the debug log |
+
+Your notes are never changed by a failed export, and no half-written copy is left under the
+name you chose.
+
 ## The PC hub
 
 - **The hub is not running: ...** Read the reason. If another program uses the port, choose
@@ -110,6 +129,8 @@ in [Issues](sync-status.md#issues).
 
 These messages were made on purpose and read back with the command: a file that is not a
 database, another program's database, a damaged file, a newer version's file, a read-only
-file and folder, a locked file, missing and empty folders, a refused and a corrected password,
-a missing password after a restore, an unpaired device, an address outside Tailscale, plain
+file and folder, a locked file, export to an existing file, the live file, a missing and a
+read-only folder and a folder name, missing and empty folders, a refused and a corrected password,
+a missing password after a restore (also on the desktop app and the Android emulator), an
+unpaired device, an address outside Tailscale, plain
 `http`, and an unknown server. The rest are quoted from the program's text.
