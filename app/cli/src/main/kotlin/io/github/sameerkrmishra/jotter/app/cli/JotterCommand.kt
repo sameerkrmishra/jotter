@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.CoreCliktCommand
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.options.option
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
+import io.github.sameerkrmishra.jotter.app.sync.installLinuxLogging
 import io.github.sameerkrmishra.jotter.app.sync.linuxSecretStores
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import java.io.Console
@@ -61,12 +62,15 @@ internal class JotterCommand(
             BackendsCommand(sync),
             ImportCommand(location),
             ExportCommand(location),
+            DebugLogCommand(sync),
         )
     }
 
     override fun help(context: Context): String = "Local-first notes, on the command line."
 
     override fun run() {
+        // Before anything that may log. Without HOME there is no log at all.
+        installLinuxLogging("cli", currentContext.readEnvvar)
         sync.readEnvvar = currentContext.readEnvvar
         location.path =
             databasePath(databaseOption, currentContext.readEnvvar, System.getProperty("user.home"))

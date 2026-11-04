@@ -18,6 +18,13 @@ tasks.startScripts {
         resources.text.fromFile(template)
 }
 
+// The version the debug log names (ADR-0019: from gradle.properties only).
+tasks.jar {
+    val version = providers.gradleProperty("jotter.versionName")
+    inputs.property("version", version)
+    manifest { attributes("Implementation-Version" to version.get()) }
+}
+
 // StartScriptTest runs the real start script from the installed distribution.
 tasks.test {
     dependsOn(tasks.installDist)
@@ -30,6 +37,7 @@ dependencies {
     implementation(projects.core.storage)
     implementation(projects.core.sync)
     implementation(projects.app.sync)
+    implementation(projects.core.logging)
     implementation(projects.interop.keepImport)
     implementation(projects.interop.markdownExport)
     // The exception NoteStore.open lets through, to report it without a stack trace.

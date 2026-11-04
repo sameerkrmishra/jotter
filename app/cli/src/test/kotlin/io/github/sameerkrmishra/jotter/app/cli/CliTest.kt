@@ -397,7 +397,10 @@ class CliTest {
         val file = directory.resolve("file")
         file.writeText("x")
 
-        assertFails("cannot create its directory", jotter("list", file = file.resolve("jotter.db")))
+        assertFails(
+            "Jotter cannot create the folder for",
+            jotter("list", file = file.resolve("jotter.db")),
+        )
     }
 
     @Test
@@ -405,7 +408,7 @@ class CliTest {
         database.writeText("Not a database, but long enough for a header of SQLite. ".repeat(9))
         val before = database.readText()
 
-        assertFails("cannot open $database: file is not a database", jotter("add", "x"))
+        assertFails("$database is damaged, so Jotter cannot read it", jotter("add", "x"))
 
         assertEquals(before, database.readText())
     }
@@ -413,7 +416,7 @@ class CliTest {
     @Test
     fun aPathSqliteCannotOpenIsNamedInTheError() {
         assertFails(
-            "cannot open $directory: unable to open database file",
+            "Jotter cannot open $directory. Check that its folder exists",
             jotter("list", file = directory),
         )
     }
@@ -422,7 +425,7 @@ class CliTest {
     fun theRootDirectoryIsAnOrdinaryFailure() {
         val result = jotter("--db", "/", "list")
 
-        assertFails("cannot open /: unable to open database file", result)
+        assertFails("Jotter cannot open /.", result)
     }
 
     @Test
@@ -440,7 +443,7 @@ class CliTest {
         rawConnection().use { it.execSQL("CREATE TABLE theirs (x)") }
         val before = Files.readAllBytes(database)
 
-        assertFails("Not a database of this application", jotter("add", "x"))
+        assertFails("is not a Jotter notes file", jotter("add", "x"))
 
         assertTrue(before.contentEquals(Files.readAllBytes(database)))
     }
@@ -450,7 +453,7 @@ class CliTest {
         lines("list")
         rawConnection().use { it.execSQL("PRAGMA user_version = 999") }
 
-        assertFails("newer than this app's", jotter("list"))
+        assertFails("saved by a newer version of Jotter", jotter("list"))
     }
 
     @Test
@@ -459,7 +462,7 @@ class CliTest {
         rawConnection().use { lock ->
             lock.execSQL("BEGIN IMMEDIATE")
 
-            assertFails("is locked by another process", jotter("add", "x"))
+            assertFails("Another Jotter program is using the notes", jotter("add", "x"))
 
             lock.execSQL("ROLLBACK")
         }
@@ -472,7 +475,7 @@ class CliTest {
             lock.execSQL("BEGIN EXCLUSIVE")
             lock.execSQL("CREATE TABLE being_created (x)")
 
-            assertFails("is locked by another process", jotter("list"))
+            assertFails("in use by another Jotter program", jotter("list"))
 
             lock.execSQL("ROLLBACK")
         }
