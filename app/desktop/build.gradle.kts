@@ -54,8 +54,9 @@ compose.desktop {
  * - Compose's jlink strips the runtime's bin/; the JDK's own `java` launcher goes back, for the
  *   CLI in the AppImage.
  * - The runtime's base class data archive (lib/server/classes.jsa), which jlink does not make:
- *   `java -Xshare:dump`, in an empty environment, gives the same bytes on every run (the
- *   reproducibility check covers it), and speeds up the start of both the app and the CLI.
+ *   `java -Xshare:dump`, in an empty environment and with a fixed heap and collector, gives the
+ *   same bytes on every run and machine (the reproducibility check covers it), and speeds up the
+ *   start of both the app and the CLI.
  *
  * Compose registers its tasks after the build script runs, hence the name filter.
  */
@@ -110,7 +111,9 @@ tasks.named { it == "createDistributable" }.configureEach {
         javaLauncher.get().copyTo(launcher, overwrite = true)
         launcher.setExecutable(true, false)
         val dump =
-            ProcessBuilder(launcher.path, "-Xshare:dump")
+            // A fixed heap and collector: by default both follow the build machine's memory and
+            // processors, and so did the archive (the same for 1, 4 and 12 processors with these).
+            ProcessBuilder(launcher.path, "-Xmx128m", "-Xms128m", "-XX:+UseG1GC", "-Xshare:dump")
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         // An empty environment: the locale is archived (C.UTF-8 and POSIX give different
