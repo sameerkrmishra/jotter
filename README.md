@@ -17,6 +17,12 @@ data.
 > Status: early development. See [docs/PLAN.md](docs/PLAN.md) for the plan and
 > roadmap.
 
+## Using Jotter
+
+The [user guide](docs/guide/README.md) covers installing, notes, import and export,
+the `jotter` command, sync, [backup and restore](docs/guide/backup.md) and
+[troubleshooting](docs/guide/troubleshooting.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and propose

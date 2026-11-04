@@ -53,7 +53,9 @@ Its `check` job is the required status check for merging. Beside it, the
 `backend/webdav` against real WebDAV servers in containers
 (see [backend/webdav/README.md](backend/webdav/README.md)), and the
 `android-device` job runs `connectedAndroidDeviceTest` and the Android app's
-`:app:android:connectedDebugAndroidTest` on API 26 and API 36 emulators. A separate
+`:app:android:connectedDebugAndroidTest` on API 26 and API 36 emulators
+([.github/scripts/device-tests.sh](.github/scripts/device-tests.sh)), running once more a
+module whose tests did not run at all, as when an adb call of the test runner fails. A separate
 `reproducible` workflow ([.github/workflows/reproducible.yml](.github/workflows/reproducible.yml))
 builds the release APK twice and fails unless the two are identical, on `main`, on tags and on
 pull requests that change the build

@@ -155,11 +155,15 @@ jobs:
           ram-size: 3072M
           disk-size: 4096M
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          # --continue: every module reports, not only the first that fails.
-          # app/android's own device tests took about 1 minute per API level on a local emulator.
-          script: ./gradlew connectedAndroidDeviceTest :app:android:connectedDebugAndroidTest --continue
+          # connectedAndroidDeviceTest and :app:android:connectedDebugAndroidTest, with --continue
+          # so that every module reports, not only the first that fails. A module whose tests did
+          # not run at all, because an adb call of the test runner failed, runs once more; see
+          # the script. app/android's own device tests took about 1 minute per API level on a
+          # local emulator.
+          script: .github/scripts/device-tests.sh
 
-      # A runner argument that filtered out every test of a module would pass silently.
+      # A runner argument that filtered out every test of a module would pass silently, and so would
+      # a module whose test APK the runner never installed, even after the retry.
       - if: ${{ !cancelled() }}
         run: .github/scripts/device-test-results.sh
 
