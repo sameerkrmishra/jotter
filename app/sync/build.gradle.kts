@@ -16,6 +16,8 @@ kotlin {
             api(projects.backend.api)
             api(projects.core.storage)
             api(projects.core.sync)
+            // The debug log reads the logs (DebugReport).
+            api(projects.core.logging)
             // TailnetCheck.engine hands the hub client an HTTP engine (ADR-0018).
             api(libs.ktor.client.core)
             implementation(projects.backend.localfolder)
@@ -28,6 +30,8 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(projects.backend.api.contract)
+            // The database failures that StorageWordsTest puts in words.
+            implementation(projects.core.sqlite)
             // To make the database fail a write.
             implementation(libs.androidx.sqlite.bundled)
             implementation(libs.kotlinx.coroutines.test)

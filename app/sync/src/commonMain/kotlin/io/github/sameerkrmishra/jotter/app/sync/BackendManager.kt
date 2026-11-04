@@ -6,6 +6,7 @@ import io.github.sameerkrmishra.jotter.backend.api.Reachability
 import io.github.sameerkrmishra.jotter.backend.api.UnreachableReason
 import io.github.sameerkrmishra.jotter.backend.localfolder.LocalFolderBlobStore
 import io.github.sameerkrmishra.jotter.backend.peer.PeerAddress
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.BackendRecord
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.SyncAttempt
@@ -238,6 +239,7 @@ public class BackendManager internal constructor(
                 addedAt = clock.now(),
             )
         withContext(io) { store.backends.add(record) }
+        log.info { "Added backend $id (${record.kind})" }
         return backendOf(record)
     }
 
@@ -569,6 +571,7 @@ public class BackendManager internal constructor(
             if (!keepSecrets) backend.config.secrets.forEach { place.delete(SecretKey(id, it)) }
             withContext(io) { store.backends.remove(id) }
             engine.forget(id)
+            log.info { "Removed backend $id (${BackendKinds.kindOf(backend.config)})" }
             true
         }
 
@@ -609,6 +612,10 @@ public class BackendManager internal constructor(
         operations.withLock {
             val backend = list().firstOrNull { it.id == id } ?: return@withLock null
             val sync = cycle(backend)
+            log.info {
+                "Backend ${backend.id} (${BackendKinds.kindOf(backend.config)}): " +
+                    "${sync.attempt.outcome}, ${sync.attempt.issues.size} issues"
+            }
             record(sync)
             sync
         }
@@ -650,11 +657,18 @@ public class BackendManager internal constructor(
             } catch (e: MissingSecretException) {
                 backend.ended(Outcome.UNAUTHORIZED, e.message.orEmpty())
             } catch (e: IllegalArgumentException) {
+                // The factory's words, such as a URL this version refuses.
+                log.warn(e) { "Backend ${backend.id} cannot be opened" }
                 backend.ended(Outcome.FAILED, "Cannot open it: ${e.message}.")
+            } catch (e: SecretStoreException) {
+                log.warn(e) { "The secret of backend ${backend.id} cannot be read" }
+                backend.ended(Outcome.FAILED, "Not synced: ${e.message}. It is tried again later.")
             } catch (e: Exception) {
+                log.error(e) { "Sync with backend ${backend.id} failed on this device" }
                 backend.ended(
                     Outcome.FAILED,
-                    "Failed on this device: ${e.message}. It is tried again later.",
+                    "Not synced, because of a problem on this device: " +
+                        "${describeStorageFailure(e)} It is tried again later.",
                 )
             }
         }
@@ -683,8 +697,9 @@ public class BackendManager internal constructor(
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // The status screen then shows the attempt before; the next sync records again.
+            log.warn(e) { "The outcome of the sync with ${sync.backend.id} was not recorded" }
         }
     }
 
@@ -796,3 +811,5 @@ public class BackendManager internal constructor(
         fun nameOf(folder: Path): String = folder.name.ifEmpty { folder.toString() }
     }
 }
+
+private val log = Logger("backends")
