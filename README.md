@@ -9,13 +9,18 @@ data.
 - **No lock-in.** Devices sync through storage you choose: a local folder,
   WebDAV (mailbox.org, a NAS, Nextcloud) or your own PC over Tailscale.
 - **Portable.** Copy the database file to a flash drive when the app and CLI
-  are not running (or use "Export database" while they run), or export notes
-  as Markdown.
+  are not running, or export notes as Markdown.
 - **Quick to use.** Markdown notes with tags, pinning, archive, trash and
   full-text search, in the spirit of Google Keep.
 
 > Status: early development. See [docs/PLAN.md](docs/PLAN.md) for the plan and
 > roadmap.
+
+## Using Jotter
+
+The [user guide](docs/guide/README.md) covers installing, notes, import and export,
+the `jotter` command, sync, [backup and restore](docs/guide/backup.md) and
+[troubleshooting](docs/guide/troubleshooting.md).
 
 ## Contributing
 
