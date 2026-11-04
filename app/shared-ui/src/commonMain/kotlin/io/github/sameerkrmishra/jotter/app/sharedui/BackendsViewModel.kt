@@ -264,7 +264,7 @@ internal class BackendsViewModel(
         noKeyring ?: return
         noKeyring = null
         val retry = retryWithFile
-        if (passwordMetNoKeyring) {
+        if (changingPassword != null && passwordMetNoKeyring) {
             confirmPassword(SecretPlace.FILE)
         } else if (retry == null) {
             addServer(setUpNewStore = setUpAsked, SecretPlace.FILE)
@@ -380,6 +380,8 @@ internal class BackendsViewModel(
      */
     fun confirmPassword(place: SecretPlace? = null) {
         val backend = changingPassword ?: return
+        // A second tap while the first is checked does nothing.
+        if (busy) return
         val password = Secret(davPassword)
         val what = if (backend.config is PeerConfig) "pairing token" else "app password"
         passwordMetNoKeyring = false

@@ -6,6 +6,9 @@ import io.github.sameerkrmishra.jotter.app.sync.AddResult
 import io.github.sameerkrmishra.jotter.app.sync.Backend
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
 import io.github.sameerkrmishra.jotter.app.sync.Outcome
+import io.github.sameerkrmishra.jotter.app.sync.Secret
+import io.github.sameerkrmishra.jotter.app.sync.SecretKey
+import io.github.sameerkrmishra.jotter.app.sync.SecretStore
 import io.github.sameerkrmishra.jotter.app.sync.SecretStores
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
@@ -26,6 +29,7 @@ import kotlin.io.path.deleteRecursively
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 private const val TIMEOUT_MS = 10_000L
@@ -51,6 +55,47 @@ class BackendsViewModelTest {
         while (!condition()) {
             check(System.currentTimeMillis() < end) { "Timed out waiting for $what" }
             Thread.sleep(POLL_MS)
+        }
+    }
+
+    @Test
+    fun aSecondTapWhileAPasswordIsCheckedChangesNothingMore() {
+        TinyDavServer().use { server ->
+            val secrets = TestSecrets()
+            val writes = AtomicInteger()
+            val counting =
+                object : SecretStore by secrets.keyring {
+                    override suspend fun write(
+                        key: SecretKey,
+                        secret: Secret,
+                    ) {
+                        writes.incrementAndGet()
+                        secrets.keyring.write(key, secret)
+                    }
+                }
+            val stores = SecretStores(counting, secrets.file, "/config/jotter/secrets.json")
+            SyncedDevice("here", TestSecrets(secrets.keyring, secrets.file, stores)).use { device ->
+                val added =
+                    runBlocking {
+                        device.manager.addWebDav(
+                            server.url,
+                            "me",
+                            Secret(server.password),
+                            setUpNewStore = true,
+                        )
+                    }
+                val backend = assertIs<AddResult.Added>(added).backend
+                writes.set(0)
+                val screen = BackendsViewModel(device.manager, device.scheduler, scope)
+                screen.askForPassword(backend)
+                screen.editServer(password = server.password)
+                screen.confirmPassword()
+                screen.confirmPassword()
+                waitFor("the change") { screen.message?.startsWith("Stored the new") == true }
+                waitFor("the end") { !screen.busy }
+                assertEquals(1, writes.get())
+                screen.close()
+            }
         }
     }
 

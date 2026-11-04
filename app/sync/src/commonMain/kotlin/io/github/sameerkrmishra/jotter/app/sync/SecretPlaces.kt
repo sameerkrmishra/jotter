@@ -73,10 +73,10 @@ internal fun secretsWords(
 }
 
 /**
- * Records in [store] that the secret [key] of [backend], already written to [to], is kept there,
- * as [placed] says, and then deletes the old copy. If the record cannot be changed, the new copy
- * is deleted again, also when cancelled, as the record still names the old place; if that delete
- * fails too, the result says where the new copy may still be.
+ * Records in [store] that the secret [key] of [backend], already written to the place [placed]
+ * names, is kept there, and then deletes the old copy. If the record cannot be changed, the new
+ * copy is deleted again, also when cancelled, as the record still names the old place; if that
+ * delete fails too, the result says where the new copy may still be.
  */
 @Suppress("LongParameterList") // What BackendManager holds, passed down.
 internal suspend fun moveSecret(
@@ -102,7 +102,7 @@ internal suspend fun moveSecret(
             @Suppress("TooGenericExceptionCaught") e: Exception,
         ) {
             log.warn(e) { "Where the secret of backend ${backend.id} is cannot be recorded" }
-            "Cannot record where the secret is kept: ${e.message}. It is still kept where it was."
+            notRecorded(e)
         }
     if (failure != null) {
         val left = rollBack(new, old, key, placed, secrets)
@@ -115,6 +115,11 @@ internal suspend fun moveSecret(
         }
     return PasswordChange.Moved(placed.config.secretPlace, left)
 }
+
+/** Why a move was not recorded, naming [failure] by its class if it has no message. */
+internal fun notRecorded(failure: Exception): String =
+    "Cannot record where the secret is kept: ${failure.message ?: failure::class.simpleName}. " +
+        "It is still kept where it was."
 
 /**
  * Deletes the new copy of a move that was not recorded, even when cancelled, or says where it may

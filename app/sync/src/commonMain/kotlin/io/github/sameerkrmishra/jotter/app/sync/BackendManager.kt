@@ -460,8 +460,12 @@ public class BackendManager internal constructor(
             try {
                 target.write(key, password)
             } catch (e: SecretStoreUnavailableException) {
-                // Only the keyring is ever unavailable: the file is always there to write.
-                return@withLock PasswordChange.NoKeyring(e.message.orEmpty())
+                return@withLock if (to == SecretPlace.KEYRING) {
+                    PasswordChange.NoKeyring(e.message.orEmpty())
+                } else {
+                    // Offering the file again would not help.
+                    PasswordChange.Refused("Cannot store the $words: ${e.message}")
+                }
             } catch (e: SecretStoreException) {
                 return@withLock PasswordChange.Refused("Cannot store the $words: ${e.message}")
             }

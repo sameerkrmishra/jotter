@@ -346,6 +346,47 @@ class SecretMoveTest {
         }
 
     @Test
+    fun aFileThatIsUnavailableIsNotOfferedAgain() =
+        test {
+            val server = WebDavBackendTest.Server()
+            server.marked = true
+            val gone =
+                object : SecretStore by InMemorySecretStore() {
+                    override suspend fun write(
+                        key: SecretKey,
+                        secret: Secret,
+                    ): Unit = throw SecretStoreUnavailableException("The config folder is gone.")
+                }
+            Device(this, "a", fileSecrets = gone, webDav = server).use { device ->
+                val backend =
+                    assertIs<AddResult.Added>(device.manager.addWebDav(url, "me", password)).backend
+                assertEquals(
+                    PasswordChange.Refused(
+                        "Cannot store the app password: The config folder is gone.",
+                    ),
+                    device.manager.changePassword(backend.id, Secret("x"), SecretPlace.FILE),
+                )
+                assertEquals(
+                    password,
+                    device.secrets.read(SecretKey(backend.id, SecretKind.APP_PASSWORD)),
+                )
+            }
+        }
+
+    @Test
+    fun aFailureWithoutAMessageIsNamedByItsKind() {
+        assertEquals(
+            "Cannot record where the secret is kept: IllegalStateException. It is still kept " +
+                "where it was.",
+            notRecorded(IllegalStateException()),
+        )
+        assertEquals(
+            "Cannot record where the secret is kept: disk gone. It is still kept where it was.",
+            notRecorded(IllegalStateException("disk gone")),
+        )
+    }
+
+    @Test
     fun aMoveThatCannotWriteChangesNothing() =
         test {
             val server = WebDavBackendTest.Server()
