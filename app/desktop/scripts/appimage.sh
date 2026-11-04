@@ -54,6 +54,8 @@ fi
 # shellcheck disable=SC2086
 (cd "$root" && ./gradlew --quiet ${JOTTER_GRADLE_ARGS:-} :app:desktop:appImageDir)
 
+# Gradle sets the modes of everything inside, but the directory itself is made with the umask.
+chmod 755 "$appdir"
 mkdir -p "$out"
 image=$out/Jotter-$version-x86_64.AppImage
 squashfs=$out/.Jotter.squashfs

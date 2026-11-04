@@ -116,6 +116,9 @@ else
             "$unsquashfs" -q -n -o "$offset" -d "$out/$name-unpacked" "$out/$name.AppImage" >/dev/null
         done
         diff -rq "$out/a-unpacked" "$out/b-unpacked" >&2 || true
+        # Modes and types, which diff -r does not compare.
+        diff <(cd "$out/a-unpacked" && find . -printf '%m %y %p\n' | sort -k3) \
+            <(cd "$out/b-unpacked" && find . -printf '%m %y %p\n' | sort -k3) >&2 || true
     fi
     status=1
 fi
