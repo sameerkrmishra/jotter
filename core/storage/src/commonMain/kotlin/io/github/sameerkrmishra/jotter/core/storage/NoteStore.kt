@@ -48,9 +48,9 @@ public class NoteStore private constructor(
 
     /**
      * Writes a consistent copy of the whole database to the new file [path], with SQLite's
-     * `VACUUM INTO` (ADR-0002), and checks it: it must open and pass `PRAGMA integrity_check`. The copy holds every
-     * table: notes, history, the device's id, backends and what sync has read, so opening it
-     * elsewhere is a restored device (ADR-0014). It is one file, with no `-wal`.
+     * `VACUUM INTO` (ADR-0002), and checks it: it must open and pass `PRAGMA integrity_check`. The
+     * copy holds every table: notes, history, the device's id, backends and what sync has read,
+     * so opening it elsewhere is a restored device (ADR-0014). It is one file, with no `-wal`.
      *
      * It only reads this database, in one read transaction, so it sees no half-done write, and
      * the CLI or another process may write meanwhile (WAL). Writes of this process wait until it

@@ -30,21 +30,23 @@ internal class ExportDatabaseCommand(
 
     override fun run() {
         if (!Files.exists(location.path)) {
-            throw CliktError("jotter: there are no notes to export: ${location.path} does not exist")
+            throw CliktError(
+                "jotter: there are no notes to export: ${location.path} does not exist",
+            )
         }
         val target = file.toAbsolutePath().toOkioPath()
         val outcome =
             withStore(location.path) { store ->
                 runBlocking { DatabaseExport(store, EmptyCoroutineContext).export(target, replace) }
             }
-        when (outcome) {
-            is ExportOutcome.Exported -> echo(outcome.message)
-            is ExportOutcome.Exists ->
-                throw CliktError(
-                    "jotter: ${outcome.file} exists already, so it was left alone. Choose a new " +
-                        "file name, or add --replace to replace it.",
-                )
-            is ExportOutcome.Failed -> throw CliktError("jotter: ${outcome.message}")
-        }
+        val failure =
+            when (outcome) {
+                is ExportOutcome.Exported -> null.also { echo(outcome.message) }
+                is ExportOutcome.Exists ->
+                    "${outcome.file} exists already, so it was left alone. Choose a new file " +
+                        "name, or add --replace to replace it."
+                is ExportOutcome.Failed -> outcome.message
+            }
+        if (failure != null) throw CliktError("jotter: $failure")
     }
 }

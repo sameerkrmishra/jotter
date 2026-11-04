@@ -73,7 +73,8 @@ private fun logUncaughtFailures() {
 }
 
 /** Asks where to save the debug log, with the desktop's own file dialog. */
-private suspend fun chooseDebugLogFile(): Path? = chooseFile("Save the debug log", DEBUG_LOG_FILE_NAME)
+private suspend fun chooseDebugLogFile(): Path? =
+    chooseFile("Save the debug log", DEBUG_LOG_FILE_NAME)
 
 /** Asks where to save an exported database. */
 private suspend fun chooseDatabaseFile(): Path? = chooseFile("Export database", DATABASE_FILE_NAME)

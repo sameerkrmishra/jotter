@@ -37,7 +37,9 @@ import kotlinx.coroutines.launch
  * @param databaseExport Where "Export database" writes the copy, or null for an app without it.
  */
 @Stable
-@Suppress("TooManyFunctions") // One small function per way of moving between screens.
+// One small function per way of moving between screens; each optional part of an app is one
+// parameter, with a default.
+@Suppress("TooManyFunctions", "LongParameterList")
 public class AppViewModel(
     private val notes: NoteService,
     private val conflicts: ConflictResolver,

@@ -24,7 +24,12 @@ class DatabaseFileTest {
     private val directory = createTempDirectory("jotter-desktop-export")
     private val out = directory.resolve("out").also { it.toFile().mkdir() }
     private val file = out.resolve(DATABASE_FILE_NAME)
-    private val store = NoteStore.open(directory.resolve("jotter.db").toString(), "PC", EmptyCoroutineContext)
+    private val store =
+        NoteStore.open(
+            directory.resolve("jotter.db").toString(),
+            "PC",
+            EmptyCoroutineContext,
+        )
 
     @AfterTest
     fun deleteEverything() {
@@ -32,7 +37,8 @@ class DatabaseFileTest {
         directory.deleteRecursively()
     }
 
-    private fun place(chosen: Path?) = DatabaseFile({ chosen }, DatabaseExport(store, EmptyCoroutineContext))
+    private fun place(chosen: Path?) =
+        DatabaseFile(choose = { chosen }, export = DatabaseExport(store, EmptyCoroutineContext))
 
     private fun notesIn(copy: Path) =
         NoteStore.open(copy.toString(), "check", EmptyCoroutineContext).use { copied ->

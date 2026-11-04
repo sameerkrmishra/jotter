@@ -87,7 +87,8 @@ class ExportDatabaseCommandTest {
         assertEquals(1, missing.statusCode)
         assertContains(missing.stderr, "does not exist. Choose another place")
 
-        val noNotes = jotter("export-database", out.resolve("x.db").toString(), file = out.resolve("none.db"))
+        val noNotes =
+            jotter("export-database", out.resolve("x.db").toString(), file = out.resolve("none.db"))
         assertEquals(1, noNotes.statusCode)
         assertContains(noNotes.stderr, "there are no notes to export")
         assertFalse(out.resolve("none.db").exists())
@@ -105,9 +106,10 @@ class ExportDatabaseCommandTest {
                 val copy = out.resolve("copy.db")
                 val result = jotter("export-database", "--replace", copy.toString())
                 assertEquals(0, result.statusCode, result.stderr)
-                counts += NoteStore.open(copy.toString(), "check", EmptyCoroutineContext).use {
-                    it.notes.list().size
-                }
+                counts +=
+                    NoteStore.open(copy.toString(), "check", EmptyCoroutineContext).use {
+                        it.notes.list().size
+                    }
             }
             assertEquals(0, writer.waitFor())
             println("ExportDatabaseCommandTest: copies with ${counts.distinct()} notes")

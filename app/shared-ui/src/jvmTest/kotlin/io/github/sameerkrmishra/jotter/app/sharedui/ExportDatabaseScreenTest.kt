@@ -60,7 +60,7 @@ class ExportDatabaseScreenTest {
         }
 
     private fun app(
-        place: DatabaseExportPlace = this.place,
+        place: DatabaseExportPlace? = this.place,
         block: ComposeUiTest.(AppViewModel) -> Unit,
     ) = runComposeUiTest {
         lateinit var app: AppViewModel
@@ -137,7 +137,7 @@ class ExportDatabaseScreenTest {
             onNodeWithText(REPLACE).performClick()
             awaitText("Exported your notes to $file")
             assertEquals(listOf("milk"), notesIn(file))
-            assertEquals(listOf(file), Files.list(directory).use { it.toList() })
+            assertEquals(listOf(file), Files.list(directory).use { entries -> entries.toList() })
         }
 
     @Test
@@ -157,10 +157,25 @@ class ExportDatabaseScreenTest {
             assertTrue(app.exportsDatabase)
             runOnIdle { app.openDatabaseExport() }
             awaitText(EXPORT_DATABASE_EXPLAINED)
+            // A second click on the menu keeps the dialog that is open.
+            val open = app.exportView
+            runOnIdle { app.openDatabaseExport() }
+            assertTrue(open != null && app.exportView === open)
             onNodeWithText("Cancel").performClick()
             waitForIdle()
             assertNull(app.exportView)
             assertFalse(file.exists())
+        }
+
+    @Test
+    fun anAppWithoutItOffersNothing() =
+        app(place = null) { app ->
+            assertFalse(app.exportsDatabase)
+            runOnIdle { app.openDatabaseExport() }
+            assertNull(app.exportView)
+            onNodeWithText(BACKENDS_TITLE).performClick()
+            awaitText("Sync now")
+            assertTrue(onAllNodesWithText(EXPORT_DATABASE).fetchSemanticsNodes().isEmpty())
         }
 
     @Test

@@ -253,7 +253,9 @@ class BackendsScreenTest {
             awaitText("enter the password again.", substring = true)
             // Nothing on the card speaks of the network, or ends with two periods.
             listOf("Cannot be reached", "network", "..").forEach { words ->
-                val onCard = hasText(words, substring = true) and hasAnyAncestor(hasTestTag(backendTag("dav")))
+                val onCard =
+                    hasText(words, substring = true) and
+                        hasAnyAncestor(hasTestTag(backendTag("dav")))
                 assertTrue(onAllNodes(onCard).fetchSemanticsNodes().isEmpty(), words)
             }
             onNodeWithText(NEW_PASSWORD).assertExists()

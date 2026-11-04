@@ -29,7 +29,10 @@ class ExportTest {
                 // The writes are still in the WAL, which only the copy may read.
                 assertTrue(dir.exists("-wal"))
                 val before = dir.bytes()
-                val walBefore = FileSystem.SYSTEM.read("${dir.path}-wal".toPath()) { readByteString() }
+                val walBefore =
+                    FileSystem.SYSTEM.read(
+                        "${dir.path}-wal".toPath(),
+                    ) { readByteString() }
 
                 store.exportTo(copy)
 
@@ -54,7 +57,13 @@ class ExportTest {
                 // A restored device keeps its id (ADR-0014).
                 assertEquals(live.first, restored.deviceId)
                 assertEquals(2, restored.notes.list().size)
-                assertEquals("milk, bread and tea", restored.notes.search("tea").single().note.body)
+                assertEquals(
+                    "milk, bread and tea",
+                    restored.notes
+                        .search("tea")
+                        .single()
+                        .note.body,
+                )
                 assertEquals(listOf("stick"), restored.backends.list().map { it.id })
             }
             assertEquals(3, live.second)
@@ -95,7 +104,13 @@ class ExportTest {
                         "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
                         { cursor ->
                             QueryResult.Value(
-                                buildList { while (cursor.next().value) add(cursor.getString(0)!!) },
+                                buildList {
+                                    while (cursor.next().value) {
+                                        add(
+                                            cursor.getString(0)!!,
+                                        )
+                                    }
+                                },
                             )
                         },
                         0,
