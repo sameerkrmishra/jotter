@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.app.cli
 
+import io.github.sameerkrmishra.jotter.app.sync.LOG_LEVEL_ENVVAR
 import io.github.sameerkrmishra.jotter.core.storage.DATABASE_ENVVAR
 import java.io.File
 import kotlin.io.path.ExperimentalPathApi
@@ -33,10 +34,12 @@ class MainTest {
         environment: Map<String, String> = emptyMap(),
         stdout: ProcessBuilder.Redirect? = null,
         closeStdout: Boolean = false,
+        stdin: File? = null,
     ): Exit {
         val javaBinary = Path(System.getProperty("java.home"), "bin", "java").toString()
         val command = listOf(javaBinary, "-cp", System.getProperty("java.class.path"), MAIN_CLASS)
         val builder = ProcessBuilder(command + args)
+        stdin?.let(builder::redirectInput)
         builder.environment().apply {
             remove(DATABASE_ENVVAR)
             remove("XDG_DATA_HOME")
@@ -111,6 +114,33 @@ class MainTest {
     }
 
     @Test
+    fun contactingAServerPrintsNoSlf4jWarningAndLogsNoPassword() {
+        val password = directory.resolve("password").toFile()
+        password.writeText("pw-$MARKER\n")
+        val database = mapOf(DATABASE_ENVVAR to directory.resolve("n.db").toString())
+
+        // Nothing listens on port 9: the WebDAV client fails to connect and logs why.
+        val exit =
+            jotter(
+                "backends",
+                "add",
+                "webdav",
+                "https://127.0.0.1:9/dav/",
+                "--user",
+                "me",
+                environment = database + (LOG_LEVEL_ENVVAR to "debug"),
+                stdin = password,
+            )
+
+        assertEquals(1, exit.status, exit.stderr)
+        assertFalse("SLF4J" in exit.stderr, exit.stderr)
+        assertFalse("Exception" in exit.stderr, exit.stderr)
+        val log = home.resolve(".local/state/jotter/logs/cli.log").toFile().readText()
+        assertTrue("webdav" in log, log)
+        assertFalse(MARKER in log, log)
+    }
+
+    @Test
     fun aUsageErrorIsNonZero() {
         val exit = jotter("nonsense")
 
@@ -120,6 +150,7 @@ class MainTest {
 
     private companion object {
         const val MAIN_CLASS = "io.github.sameerkrmishra.jotter.app.cli.MainKt"
+        const val MARKER = "MARKER-7f3a9c"
         const val TIMEOUT_SECONDS = 60L
 
         /** 128 + 13, as a shell reports it. */

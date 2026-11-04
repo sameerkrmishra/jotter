@@ -82,6 +82,12 @@ The merge rules are in
   rules. Kotlin has no friend modules, so it cannot be `internal`. No app needs it, and
   `@SyncStoreApi` makes any other use a compile error; this module's build opts in.
 
+## Log
+
+Each cycle logs its target, outcome, counts and duration, and each issue by device
+id and segment number ([ADR-0021](../../docs/adr/0021-local-logging.md)): never a
+revision's content. `SyncEngine.FORMAT` names the format for the debug log.
+
 ## Formats
 
 These are permanent, and pinned on the JVM and `linuxX64`:

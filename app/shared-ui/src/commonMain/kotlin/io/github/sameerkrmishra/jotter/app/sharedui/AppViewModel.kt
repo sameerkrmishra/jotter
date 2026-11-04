@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
  * @param io Where blocking [NoteService] calls run, off the UI thread.
  * @param sync The backends and the scheduler that syncs with them, or null for an app that does
  *   not sync, which then shows no backend screen.
+ * @param debugLog Builds and exports the debug log, or null for an app that has none.
  */
 @Stable
 @Suppress("TooManyFunctions") // One small function per way of moving between screens.
@@ -42,6 +43,7 @@ public class AppViewModel(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val sync: SyncControls? = null,
+    private val debugLog: DebugLogControls? = null,
 ) {
     // Each new value makes the view models read the database again.
     private val refreshes = MutableStateFlow(0)
@@ -61,6 +63,13 @@ public class AppViewModel(
     /** The backend screen, while it is open. */
     internal var backends by mutableStateOf<BackendsViewModel?>(null)
         private set
+
+    /** The debug log screen, while it is open. */
+    internal var debugLogView by mutableStateOf<DebugLogViewModel?>(null)
+        private set
+
+    /** Whether the app has a debug log to offer. */
+    internal val hasDebugLog: Boolean get() = debugLog != null
 
     /** Whether the app syncs, so that the note list offers the backend screen. */
     internal val syncs: Boolean get() = sync != null
@@ -90,12 +99,14 @@ public class AppViewModel(
     }
 
     /**
-     * Goes back one screen, for a phone's Back: from the review, the backend screen or the editor
+     * Goes back one screen, for a phone's Back: from the debug log, the review, the backend screen
+     * or the editor
      * towards the note list. The editor saves first, as its own Back does, and stays open with its
      * message if that fails. Returns false on the note list, where Back leaves the app.
      */
     public fun back(): Boolean {
         when {
+            debugLogView != null -> closeDebugLog()
             review != null -> closeReview()
             backends != null -> closeBackends()
             editor != null -> leaveEditor()
@@ -174,6 +185,19 @@ public class AppViewModel(
     internal fun closeBackends() {
         backends?.close()
         backends = null
+    }
+
+    /** Opens the debug log screen over the others. */
+    internal fun openDebugLog() {
+        val controls = debugLog ?: return
+        debugLogView?.close()
+        debugLogView = DebugLogViewModel(controls, scope)
+    }
+
+    /** Closes the debug log screen. */
+    internal fun closeDebugLog() {
+        debugLogView?.close()
+        debugLogView = null
     }
 
     /** Answers the question that [pendingExit] asks: the user stays with their text. */

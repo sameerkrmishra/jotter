@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.server
 
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
 import java.io.IOException
@@ -151,7 +152,10 @@ internal class PeerServer(
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Throwable,
         ) {
-            if (!stopping) onFailure("the hub stopped accepting connections: $e")
+            if (!stopping) {
+                log.error(e) { "The hub stopped accepting connections" }
+                onFailure("the hub stopped accepting connections")
+            }
         }
     }
 
@@ -257,7 +261,8 @@ internal class PeerServer(
         } catch (
             @Suppress("TooGenericExceptionCaught") e: Throwable,
         ) {
-            onFailure("the hub's watch over its connections failed: $e")
+            log.error(e) { "The hub's watch over its connections failed" }
+            onFailure("the hub's watch over its connections failed")
             stopping = true
             server?.close()
             open.forEach { it.close() }
@@ -310,3 +315,5 @@ private class Connection(
         }
     }
 }
+
+private val log = Logger("hub")

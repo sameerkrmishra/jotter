@@ -13,8 +13,10 @@ import io.github.sameerkrmishra.jotter.app.sharedui.SyncControls
 import io.github.sameerkrmishra.jotter.app.sync.BackendManager
 import io.github.sameerkrmishra.jotter.app.sync.StandardBackendFactory
 import io.github.sameerkrmishra.jotter.app.sync.SyncScheduler
+import io.github.sameerkrmishra.jotter.app.sync.installLinuxLogging
 import io.github.sameerkrmishra.jotter.app.sync.linuxSecretStores
 import io.github.sameerkrmishra.jotter.backend.peer.PeerProtocol
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.sync.ConflictResolver
 import io.github.sameerkrmishra.jotter.core.sync.DeviceInfo
@@ -27,6 +29,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import java.awt.FileDialog
+import java.awt.Frame
 import java.nio.file.Path
 import kotlin.system.exitProcess
 
@@ -39,16 +44,43 @@ private const val AUTOCLOSE_DELAY_MS = 4_000L
  */
 public fun main(args: Array<String>) {
     val autoclose = AUTOCLOSE_ARG in args
+    val logs = installLinuxLogging("desktop", System::getenv)
+    logUncaughtFailures()
+    log.info { "Jotter ${desktopVersion()} starts on ${desktopPlatform()}" }
     val store =
         try {
             openStore()
         } catch (e: DatabaseUnavailableException) {
-            showFailure(e.message.orEmpty(), autoclose)
+            showFailure(e.message.orEmpty(), autoclose, logs)
             exitProcess(1)
         }
-    runApp(store, autoclose)
+    runApp(store, autoclose, logs)
+    log.info { "Jotter exits" }
     exitProcess(0)
 }
+
+private val log = Logger("desktop")
+
+/** A failure no code caught, on any thread, goes to the log as well as where it went before. */
+private fun logUncaughtFailures() {
+    val before = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, failure ->
+        log.error(failure) { "Uncaught failure on thread ${thread.name}" }
+        before?.uncaughtException(thread, failure) ?: failure.printStackTrace()
+    }
+}
+
+/** Asks where to save the debug log, with the desktop's own file dialog. */
+private suspend fun chooseDebugLogFile(): Path? =
+    withContext(Dispatchers.Main) {
+        val dialog = FileDialog(null as Frame?, "Save the debug log", FileDialog.SAVE)
+        dialog.file = DEBUG_LOG_FILE_NAME
+        dialog.isVisible = true
+        dialog.file?.let { Path.of(dialog.directory, it) }
+    }
+
+@Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
+private val debugLogFile = DebugLogFile(::chooseDebugLogFile, Dispatchers.IO)
 
 @Suppress("InjectDispatcher") // This is where dispatchers are chosen, to inject them elsewhere.
 private fun openStore() =
@@ -58,12 +90,14 @@ private fun openStore() =
 private fun showFailure(
     reason: String,
     autoclose: Boolean,
+    logs: okio.Path?,
 ) {
     System.err.println("jotter: $reason")
+    val debugLog = desktopDebugLog(logs, null, reason, debugLogFile)
     application(exitProcessOnExit = false) {
         Window(onCloseRequest = ::exitApplication, title = "Jotter") {
             AutoClose(autoclose, ::exitApplication)
-            CannotOpenNotes(reason, ::exitApplication)
+            CannotOpenNotes(reason, debugLog, ::exitApplication)
         }
     }
 }
@@ -77,6 +111,7 @@ private fun showFailure(
 private fun runApp(
     store: NoteStore,
     autoclose: Boolean,
+    logs: okio.Path?,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val engine = SyncEngine(store, DeviceInfo(DEVICE_NAME, "linux"), Dispatchers.IO)
@@ -103,6 +138,7 @@ private fun runApp(
             scope,
             Dispatchers.IO,
             SyncControls(manager, scheduler, hub),
+            desktopDebugLog(logs, manager, null, debugLogFile),
         )
     application(exitProcessOnExit = false) {
         val close = { app.requestExit(::exitApplication) }

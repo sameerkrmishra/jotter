@@ -72,6 +72,13 @@ class StartScriptTest {
         environment: Map<String, String> = mapOf("HOME" to home.toString()),
     ): Exit = start(*args, environment = environment).finish(TIMEOUT_SECONDS)
 
+    @Test
+    fun theDebugLogNamesTheVersionFromTheJar() {
+        val exit = jotter("debug-log")
+        assertEquals(0, exit.status, exit.stderr)
+        assertTrue(Regex("""App: cli \d+\.\d+\.\d+""").containsMatchIn(exit.stdout), exit.stdout)
+    }
+
     private fun assertAdded(exit: Exit) {
         assertEquals(0, exit.status, exit.stdout + exit.stderr)
         assertEquals(ID_LINE_LENGTH, exit.stdout.length, exit.stdout)

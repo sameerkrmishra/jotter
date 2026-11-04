@@ -58,7 +58,7 @@ class DatabaseTest {
                 open(DATABASE_ENVVAR to blocker.resolve("notes.db").toString())
             }
 
-        assertContains(failure.message.orEmpty(), "cannot create the directory")
+        assertContains(failure.message.orEmpty(), "Jotter cannot create the folder for")
     }
 
     @Test
@@ -74,7 +74,7 @@ class DatabaseTest {
                     open(DATABASE_ENVVAR to file.toString())
                 }
 
-            assertContains(failure.message.orEmpty(), "locked by another process")
+            assertContains(failure.message.orEmpty(), "in use by another Jotter program")
             lock.execSQL("ROLLBACK")
         }
     }
@@ -86,7 +86,7 @@ class DatabaseTest {
                 openNoteStore({ null }, "?", EmptyCoroutineContext)
             }
 
-        assertContains(failure.message.orEmpty(), "no database location")
+        assertContains(failure.message.orEmpty(), "neither HOME nor JOTTER_DB is set")
     }
 
     @Test
@@ -99,7 +99,8 @@ class DatabaseTest {
                 open(DATABASE_ENVVAR to file.toString())
             }
 
-        assertContains(failure.message.orEmpty(), "cannot open")
+        assertContains(failure.message.orEmpty(), "is damaged, so Jotter cannot read it")
+        assertContains(failure.message.orEmpty(), "has not changed or replaced it")
         assertContains(file.readText(), "not a database")
     }
 }

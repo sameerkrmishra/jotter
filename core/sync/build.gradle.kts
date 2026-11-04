@@ -15,6 +15,7 @@ kotlin {
             api(projects.core.merge)
             api(projects.core.model)
             api(projects.core.storage)
+            implementation(projects.core.logging)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             // SHA-256 and gzip in common code (ADR-0006).

@@ -196,7 +196,7 @@ class ReviewViewModelTest : EditorTest() {
             settle()
 
             assertTrue(review.message.orEmpty().startsWith(RESOLVE_FAILED_MESSAGE))
-            assertTrue(review.message.orEmpty().contains("disk full"))
+            assertTrue(review.message.orEmpty().contains("attach the debug log"))
             assertEquals(1, review.conflictDetails.size)
             database.allowWrites()
             review.dismissMessage()

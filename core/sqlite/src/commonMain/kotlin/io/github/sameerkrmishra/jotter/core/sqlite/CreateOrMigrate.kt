@@ -54,19 +54,42 @@ private fun migrate(
 ) {
     driver.execute(null, "PRAGMA foreign_keys = OFF", 0)
     try {
-        SchemaTransacter(driver).transaction {
-            // Read again under the write lock: another process may have migrated in the meantime.
-            val version = readCheckedVersion(driver, schema)
-            if (version < schema.version) {
-                // migrate() takes a vararg. Copying a few callbacks costs nothing.
-                @Suppress("SpreadOperator")
-                schema.migrate(driver, version, schema.version, *callbacks)
-                checkForeignKeys(driver)
-                writeUserVersion(driver, schema.version)
-            }
-        }
+        upgrading { migrateInTransaction(driver, schema, callbacks) }
     } finally {
         driver.execute(null, "PRAGMA foreign_keys = ON", 0)
+    }
+}
+
+/**
+ * Runs [block], reporting a failure as [DatabaseUpgradeException], except a busy database, which
+ * may simply be tried again, and a database that another process migrated past this app's schema.
+ */
+@Suppress("TooGenericExceptionCaught") // Everything is rethrown, most of it wrapped.
+private inline fun upgrading(block: () -> Unit) {
+    try {
+        block()
+    } catch (e: DatabaseTooNewException) {
+        throw e
+    } catch (e: RuntimeException) {
+        throw if (isSqliteBusy(e)) e else DatabaseUpgradeException(e)
+    }
+}
+
+private fun migrateInTransaction(
+    driver: SqlDriver,
+    schema: SqlSchema<QueryResult.Value<Unit>>,
+    callbacks: Array<out AfterVersion>,
+) {
+    SchemaTransacter(driver).transaction {
+        // Read again under the write lock: another process may have migrated in the meantime.
+        val version = readCheckedVersion(driver, schema)
+        if (version < schema.version) {
+            // migrate() takes a vararg. Copying a few callbacks costs nothing.
+            @Suppress("SpreadOperator")
+            schema.migrate(driver, version, schema.version, *callbacks)
+            checkForeignKeys(driver)
+            writeUserVersion(driver, schema.version)
+        }
     }
 }
 
@@ -95,9 +118,7 @@ internal fun checkNotNewer(
     version: Long,
     schemaVersion: Long,
 ) {
-    check(version <= schemaVersion) {
-        "The database has schema version $version, newer than this app's $schemaVersion"
-    }
+    if (version > schemaVersion) throw DatabaseTooNewException(version, schemaVersion)
 }
 
 private fun readUserVersion(driver: SqlDriver): Long {

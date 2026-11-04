@@ -89,7 +89,8 @@ class BackendsViewModelTest {
             val screen = BackendsViewModel(device.manager, failing, scope)
             waitFor("the problem") {
                 screen.problem ==
-                    "Jotter could not sync: disk gone. It tries again."
+                    "Jotter could not sync: Something unexpected went wrong. If it keeps " +
+                    "happening, report it and attach the debug log. It tries again."
             }
             screen.close()
         }

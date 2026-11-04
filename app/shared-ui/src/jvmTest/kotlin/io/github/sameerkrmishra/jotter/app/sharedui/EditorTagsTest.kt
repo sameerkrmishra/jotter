@@ -197,7 +197,7 @@ class EditorTagsTest : EditorTest() {
             editor.addTag()
 
             assertEquals("work", editor.tagInput)
-            assertContains(editor.message.orEmpty(), "disk full")
+            assertContains(editor.message.orEmpty(), "attach the debug log")
         }
 
     @Test

@@ -1,5 +1,6 @@
 package io.github.sameerkrmishra.jotter.app.sync
 
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -178,9 +179,10 @@ public class SyncScheduler(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                log.warn(e) { "Watching for edits failed" }
                 val text =
-                    "Jotter cannot see edits to sync them (${e.message}). It syncs every few " +
-                        "minutes meanwhile, and tries again."
+                    "Jotter cannot see edits to sync them: ${describeStorageFailure(e)} It " +
+                        "syncs every few minutes meanwhile, and tries again."
                 report { it.copy(watching = text) }
                 startOnce()
                 delay(timing.firstBackoff)
@@ -275,7 +277,8 @@ public class SyncScheduler(
             failures.entries.forEach { entry ->
                 entry.setValue(Failures(entry.value.count, maxOf(entry.value.until, later)))
             }
-            val text = "Jotter could not sync: ${e.message}. It tries again."
+            log.error(e) { "A sync round failed" }
+            val text = "Jotter could not sync: ${describeStorageFailure(e)} It tries again."
             report { it.copy(syncing = text) }
         } finally {
             running.value = false
@@ -366,3 +369,5 @@ public class SyncScheduler(
     /** Which backends a round syncs, from none to all. */
     private enum class Reach { NONE, FAILED, DUE, ALL }
 }
+
+private val log = Logger("scheduler")

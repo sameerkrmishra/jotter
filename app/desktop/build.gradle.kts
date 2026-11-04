@@ -23,6 +23,13 @@ compose.desktop {
     }
 }
 
+// The version the debug log names (ADR-0019: from gradle.properties only).
+tasks.jar {
+    val version = providers.gradleProperty("jotter.versionName")
+    inputs.property("version", version)
+    manifest { attributes("Implementation-Version" to version.get()) }
+}
+
 dependencies {
     implementation(projects.app.sharedUi)
     // The hub's default port.

@@ -34,6 +34,7 @@ newer. Symlink `bin/jotter` into your `PATH` to use it from anywhere.
 | `jotter backends remove ID` | Stops syncing with a backend and forgets it on this device. Its files stay where they are. `--keep-secret` leaves its password or token where it is, for when no keyring answers, and says where |
 | `jotter backends status [ID]` | Asks each backend, or one, whether it can be reached now, and prints that with its last sync and issues |
 | `jotter export DIR` | Writes one Markdown file per note into `DIR`, creating it if needed. **Active and archived notes; `--trash` adds the trash.** `--tag TAG` filters by a tag: `jotter export --tag recipes ./out` |
+| `jotter debug-log` | Prints the debug log to attach to an issue: versions, platform, each backend's kind and last sync with its issues, and the newest lines of the CLI's and the desktop app's logs. It holds no note, title, tag, password or token ([ADR-0021](../../docs/adr/0021-local-logging.md)). `--output FILE` (`-o`) writes the same text to a new file and never overwrites one. It works also when the notes cannot be opened, and says why. Nothing is sent anywhere |
 
 `jotter add` takes anything that is not one of its options as the note, so
 checklist items need no quoting beyond the shell's: `jotter add "- [ ] milk"`,
@@ -167,6 +168,13 @@ empty note, a file that is not a Jotter database, a database from a newer versio
 of Jotter, a directory that cannot be created, a path that cannot be opened or is
 not valid in the locale, an unreadable stdin, no usable database location, or a
 database that stayed locked.
+A failure of the database says what happened and what to do, in `app:sync`'s words
+(`describeOpenFailure`, `describeStorageFailure`), never SQLite's: a damaged file,
+a full disk, a read-only file or folder, a disk error, a newer version's file,
+another program's database, a failed upgrade, or a lock. None of them changes the
+file, and a file that cannot be opened is never replaced by a new one. The exception
+itself goes to the log. Anything else that escapes a command is a bug: `main()` prints
+one line that asks for a report with `jotter debug-log`, and logs its stack trace.
 For `sync`, one or more backends that did not sync, with a last line that says how
 many, after the lines of all of them; `sync` without backends; and for `backends`,
 a folder that is missing, not a store without `--new`, already added, or an id that
@@ -191,6 +199,19 @@ does not pass for a success. A reader that leaves, as in `jotter list | head -1`
 is not a failure: as for any Unix filter, SIGPIPE ends the process silently, with
 status 141. `main()` restores that default, which the JVM turns off, through
 `sun.misc.Signal`.
+
+## Log
+
+The CLI logs to `$XDG_STATE_HOME/jotter/logs/cli.log`, or
+`~/.local/state/jotter/logs/cli.log`, next to the desktop app's `desktop.log`, and
+only if `XDG_STATE_HOME` or `HOME` is an absolute path: there is no other fallback.
+The file is opened at the first line, so a command that logs nothing, such as most
+`jotter add`s, costs nothing. INFO by default; `JOTTER_LOG_LEVEL=debug` (or `warn`,
+`error`) for one run. It rotates at 256 KiB and keeps four files. Commands that run at once share it:
+each line is appended under a file lock and carries the process id. The folder is
+0700 and the files 0600. What is never in it:
+see [ADR-0021](../../docs/adr/0021-local-logging.md). Ktor's lines go there too, so
+contacting a server no longer prints SLF4J's "no providers" warnings.
 
 ## Database location
 

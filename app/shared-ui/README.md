@@ -29,7 +29,8 @@ such as the backend list, adding and removing backends and the sync scheduler, i
 | `AppViewModel` | The main public class: the list, the open editor, `refresh` and `requestExit`; for a phone, `back` (Back from any screen, saving the editor first) and `keep` (stores the draft and the combined texts without closing anything, when the app goes to the background). Built by the app's composition root ([ADR-0005](../../docs/adr/0005-manual-dependency-injection.md)) |
 | `SyncControls` | The backend manager and scheduler of `app:sync`, for `AppViewModel`. Without it the app shows no backend screen. `foldersUnavailable` replaces the folder form with a plain sentence, on Android ([ADR-0018](../../docs/adr/0018-android-app.md)) |
 | `JotterApp` | The one public composable, which calls `refresh` whenever its window gains focus |
-| `CannotOpenNotes` | What an app shows instead if the database could not be opened |
+| `CannotOpenNotes` | What an app shows instead if the database could not be opened: the reason in plain words, and "Show debug log" if the app gives one |
+| `DebugLogControls`, `DebugLogExport`, `DebugLogViewModel`, `DebugLogScreen` | The debug log ([ADR-0021](../../docs/adr/0021-local-logging.md)), from "Debug log" on the Sync screen: the whole text, as it would be saved, then the app's own export (a file dialog on the desktop, Android's document picker). Nothing is sent anywhere |
 | `NotesViewModel`, `NotesScreen`, `NoteCard` | The grid, pinned first, with search, the active, archive and trash views, the tag filter, and pin, archive, trash, restore and delete forever (which asks first) |
 | `EditorViewModel`, `EditorScreen` | The text editor with its Markdown preview, and adding and removing tags |
 | `AttentionViewModel` | The notes that sync left something on, from `ConflictResolver`'s lists: open conflicts, hidden heads, text that does not count, and combined texts not yet saved |
@@ -44,6 +45,11 @@ Grid cards still show a note's text as it was typed: parsing every card on scrol
 not worth it for six lines.
 
 ## Design
+
+- **Failures in plain words.** A save, an edit, a change in the list or a resolution that
+  fails says what could not be done, then why and what to do in `app:sync`'s words
+  (`describeStorageFailure`), never an exception's text. The draft or combined text stays.
+  `reportUnexpected` puts the stack trace in the log, not on stderr.
 
 - **Snapshot state, not flows, in the view models' API.** A text field must see
   its new value in the same frame, or fast typing loses characters, and a value

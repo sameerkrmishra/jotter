@@ -4,6 +4,8 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.sameerkrmishra.jotter.app.sync.describeStorageFailure
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.model.Note
 import io.github.sameerkrmishra.jotter.core.model.NoteState
 import io.github.sameerkrmishra.jotter.core.model.TagName
@@ -33,17 +35,20 @@ internal const val MIN_SEARCH_LENGTH = 2
 internal const val BUSY_MESSAGE = "Another program is using the notes. Nothing changed; try again."
 internal const val GONE_MESSAGE = "That note no longer exists."
 internal const val MOVED_MESSAGE = "That note is no longer in the trash, so it was not deleted."
-internal const val READ_FAILED_MESSAGE = "The notes could not be read."
+internal const val READ_FAILED_MESSAGE =
+    "The notes could not be read. Try again; if it keeps happening, report it and attach the " +
+        "debug log."
 internal const val WRITE_FAILED_MESSAGE = "The note could not be changed."
 
 /**
- * Keeps the stack trace of a failure the UI has no specific message for, which may be a bug. The
- * user sees only its message. Goes to stderr until there is logging (PLAN.md §3.2, core/logging).
+ * Keeps a failure the UI has no specific message for, which may be a bug, in the log with its
+ * stack trace. The user sees plain words instead ([describeStorageFailure]).
  */
-@Suppress("PrintStackTrace")
 internal fun reportUnexpected(failure: Throwable) {
-    failure.printStackTrace()
+    uiLog.error(failure) { "Unexpected failure in the UI" }
 }
+
+private val uiLog = Logger("ui")
 
 /**
  * What the note list shows.
@@ -186,7 +191,7 @@ internal class NotesViewModel(
                     MOVED_MESSAGE
                 } catch (e: RuntimeException) {
                     reportUnexpected(e)
-                    "$WRITE_FAILED_MESSAGE ${e.message.orEmpty()}".trim()
+                    "$WRITE_FAILED_MESSAGE ${describeStorageFailure(e)}"
                 }
         }
     }

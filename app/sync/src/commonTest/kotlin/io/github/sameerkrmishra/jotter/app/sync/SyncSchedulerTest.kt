@@ -242,7 +242,7 @@ class SyncSchedulerTest {
             assertTrue(
                 scheduler.problem.value
                     .orEmpty()
-                    .contains("database is locked"),
+                    .contains("Jotter could not sync: Something unexpected went wrong."),
             )
         }
 
@@ -304,7 +304,8 @@ class SyncSchedulerTest {
             assertEquals(0, backends.rounds.size)
             assertFalse(scheduler.syncing.value)
             assertEquals(
-                "Jotter could not sync: database gone. It tries again.",
+                "Jotter could not sync: Something unexpected went wrong. If it keeps happening, " +
+                    "report it and attach the debug log. It tries again.",
                 scheduler.problem.value,
             )
             scheduler.syncNow()
@@ -335,7 +336,7 @@ class SyncSchedulerTest {
             assertTrue(
                 scheduler.problem.value
                     .orEmpty()
-                    .contains("query failed"),
+                    .contains("Jotter cannot see edits to sync them: Something unexpected"),
             )
             testScheduler.advanceTimeBy(31.seconds)
             marks.value = 11

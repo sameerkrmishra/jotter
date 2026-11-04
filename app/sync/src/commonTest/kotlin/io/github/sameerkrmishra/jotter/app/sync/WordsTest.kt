@@ -31,7 +31,11 @@ class WordsTest {
         assertTrue(texts[1].contains("not marked as a Jotter store"))
         assertTrue(texts[2].contains("refused the user name or app password"), texts[2])
         assertTrue(texts[2].contains("only every 30 minutes"), texts[2])
-        assertEquals("Cannot be reached: /media/stick.", texts[3])
+        assertEquals(
+            "Cannot be reached: /media/stick. Check the network, or that the drive or server " +
+                "is there; Jotter tries again by itself.",
+            texts[3],
+        )
     }
 
     @Test

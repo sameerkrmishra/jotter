@@ -5,6 +5,7 @@ import io.github.sameerkrmishra.jotter.backend.api.BlobInfo
 import io.github.sameerkrmishra.jotter.backend.api.BlobStore
 import io.github.sameerkrmishra.jotter.backend.api.BlobStoreException
 import io.github.sameerkrmishra.jotter.backend.api.Reachability
+import io.github.sameerkrmishra.jotter.core.logging.Logger
 import io.github.sameerkrmishra.jotter.core.model.DeviceId
 import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.sync.dto.DeviceDto
@@ -15,6 +16,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
+import kotlin.time.Duration
+import kotlin.time.TimeSource
 
 /**
  * A backend to sync with.
@@ -72,7 +75,11 @@ public class SyncEngine internal constructor(
     /** Runs one cycle with [target]. One at a time: a second call waits for the first. */
     public suspend fun sync(target: SyncTarget): SyncResult =
         cycles.withLock {
-            withContext(databaseContext) { cycle(target) }
+            val started = TimeSource.Monotonic.markNow()
+            log.debug { "Sync with ${target.id} started" }
+            val result = withContext(databaseContext) { cycle(target) }
+            logResult(target.id, result, started.elapsedNow())
+            result
         }
 
     /** Forgets what is known of [targetId] (PLAN.md §6.5). Its files stay. */
@@ -92,6 +99,30 @@ public class SyncEngine internal constructor(
         cycles.withLock {
             withContext(databaseContext) { store.sync.forgetUnlistedBackends() }
         }
+
+    private fun logResult(
+        targetId: String,
+        result: SyncResult,
+        took: Duration,
+    ) {
+        val time = took.inWholeMilliseconds
+        when (result) {
+            is SyncResult.Completed ->
+                log.info { "Sync with $targetId completed in $time ms: ${summary(result.report)}" }
+            is SyncResult.Unreachable ->
+                log.info {
+                    "Sync with $targetId: unreachable (${result.reachability.reason}): " +
+                        result.reachability.detail
+                }
+            is SyncResult.Incompatible ->
+                log.warn { "Sync with $targetId: incompatible backend: ${result.detail}" }
+            is SyncResult.Interrupted ->
+                log.warn(result.cause) {
+                    "Sync with $targetId interrupted after $time ms: ${summary(result.report)}"
+                }
+        }
+        result.issues().forEach { issue -> log.warn { "Sync with $targetId: ${describe(issue)}" } }
+    }
 
     private suspend fun cycle(target: SyncTarget): SyncResult {
         val blobs = target.store
@@ -211,7 +242,35 @@ public class SyncEngine internal constructor(
         }
     }
 
-    private companion object {
-        val json = Json { ignoreUnknownKeys = true }
+    /** What this version writes to a backend. */
+    public companion object {
+        /** The sync format and codec, as in the name of the format file: `1-json+gzip`. */
+        public const val FORMAT: String = "$SYNC_FORMAT-$SYNC_CODEC"
+
+        private val json = Json { ignoreUnknownKeys = true }
+
+        private val log = Logger("sync")
+
+        private fun summary(report: SyncReport): String =
+            "sent ${report.pushedSegments} files, applied ${report.appliedSegments}, " +
+                "${report.newRevisions} new revisions, ${report.merges} merges, " +
+                "${report.issues.size} issues"
+
+        private fun SyncResult.issues(): List<SyncIssue> =
+            when (this) {
+                is SyncResult.Completed -> report.issues
+                is SyncResult.Interrupted -> report.issues
+                else -> emptyList()
+            }
+
+        /** An issue for the log: ids and numbers, never content. */
+        private fun describe(issue: SyncIssue): String =
+            when (issue) {
+                is SyncIssue.SegmentNotApplied ->
+                    "segment ${issue.number} of device ${issue.device} not applied " +
+                        "(${issue.problem}): ${issue.detail}"
+                is SyncIssue.RevisionTooLarge -> "revision ${issue.id} is too large to push"
+                is SyncIssue.ClockDrift -> "a revision is dated too far ahead: ${issue.timestamp}"
+            }
     }
 }
