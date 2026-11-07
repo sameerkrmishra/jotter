@@ -431,7 +431,8 @@ and migration to a new store, is
   [where backend secrets live](adr/0016-where-secrets-live.md) and 0017
   [the WebDAV backend](adr/0017-webdav-backend.md) (M4); 0018
   [the Android app](adr/0018-android-app.md) and 0019
-  [release builds](adr/0019-release-builds.md) (M5); 0021
+  [release builds](adr/0019-release-builds.md) (M5); 0020
+  [the Linux package](adr/0020-linux-desktop-package.md) and 0021
   [local logging](adr/0021-local-logging.md) (M6).
 - **CI (GitHub Actions):** format check, detekt, Android Lint, all tests
   (JVM + Robolectric + Kotlin/Native `linuxX64`), Kover verify, build APK
