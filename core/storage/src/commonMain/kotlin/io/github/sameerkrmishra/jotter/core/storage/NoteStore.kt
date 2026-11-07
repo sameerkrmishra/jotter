@@ -107,8 +107,9 @@ public class NoteStore private constructor(
             try {
                 val database = JotterDatabase(driver)
                 val deviceId = reportingBusy { readOrCreateDeviceId(database, deviceName, ids) }
-                val notes = NoteService(database, deviceId, clock, queryContext, ids)
-                val sync = SyncStore(database, deviceId, clock, queryContext, ids)
+                val settler = NoteSettler()
+                val notes = NoteService(database, deviceId, clock, queryContext, ids, settler)
+                val sync = SyncStore(database, deviceId, clock, queryContext, ids, settler)
                 val backends = BackendStore(database, queryContext)
                 opened = true
                 return NoteStore(driver, database, deviceId, notes, sync, backends, path)

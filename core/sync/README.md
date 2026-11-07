@@ -127,12 +127,15 @@ open on every device until it is answered.
 plus `REGRESSION_SEEDS` on both. Those are the first catches of every bug and mutant found so
 far, so each is still caught by its own seed, and the range holds all of them below 800. CI's
 `simulate` job runs seeds 1 to 3000 beside `check`, and `nightly.yml` runs 50000 more, each
-night a new range, and opens an issue if a run fails or times out.
+night a new range (run number N runs from 100000 + 50000 N), and opens an issue if a run fails
+or times out. The issue names every failing seed with the command that replays it, and the
+run keeps its test results as the `simulator-results` artifact.
 
 On the JVM the seeds run on one thread per core (`JOTTER_SIM_THREADS` to change it); on
 `linuxX64` one after another, as a few long seeds take most of the time. Each case
 is its own world on one thread, so no outcome depends on the order, and a failure names the
-first failing seed of the range.
+first failing seed of the range, and prints all of them on a `Failing seeds:` line. A range of
+fewer than 100 seeds, such as one seed replayed, need not show merges, conflicts and crashes.
 Measured 2026-11-03 here (6 cores, 12 threads): one thread runs about 5.4 seeds a second, and 12
 threads 3000 seeds in 208 s, against 554 s on one. A GitHub runner, with 4 threads, ran them
 in 4 m 40 s, about 11 seeds a second, so the nightly 50000 take some 80 minutes.

@@ -95,6 +95,10 @@ public sealed interface ResolveResult {
 public class ConflictResolver(
     private val store: NoteStore,
 ) {
+    init {
+        keepNotesSettled(store)
+    }
+
     /** Returns the open conflicts, by note. */
     public fun open(): List<OpenConflict> = store.sync.conflicts()
 

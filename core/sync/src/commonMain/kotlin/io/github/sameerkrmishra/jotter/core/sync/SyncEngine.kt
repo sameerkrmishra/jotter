@@ -72,6 +72,10 @@ public class SyncEngine internal constructor(
 
     private val cycles = Mutex()
 
+    init {
+        keepNotesSettled(store)
+    }
+
     /** Runs one cycle with [target]. One at a time: a second call waits for the first. */
     public suspend fun sync(target: SyncTarget): SyncResult =
         cycles.withLock {
