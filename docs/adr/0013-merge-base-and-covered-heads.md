@@ -1,7 +1,8 @@
 # 0013. The merge base, covered heads and the canonical form of a merge
 
 - **Status:** Proposed
-- **Date:** 2026-11-02
+- **Date:** 2026-11-02, amended 2026-11-07 (the fold runs until it makes nothing new; a
+  deletion beside other heads shows what the revisions say at once)
 
 ## Context
 
@@ -59,9 +60,34 @@ edits `U` is bounded, so the merges come to an end. The result depends on the se
 revisions alone. A head beside an open conflict is not covered, as resolutions build
 on it. "Until one remains" now means one live head.
 
+**The fold runs until it makes nothing new.** One fold, a left fold over the live heads
+by id that stops after a conflict, is repeated on the revisions and its merges until it
+adds no revision. One is not always enough: a merge can be the missing parent that
+proves a stored revision invalid, such as one stamped below it, and then what was built
+on that revision stops counting, and a head under it becomes live, after the fold has
+gone past. Nightly seed 262796 left a deletion that way: the only stored head of the
+note was an invalid merge, so no later sync looked at it again, and the note kept two
+live heads for good. Repeating changes no merge's bytes, nor which pair a fold merges:
+the next fold is what the next sync of a note with several stored heads already made.
+It is still a function of the set of revisions, and it ends for the reason above. A
+fold that would only make a merge already stored, which can only be one that does not
+count, such as a collided id, ends it too.
+
 **What a note shows.** Of the live heads that are not tombstones, those descending
 from an open conflict if there are any, the one with the highest stamp. A tombstone
 only if no live head has text.
+
+So deleting a note forever beside another head with text, such as an edit that waits for
+a missing ancestor, does not remove the note: its tombstone is one head among others.
+The deletion settles the note in its own transaction, as a sync would, so the note shows
+that head at once, merged with the deletion if it can be, and still in the trash. Before
+this, the `note` row went with the deletion until the next sync, while the revisions
+showed the other head, and an answer to a hidden head had no shown head to name
+(nightly seed 171987). `core:storage` cannot judge revisions, so `core:sync` hands it
+the reconcile with `SyncStore.settleNotesWith` when a `SyncEngine` or a
+`ConflictResolver` is made; a process with neither leaves the note to its next sync.
+This writes only local tables and merges that the next sync would make, so it is no
+format change.
 
 **Conflicts.** `Revision.resolves` holds the conflicted merge a user revision closes.
 A conflict is open unless a stored revision names it, or a tombstone descends from it

@@ -346,7 +346,7 @@ class ConflictResolverTest {
         }
 
     @Test
-    fun aHeadThatWaitedForADeletedConflictMergesOnTheNextSyncWithNothingNew(): TestResult =
+    fun aHeadThatWaitedForADeletedConflictMergesAtOnce(): TestResult =
         runTest {
             val third = open("third")
             val note = phone.notes.create("", "line\nother\n")
@@ -360,13 +360,13 @@ class ConflictResolverTest {
             exchange()
             phone.notes.setState(note.id, NoteState.TRASHED)
             phone.notes.deleteForever(note.id)
-            assertNull(phone.notes.get(note.id))
 
-            val report = engine(phone).sync(target)
-
-            assertEquals(1, (report as SyncResult.Completed).report.merges)
             assertEquals("line\nthird\n", phone.notes.get(note.id)?.body)
             assertEquals(NoteState.TRASHED, phone.notes.get(note.id)?.state)
+            assertTrue(ConflictResolver(phone).open().isEmpty())
+            val report = engine(phone).sync(target)
+            assertEquals(0, (report as SyncResult.Completed).report.merges)
+            assertEquals("line\nthird\n", phone.notes.get(note.id)?.body)
             third.close()
         }
 

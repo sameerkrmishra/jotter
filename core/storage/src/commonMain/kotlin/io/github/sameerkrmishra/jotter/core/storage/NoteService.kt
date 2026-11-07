@@ -56,6 +56,7 @@ public class NoteService internal constructor(
     private val clock: Clock,
     private val queryContext: CoroutineContext,
     private val ids: IdSource,
+    private val settler: NoteSettler,
 ) {
     private val revisions = RevisionStore(database.revisionQueries)
     private val materialiser = NoteMaterialiser(database.noteQueries)
@@ -284,7 +285,10 @@ public class NoteService internal constructor(
 
     /**
      * Deletes the note [id] forever. Only a note in the trash can be deleted forever. Its history
-     * stays, ending in a tombstone revision, so the deletion can sync like any other change.
+     * stays, ending in a tombstone revision, so the deletion can sync like any other change. If
+     * the note has other heads, such as an edit that waits for a missing ancestor, the deletion is
+     * only one of them: the note then shows what `core:sync` decides (ADR-0013), which can be
+     * another version of it, still in the trash.
      *
      * @throws NoSuchNoteException if there is no note [id].
      * @throws IllegalStateException if the note is not in the trash.
@@ -298,10 +302,13 @@ public class NoteService internal constructor(
             }
             val stamp = nextStamp(hlc, after = current.updatedAt)
             store(userRevision(stamp, current.id, current.revisionId, RevisionContent.Tombstone))
-            // The only head is now a tombstone, which closes what is behind it. With other heads
-            // the next sync decides, and until then the note's rows stand.
             if (id !in revisions.notesWithSeveralHeads()) {
+                // The only head is now a tombstone, which closes what is behind it.
                 database.syncQueries.deleteConflictsOfNote(id.toString())
+            } else {
+                // Another head with text still shows (ADR-0013), and the deletion may merge with
+                // it: core:sync settles the note now. Without it, the next sync does.
+                settler.settle?.invoke(id)
             }
         }
     }

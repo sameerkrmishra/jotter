@@ -14,6 +14,7 @@ import io.github.sameerkrmishra.jotter.core.model.RevisionKind
 import io.github.sameerkrmishra.jotter.core.storage.db.JotterDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.concurrent.Volatile
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Clock
 
@@ -146,6 +147,7 @@ public class SyncStore internal constructor(
     private val clock: Clock,
     private val queryContext: CoroutineContext,
     private val ids: IdSource,
+    private val settler: NoteSettler,
 ) {
     private val queries = database.syncQueries
     private val revisions = RevisionStore(database.revisionQueries)
@@ -168,6 +170,16 @@ public class SyncStore internal constructor(
 
     /** Returns the ids of the stored revisions built directly on [id]. */
     public fun childrenOf(id: RevisionId): List<RevisionId> = revisions.childrenOf(id)
+
+    /**
+     * Makes [NoteService.deleteForever] call [settle], in its transaction, when the note it deleted
+     * has more than one head: the tombstone is then not always what the note shows (ADR-0013), and
+     * only `core:sync` can tell what is. Until [settle] is set, such a note waits for its next
+     * sync. A later call replaces the earlier one.
+     */
+    public fun settleNotesWith(settle: (NoteId) -> Unit) {
+        settler.settle = settle
+    }
 
     /** Returns the notes with more than one head. */
     public fun notesWithSeveralHeads(): List<NoteId> = revisions.notesWithSeveralHeads()
@@ -580,3 +592,9 @@ private fun draftOfRow(
         title = title,
         body = body,
     )
+
+/** What `core:sync` gave [SyncStore.settleNotesWith], shared with [NoteService]. */
+internal class NoteSettler {
+    @Volatile
+    var settle: ((NoteId) -> Unit)? = null
+}

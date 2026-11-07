@@ -91,6 +91,13 @@ class ConvergenceTest {
                 2091L,
                 3621L,
                 55279L,
+                // Nightly finds (issue #28 and after): a deletion beside a hidden head, and a
+                // head that the fold itself frees.
+                171987L,
+                218876L,
+                262796L,
+                330375L,
+                374916L,
             )
 
         /** The timeout is generous: a slow runner should fail on a finding, not on the clock. */

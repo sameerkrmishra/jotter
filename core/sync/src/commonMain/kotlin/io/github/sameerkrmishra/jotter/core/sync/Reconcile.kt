@@ -9,13 +9,19 @@ import io.github.sameerkrmishra.jotter.core.storage.HiddenHead
 import io.github.sameerkrmishra.jotter.core.storage.HiddenReason
 import io.github.sameerkrmishra.jotter.core.storage.InvalidReason
 import io.github.sameerkrmishra.jotter.core.storage.InvalidRevision
+import io.github.sameerkrmishra.jotter.core.storage.NoteStore
 import io.github.sameerkrmishra.jotter.core.storage.OpenConflict
 import io.github.sameerkrmishra.jotter.core.storage.SyncStore
 
 /**
- * Returns the merges to make for the note's [revisions], in order: a left fold over the live
- * heads by id, which stops after a conflict (ADR-0003). Nothing while a conflict is open. A head
- * that the fold so far has come to cover, or that cannot be merged yet, is passed over.
+ * Returns the merges to make for the note's [revisions], in order: left folds over the live heads
+ * by id, each of which stops after a conflict (ADR-0003), until a fold makes nothing new. Nothing
+ * while a conflict is open. A head that the fold so far has come to cover, or that cannot be
+ * merged yet, is passed over.
+ *
+ * One fold is not always enough: a merge can be the missing parent that proves a stored revision
+ * invalid, and the head that revision stood on becomes live only then (ADR-0013). Without another
+ * fold that head would wait for good, as nothing new arrives to make a sync look at the note.
  *
  * This is a function of the set of revisions, and that is why devices converge: two devices with
  * the same revisions make the same merges, whatever order the revisions arrived in. Every merge
@@ -26,6 +32,21 @@ import io.github.sameerkrmishra.jotter.core.storage.SyncStore
 internal fun foldHeads(
     revisions: List<Revision>,
     refused: Set<RevisionId> = emptySet(),
+): List<Revision> {
+    val merges = mutableListOf<Revision>()
+    do {
+        val known = (revisions + merges).mapTo(HashSet()) { it.id }
+        // A merge that is there already but does not count, such as a collided id, ends it.
+        val fresh = foldOnce(revisions + merges, refused).filterNot { it.id in known }
+        merges += fresh
+    } while (fresh.isNotEmpty())
+    return merges
+}
+
+/** One left fold over the live heads by id, which stops after a conflict. */
+private fun foldOnce(
+    revisions: List<Revision>,
+    refused: Set<RevisionId>,
 ): List<Revision> {
     val start = RevisionGraph(revisions, refused)
     if (start.openConflicts.isNotEmpty()) return emptyList()
@@ -64,6 +85,16 @@ internal fun reconcile(
     val shown = graph.shownHead()
     if (shown != null) store.materialise(shown) else store.removeNote(noteId)
     return merges
+}
+
+/**
+ * Makes a note that a local deletion left with several heads show what its revisions say at once,
+ * as a sync would: the tombstone shows only if no live head has text (ADR-0013). Without this the
+ * note would be gone from the list until the next sync, while its graph still shows another head,
+ * and an answer to one of its hidden heads would be made against a note that is not there.
+ */
+internal fun keepNotesSettled(store: NoteStore) {
+    store.sync.settleNotesWith { noteId -> reconcile(store.sync, noteId) }
 }
 
 /** Returns the graph of the stored revisions of the note [noteId]. */
