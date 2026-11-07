@@ -56,6 +56,13 @@ class LostHistoryTest {
         return assertIs<SyncResult.Completed>(result, "$result").report
     }
 
+    /** Closes [store] and opens its file again, with no SyncEngine or ConflictResolver on it. */
+    private fun reopen(store: NoteStore): NoteStore {
+        store.close()
+        stores.remove(store)
+        return NoteStore.open(store.path, "again", EmptyCoroutineContext).also { stores += it }
+    }
+
     private fun NoteStore.live(noteId: NoteId) = RevisionGraph(sync.revisions(noteId)).liveHeads
 
     /** A reader that holds an edit, while the parent of what a dead writer wrote is lost. */
@@ -94,6 +101,86 @@ class LostHistoryTest {
         assertTrue(RevisionGraph(all - edit).openConflicts.isEmpty())
     }
 
+    /**
+     * Found by the nightly simulator, seed 262796: the fold's own merge was the missing parent of a
+     * bad stamp, which proved the merge built on that stamp invalid. The deletion under it became a
+     * live head only then, and one fold never came back to it. No sync would look at the note
+     * again, as the invalid merge stays its only stored head, so it kept two live heads for good.
+     */
+    @Test
+    fun aHeadThatTheFoldItselfFreesIsFoldedToo() {
+        val root = textRevision(1, 10, "a\nb\n")
+        val left = textRevision(2, 20, "x\nb\n", root)
+        val right = textRevision(3, 30, "a\ny\n", root, device = DEVICE_B)
+        val merged = mergeRevisions(RevisionGraph(listOf(root, left, right)), left, right)
+        // Stamped below its parent, which has not arrived yet, so it counts until the fold.
+        val badStamp = textRevision(4, 5, "x\ny\nbad\n", merged)
+        val deleted = userRevision(5, 40, root) { RevisionContent.Tombstone }
+        val early = listOf(root, left, right, badStamp, deleted)
+        val onBadStamp = mergeRevisions(RevisionGraph(early), deleted, badStamp)
+        val all = early + onBadStamp
+
+        val merges = foldHeads(all)
+
+        assertEquals(merged, merges.first())
+        val graph = RevisionGraph(all + merges)
+        assertTrue(badStamp in graph.invalid && onBadStamp in graph.invalid)
+        val head = graph.liveHeads.single()
+        assertEquals(setOf(deleted.id), head.parents - merged.id)
+        assertEquals("x\ny\n", head.text.body)
+        assertEquals(NoteState.TRASHED, head.text.state.value)
+        assertTrue(foldHeads(all + merges).isEmpty())
+    }
+
+    /**
+     * Found by the nightly simulator, seed 171987: deleting forever a note with a hidden head
+     * removed its row, although the head with text shows (ADR-0013). Until the next sync the note
+     * was gone from the list, and an answer to its hidden head had no shown head to name.
+     */
+    @Test
+    fun deletingForeverBesideAHiddenHeadShowsThatHeadAtOnce(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val reader = world.reader
+            val resolver = ConflictResolver(reader)
+            val hidden = resolver.hidden().single()
+            reader.notes.setState(world.note.id, NoteState.TRASHED)
+
+            reader.notes.deleteForever(world.note.id)
+
+            val shown = assertNotNull(reader.notes.get(world.note.id))
+            assertEquals(hidden.body, shown.body)
+            assertEquals(NoteState.TRASHED, shown.state)
+            val graph = storedGraph(reader.sync, world.note.id)
+            assertEquals(graph.shownHead()?.id, shown.revisionId)
+            assertEquals(1, graph.liveHeads.size)
+            assertTrue(resolver.hidden().isEmpty())
+            val before = reader.sync.revisions(world.note.id).size
+            reader.sync(world.blobs)
+            assertEquals(before, reader.sync.revisions(world.note.id).size)
+            assertEquals(shown, reader.notes.get(world.note.id))
+        }
+
+    /** A process that never made a SyncEngine or a ConflictResolver leaves it to the next sync. */
+    @Test
+    fun withoutCoreSyncTheNextSyncShowsTheHeadADeletionLeft(): TestResult =
+        runTest {
+            val world = DeadWriter()
+            world.run()
+            val reader = reopen(world.reader)
+            val hidden = reader.sync.hiddenHeads().single()
+            reader.notes.setState(world.note.id, NoteState.TRASHED)
+
+            reader.notes.deleteForever(world.note.id)
+
+            assertNull(reader.notes.get(world.note.id))
+            reader.sync(world.blobs)
+            val shown = assertNotNull(reader.notes.get(world.note.id))
+            assertEquals(hidden.body, shown.body)
+            assertEquals(NoteState.TRASHED, shown.state)
+        }
+
     /** Found by the simulator, seed 715: a tombstone twin with the lower id hid the text. */
     @Test
     fun ofTwinsTheOneWithTextGoesFirstWhateverItsId() {
@@ -127,10 +214,13 @@ class LostHistoryTest {
             third.notes.edit(note.id, note.revisionId, "", "line\nthird\n")
             third.sync(blobs)
             phone.sync(blobs)
-            val resolver = ConflictResolver(phone)
-            val mergeId = resolver.open().single().mergeId
-            phone.notes.setState(note.id, NoteState.TRASHED)
-            phone.notes.deleteForever(note.id)
+            val mergeId = ConflictResolver(phone).open().single().mergeId
+            // Deleted where no core:sync settles it, such as an older version: the row stays.
+            val reopened = reopen(phone)
+            reopened.notes.setState(note.id, NoteState.TRASHED)
+            reopened.notes.deleteForever(note.id)
+            val resolver = ConflictResolver(reopened)
+            assertEquals(mergeId, resolver.open().single().mergeId)
 
             assertNull(resolver.details(mergeId))
             resolver.resolveNow(mergeId, ConflictResolution.KeepShown)
@@ -138,7 +228,7 @@ class LostHistoryTest {
             assertTrue(resolver.open().isEmpty())
             assertEquals(
                 "line\nthird\n",
-                resolver.hidden().singleOrNull()?.body ?: phone.notes.get(note.id)?.body,
+                resolver.hidden().singleOrNull()?.body ?: reopened.notes.get(note.id)?.body,
             )
         }
 
