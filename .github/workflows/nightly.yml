@@ -18,6 +18,9 @@ jobs:
     # CI's simulate job runs about 11 seeds a second on the same runner, so 50000 take some 80
     # minutes. A timeout still opens an issue.
     timeout-minutes: 180
+    outputs:
+      start: ${{ steps.range.outputs.start }}
+      seeds: ${{ steps.seeds.outputs.seeds }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,13 +36,27 @@ jobs:
           cache-provider: basic
 
       # Above the range `check` runs, and a different stretch every night: the run number moves the
-      # start, so the nights add up to new seeds.
-      - name: Run 50000 seeds
+      # start, so the nights add up to new seeds. Run number 1 ran 150000 to 199999, 2 the next
+      # 50000, and so on; re-running a run keeps its number, so it runs the same seeds again.
+      - name: Choose the range
+        id: range
         env:
           RUN: ${{ github.run_number }}
-        run: core/sync/scripts/simulate.sh "$((100000 + RUN * 50000))" 50000
+        run: echo "start=$((100000 + RUN * 50000))" >> "$GITHUB_OUTPUT"
 
-      - if: ${{ !success() }}
+      - name: Run 50000 seeds
+        run: core/sync/scripts/simulate.sh "${{ steps.range.outputs.start }}" 50000
+
+      # ConvergenceTest prints every failing seed on one line; the report names them.
+      - name: Find the failing seeds
+        id: seeds
+        if: ${{ failure() || cancelled() }}
+        run: |
+          seeds=$(grep -ho 'Failing seeds: [0-9 ]*' core/sync/build/test-results/jvmTest/*.xml \
+            | sed 's/Failing seeds: //; s/ *$//' | tr -s ' ' | head -n 1 || true)
+          echo "seeds=$seeds" >> "$GITHUB_OUTPUT"
+
+      - if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: simulator-results
@@ -61,7 +78,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT: ${{ needs.simulate.result }}
+          START: ${{ needs.simulate.outputs.start }}
+          SEEDS: ${{ needs.simulate.outputs.seeds }}
         run: |
-          gh issue create \
-            --title "Nightly sync simulation failed" \
-            --body "The nightly simulator run failed: $RUN_URL. Its test results name the seed."
+          if [ -n "$SEEDS" ]; then
+            title="Nightly sync simulation failed: seeds $SEEDS"
+            found="Failing seeds: $SEEDS. Replay each from the repository root:"
+            replay=$(for seed in $SEEDS; do echo "    core/sync/scripts/simulate.sh $seed 1"; done)
+          else
+            title="Nightly sync simulation failed ($RESULT)"
+            found="No failing seed was recorded: the run timed out or stopped first. Replay the range:"
+            replay="    core/sync/scripts/simulate.sh ${START:-START} 50000"
+          fi
+          body=$(printf '%s\n' \
+            "The nightly simulator run $RUN_URL ended as $RESULT, on seeds from ${START:-?} on." \
+            "" "$found" "" "$replay" "" \
+            "Its test results are the run's simulator-results artifact, kept for 14 days." \
+            "Pin each seed in REGRESSION_SEEDS (ConvergenceTest.kt) with its fix.")
+          gh issue create --title "$title" --body "$body"
