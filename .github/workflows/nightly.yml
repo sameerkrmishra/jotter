@@ -21,6 +21,7 @@ jobs:
     outputs:
       start: ${{ steps.range.outputs.start }}
       seeds: ${{ steps.seeds.outputs.seeds }}
+      seed-count: ${{ steps.seeds.outputs.count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,14 +48,19 @@ jobs:
       - name: Run 50000 seeds
         run: core/sync/scripts/simulate.sh "${{ steps.range.outputs.start }}" 50000
 
-      # ConvergenceTest prints every failing seed on one line; the report names them.
+      # Each failing test of ConvergenceTest prints its failing seeds on one line, so there can be
+      # more than one line: all of them count, each seed once, in order. Only the first 500 go on,
+      # as a job output and the issue must stay small; the count and the artifact cover the rest.
       - name: Find the failing seeds
         id: seeds
         if: ${{ failure() || cancelled() }}
         run: |
-          seeds=$(grep -ho 'Failing seeds: [0-9 ]*' core/sync/build/test-results/jvmTest/*.xml \
-            | sed 's/Failing seeds: //; s/ *$//' | tr -s ' ' | head -n 1 || true)
-          echo "seeds=$seeds" >> "$GITHUB_OUTPUT"
+          grep -ho 'Failing seeds: [0-9 ]*' core/sync/build/test-results/jvmTest/*.xml \
+            | sed 's/Failing seeds: //' | tr -s ' ' '\n' | grep -E '^[0-9]+$' | sort -n -u \
+            > failing-seeds.txt || true
+          echo "count=$(wc -l < failing-seeds.txt)" >> "$GITHUB_OUTPUT"
+          echo "seeds=$(awk 'NR <= 500' failing-seeds.txt | tr '\n' ' ' | sed 's/ *$//')" \
+            >> "$GITHUB_OUTPUT"
 
       - if: ${{ failure() || cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -81,11 +87,21 @@ jobs:
           RESULT: ${{ needs.simulate.result }}
           START: ${{ needs.simulate.outputs.start }}
           SEEDS: ${{ needs.simulate.outputs.seeds }}
+          COUNT: ${{ needs.simulate.outputs.seed-count }}
         run: |
           if [ -n "$SEEDS" ]; then
-            title="Nightly sync simulation failed: seeds $SEEDS"
-            found="Failing seeds: $SEEDS. Replay each from the repository root:"
-            replay=$(for seed in $SEEDS; do echo "    core/sync/scripts/simulate.sh $seed 1"; done)
+            # GitHub caps a title at 256 characters and a body at 65536: the title stays short,
+            # and the body lists at most 500 seeds and replays at most 50. The artifact has all.
+            count=${COUNT:-$(echo "$SEEDS" | wc -w)}
+            first=${SEEDS%% *}
+            title="Nightly sync simulation failed: $count seed(s) (first: $first)"
+            found="Failing seeds ($count): $SEEDS"
+            if [ "$count" -gt 500 ]; then found="$found, and $((count - 500)) more"; fi
+            found="$found. Replay from the repository root:"
+            replay=$(echo "$SEEDS" | awk '{
+              for (i = 1; i <= NF && i <= 50; i++) print "    core/sync/scripts/simulate.sh " $i " 1"
+              if (NF > 50) print "    (and likewise for the others)"
+            }')
           else
             title="Nightly sync simulation failed ($RESULT)"
             found="No failing seed was recorded: the run timed out or stopped first. Replay the range:"
